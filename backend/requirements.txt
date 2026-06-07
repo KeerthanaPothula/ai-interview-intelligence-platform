@@ -1,0 +1,68 @@
+# =============================================================
+# AI Interview Intelligence Platform — Backend Dependencies
+# Week 1 scope: FastAPI · PostgreSQL · SQLAlchemy · Alembic · JWT
+# =============================================================
+# Install:  pip install -r requirements.txt
+# =============================================================
+
+
+# -------------------------------------------------------------
+# Runtime Dependencies
+# -------------------------------------------------------------
+
+# Web framework — async-native, automatic OpenAPI docs, Pydantic v2
+fastapi==0.115.5
+
+# ASGI server — [standard] adds uvloop (faster event loop),
+# httptools (faster HTTP parser), and websockets support
+uvicorn[standard]==0.32.1
+
+# ORM — SQLAlchemy 2.x with the new declarative mapped_column style
+sqlalchemy==2.0.36
+
+# Database migration tool — generates and applies schema changes
+alembic==1.14.0
+
+# PostgreSQL driver — binary build avoids compiling C extensions
+# locally; fine for dev and Docker; swap to psycopg2 for prod if needed
+psycopg2-binary==2.9.10
+
+# JWT encoding / decoding — used to issue and verify access tokens
+python-jose[cryptography]==3.3.0
+
+# Password hashing — using bcrypt directly instead of passlib.
+# passlib 1.7.4 (last updated 2020) reads bcrypt.__about__.__version__
+# which was removed in bcrypt 4.0, causing a crash during backend
+# initialisation. Direct bcrypt usage removes the unmaintained wrapper.
+bcrypt==4.2.1
+
+# Load settings from environment variables and .env files via Pydantic
+# BaseSettings; replaces python-dotenv for typed config
+pydantic-settings==2.6.1
+
+# Required by FastAPI to parse multipart/form-data bodies —
+# OAuth2PasswordRequestForm (login endpoint) will not work without it
+python-multipart==0.0.12
+
+# Enables Pydantic's EmailStr type, which validates email format
+# on the register endpoint
+email-validator==2.2.0
+
+
+# -------------------------------------------------------------
+# Development Dependencies
+# (not needed in production — separate file if repo grows)
+# -------------------------------------------------------------
+
+# Testing framework
+pytest==8.3.4
+
+# Async HTTP client — used as the FastAPI TestClient transport
+# for writing integration tests against the running app
+httpx==0.28.0
+
+# Code formatter
+black==24.10.0
+
+# Linter — covers flake8, isort, and more in a single fast tool
+ruff==0.8.1
