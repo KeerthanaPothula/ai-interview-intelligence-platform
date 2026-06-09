@@ -50,18 +50,15 @@ engine = create_engine(
 # ------------------------------------------------------------------
 SessionLocal = sessionmaker(
     bind=engine,
-
     # autocommit=False: every write is wrapped in an explicit
     # transaction. You must call db.commit() to persist changes.
     # This is the correct default — autocommit makes it easy to
     # accidentally persist partial state.
     autocommit=False,
-
     # autoflush=False: SQLAlchemy won't automatically flush pending
     # changes to the DB before a query. Controlled flushing avoids
     # surprising INSERTs mid-transaction and is easier to reason about.
     autoflush=False,
-
     # expire_on_commit=False: by default, SQLAlchemy marks every ORM
     # object as "expired" after a commit, meaning the next attribute
     # access triggers a SELECT to reload the data. With FastAPI, we

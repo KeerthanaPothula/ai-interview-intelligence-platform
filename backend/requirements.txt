@@ -1,6 +1,8 @@
 # =============================================================
 # AI Interview Intelligence Platform — Backend Dependencies
 # Week 1 scope: FastAPI · PostgreSQL · SQLAlchemy · Alembic · JWT
+# Week 2 scope: + Gemini AI · audio uploads
+# Week 3 scope: + Whisper transcription · PyTorch CPU · AI analysis
 # =============================================================
 # Install:  pip install -r requirements.txt
 # =============================================================
@@ -41,12 +43,68 @@ bcrypt==4.2.1
 pydantic-settings==2.6.1
 
 # Required by FastAPI to parse multipart/form-data bodies —
-# OAuth2PasswordRequestForm (login endpoint) will not work without it
+# OAuth2PasswordRequestForm (login endpoint) and audio file uploads
+# will not work without it
 python-multipart==0.0.12
 
 # Enables Pydantic's EmailStr type, which validates email format
 # on the register endpoint
 email-validator==2.2.0
+
+# Gemini AI SDK — google-genai is the current (v2) SDK.
+# google-generativeai (v1) was deprecated March 2025 and does not
+# support Gemini 2.x models. The v2 SDK uses an instantiated client
+# (genai.Client) rather than module-level configuration, and exposes
+# client.models.generate_content() for text generation.
+google-genai==1.14.0
+
+
+# -------------------------------------------------------------
+# Week 3 — AI Audio Processing
+# -------------------------------------------------------------
+
+# OpenAI Whisper — local on-device speech-to-text inference.
+# Transcribes audio files without an external API call, so there is
+# no per-request cost and no network dependency for transcription.
+# Runs entirely on CPU in this configuration.
+#
+# System dependency: the ffmpeg binary must be installed separately.
+#   Docker:    RUN apt-get install -y ffmpeg   (add to Dockerfile)
+#   macOS:     brew install ffmpeg
+#   Linux dev: apt install ffmpeg
+# Without ffmpeg, the first transcription raises FileNotFoundError.
+#
+# Model weights (~74 MB for 'base') are downloaded to ~/.cache/whisper
+# on first inference. To pre-bake into the Docker image and avoid a
+# cold-start download, add to Dockerfile after pip install:
+#   RUN python -c "import whisper; whisper.load_model('base')"
+openai-whisper==20231117
+
+# Byte-pair encoding tokenizer used by Whisper's preprocessing pipeline.
+# openai-whisper requires tiktoken>=0.3.3. Pinned to 0.13.0 — the version
+# selected by the resolver during successful installation on Python 3.12.
+# Newer tiktoken releases do not alter the encoding vocabulary used by
+# Whisper (gpt2/multilingual vocabularies are embedded in openai-whisper's
+# own data files, not in tiktoken itself).
+tiktoken==0.13.0
+
+# PyTorch — deep learning runtime required by openai-whisper inference.
+#
+# The +cpu suffix selects the CPU-only build from the PyTorch wheel
+# index, reducing installed size from ~2 GB (default CUDA-enabled wheel
+# from PyPI) to ~220 MB. No CUDA drivers or GPU are required.
+#
+# The --extra-index-url directive below tells pip where to find +cpu
+# variants. It is additive — pip still checks PyPI first for all other
+# packages; only pytorch.org is checked for +cpu builds.
+#
+# GPU upgrade path (Week 5+): replace torch==X.X.X+cpu with the
+# corresponding CUDA wheel (e.g., torch==2.5.1+cu124) and update the
+# --extra-index-url to https://download.pytorch.org/whl/cu124.
+# No Python code changes are needed — PyTorch selects CPU vs GPU
+# automatically based on .to(device) calls in the model.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.6.0+cpu
 
 
 # -------------------------------------------------------------
@@ -59,7 +117,7 @@ pytest==8.3.4
 
 # Async HTTP client — used as the FastAPI TestClient transport
 # for writing integration tests against the running app
-httpx==0.28.0
+httpx==0.28.1
 
 # Code formatter
 black==24.10.0

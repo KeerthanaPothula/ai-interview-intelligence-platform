@@ -80,12 +80,37 @@ class Settings(BaseSettings):
 
     GEMINI_API_KEY: str = Field(..., min_length=1)
 
+    # How many questions to request from Gemini per session.
+    # ge=1 and le=20 enforce sensible bounds at startup.
+    # The Gemini prompt receives this value directly as the requested count.
+    MAX_QUESTIONS_PER_SESSION: int = Field(default=10, ge=1, le=20)
+
+    # Maximum seconds to wait for Gemini to return a response.
+    # gt=0 prevents an accidental zero that would make every request time out immediately.
+    # The timeout applies to the full HTTP round-trip (connect + read).
+    GEMINI_TIMEOUT_SECONDS: int = Field(default=30, gt=0)
+
     # ------------------------------------------------------------------
     # Whisper  (consumed from Week 2 onward)
     # Validated below against the set of known model names.
     # ------------------------------------------------------------------
 
     WHISPER_MODEL: str = "base"
+
+    # ------------------------------------------------------------------
+    # File Uploads  (consumed from Week 2 onward)
+    # ------------------------------------------------------------------
+
+    # Relative or absolute path to the audio upload directory.
+    # Created automatically on first upload by upload_service — must not
+    # be validated for existence here because Docker volumes are mounted
+    # after the Python process starts.
+    UPLOAD_DIR: str = Field(default="uploads", min_length=1)
+
+    # Ceiling for accepted audio files in megabytes.
+    # upload_service converts this to bytes: MB × 1024 × 1024.
+    # gt=0 prevents accidental zero that would reject every upload.
+    MAX_UPLOAD_SIZE_MB: int = Field(default=50, gt=0)
 
     # ------------------------------------------------------------------
     # Validators
