@@ -16,6 +16,11 @@ Router registration:
                         → routes land at /api/v1/interviews/{id}/responses/...
                                      and /api/v1/responses/{id}/status
 
+    processing_router — included WITHOUT extra prefix because the router already
+                        carries prefix="/api/v1"
+                        → routes land at /api/v1/responses/{id}/process
+                                     and /api/v1/responses/{id}/processing-status
+
     Adding an extra prefix="/api/v1" when including interviews_router or
     responses_router would produce doubled paths like:
         /api/v1/api/v1/interviews/...  ← wrong
@@ -30,13 +35,21 @@ Why docs are disabled in production:
 
 from __future__ import annotations
 
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
+from app.database import SessionLocal
 from app.routers.auth import router as auth_router
 from app.routers.interviews import router as interviews_router
+from app.routers.processing import router as processing_router
 from app.routers.responses import router as responses_router
+from app.services import processing_service
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Settings — loaded once at startup via @lru_cache.
@@ -46,6 +59,34 @@ from app.routers.responses import router as responses_router
 settings = get_settings()
 
 _VERSION = "0.2.0"
+
+
+# ---------------------------------------------------------------------------
+# Lifespan — startup recovery
+#
+# recover_stuck_jobs() issues a single conditional UPDATE ... WHERE
+# status='processing' and commits. No Whisper, no Gemini, no
+# BackgroundTasks — it runs synchronously and adds negligible latency to
+# startup regardless of how many rows it touches.
+#
+# If recover_stuck_jobs() raises (e.g. the database is unreachable), the
+# exception propagates out of this function and Uvicorn aborts startup —
+# the same fail-fast behavior as `settings = get_settings()` above, which
+# exits immediately on invalid configuration rather than serving requests
+# against a broken database.
+# ---------------------------------------------------------------------------
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    db = SessionLocal()
+    try:
+        recovered = processing_service.recover_stuck_jobs(db)
+    finally:
+        db.close()
+    logger.info("Startup recovery: %d job(s) recovered", recovered)
+    yield
+
 
 # ---------------------------------------------------------------------------
 # Application
@@ -63,6 +104,7 @@ app = FastAPI(
     docs_url="/docs" if settings.DEBUG else None,
     redoc_url="/redoc" if settings.DEBUG else None,
     openapi_url="/openapi.json" if settings.DEBUG else None,
+    lifespan=lifespan,
 )
 
 # ---------------------------------------------------------------------------
@@ -98,6 +140,9 @@ app.include_router(interviews_router)
 # responses_router already has prefix="/api/v1" — no extra prefix.
 app.include_router(responses_router)
 
+# processing_router already has prefix="/api/v1" — no extra prefix.
+app.include_router(processing_router)
+
 # ---------------------------------------------------------------------------
 # Health check
 #
@@ -110,8 +155,8 @@ app.include_router(responses_router)
 
 
 @app.get("/health", tags=["Health"], summary="Process liveness check")
-def health_check() -> dict[str, str]:
-    """Return process health, runtime environment, and API version.
+def health_check() -> dict[str, str | bool]:
+    """Return process health, runtime environment, API version, and pipeline flags.
 
     Always returns HTTP 200. Does not query the database.
     """
@@ -119,4 +164,5 @@ def health_check() -> dict[str, str]:
         "status": "healthy",
         "environment": settings.ENVIRONMENT,
         "version": _VERSION,
+        "audio_processing_enabled": settings.ENABLE_AUDIO_PROCESSING,
     }

@@ -4,6 +4,7 @@ import uuid
 
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     Depends,
     File,
     Form,
@@ -23,7 +24,7 @@ from app.schemas.analysis import (
     AudioResponseResponse,
     AudioResponseStatusResponse,
 )
-from app.services import interview_service, upload_service
+from app.services import interview_service, processing_service, upload_service
 
 router = APIRouter(
     prefix="/api/v1",
@@ -39,6 +40,7 @@ router = APIRouter(
 )
 async def upload_audio(
     session_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
     question_id: uuid.UUID = Form(
         ..., description="UUID of the question this recording answers."
     ),
@@ -81,10 +83,24 @@ async def upload_audio(
     status, and created_at. Filesystem paths and storage metadata are never
     returned.
 
-    Week 3 pipeline: the returned status is always 'uploaded'. The AI
-    transcription pipeline polls rows with status='uploaded', processes
-    them asynchronously, and transitions status to 'completed' or 'failed'.
-    Poll GET /api/v1/responses/{id}/status to track progress.
+    Week 3 pipeline: the returned status is always 'uploaded' — this
+    endpoint never runs Whisper or Gemini synchronously and never returns
+    'processing', 'completed', or 'failed' itself. If
+    settings.ENABLE_AUDIO_PROCESSING is True, a background task
+    (processing_service.process_response) is enqueued via BackgroundTasks
+    before this endpoint returns; it runs after the HTTP response has been
+    sent and drives the row through the remaining lifecycle:
+
+        uploaded -> processing -> completed
+                                -> failed
+
+    If ENABLE_AUDIO_PROCESSING is False, no background task is enqueued and
+    the row remains 'uploaded' until a client calls
+    POST /api/v1/responses/{response_id}/process.
+
+    Poll GET /api/v1/responses/{response_id}/processing-status or
+    GET /api/v1/responses/{id}/status to observe the four valid statuses
+    ('uploaded', 'processing', 'completed', 'failed') as the pipeline runs.
     """
     # A. Enforce session ownership — HTTP 404 if missing or wrong user.
     session = interview_service.get_session_or_404(db, session_id, current_user.id)
@@ -141,7 +157,14 @@ async def upload_audio(
         response_id=response_id,
     )
 
-    # G. Return 201 — AudioResponseResponse excludes file_path, mime_type,
+    # G. Enqueue the Week 3 pipeline (Whisper transcription + Gemini
+    #    evaluation) to run after this response is sent. Skipped entirely
+    #    when audio processing is disabled — the row stays 'uploaded' until
+    #    a client calls POST /responses/{response_id}/process (File 09).
+    if settings.ENABLE_AUDIO_PROCESSING:
+        background_tasks.add_task(processing_service.process_response, response.id)
+
+    # H. Return 201 — AudioResponseResponse excludes file_path, mime_type,
     #    file_size_bytes, and user_id. No storage metadata is exposed.
     return AudioResponseResponse.model_validate(response)
 

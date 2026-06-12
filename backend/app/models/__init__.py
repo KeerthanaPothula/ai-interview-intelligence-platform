@@ -7,6 +7,12 @@
 # model module that has not been imported will be silently absent from
 # generated migrations.
 #
+# Models registered by each module:
+#
+#   user.py      → User
+#   interview.py → InterviewSession, Question
+#   analysis.py  → AudioResponse, Transcript, InterviewAnalysis
+#
 # How to use in alembic/env.py:
 #
 #   import app.models  # one line discovers every table

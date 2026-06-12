@@ -98,6 +98,34 @@ class Settings(BaseSettings):
     WHISPER_MODEL: str = "base"
 
     # ------------------------------------------------------------------
+    # Processing Pipeline  (Week 3 — Whisper transcription + Gemini eval)
+    # ------------------------------------------------------------------
+
+    # Master switch for the audio processing pipeline.
+    # False: POST /process returns 503; upload_audio() skips BackgroundTask
+    #   enqueue so tests can upload audio without triggering Whisper.
+    # True (production default): both enqueue and the /process endpoint
+    #   are active.
+    # The test suite sets os.environ.setdefault("ENABLE_AUDIO_PROCESSING",
+    # "false") in conftest.py before any app import so that this default
+    # never applies during test runs.
+    ENABLE_AUDIO_PROCESSING: bool = True
+
+    # Maximum characters of transcript text sent to Gemini for evaluation.
+    # Transcripts longer than this are truncated before the API call to
+    # stay within Gemini's effective context window and control API cost.
+    # Truncation happens in processing_service before calling evaluation_service.
+    # gt=0: a zero value would truncate every transcript to empty.
+    MAX_TRANSCRIPT_CHARS: int = Field(default=20000, gt=0)
+
+    # Maximum seconds the Whisper transcription call is permitted to run.
+    # The processing service enforces this by joining the transcription
+    # thread with timeout=WHISPER_TIMEOUT_SECONDS; a join timeout causes
+    # the job to be marked failed with a "timed out" error message.
+    # gt=0: zero would immediately time out every transcription job.
+    WHISPER_TIMEOUT_SECONDS: int = Field(default=300, gt=0)
+
+    # ------------------------------------------------------------------
     # File Uploads  (consumed from Week 2 onward)
     # ------------------------------------------------------------------
 
@@ -110,7 +138,7 @@ class Settings(BaseSettings):
     # Ceiling for accepted audio files in megabytes.
     # upload_service converts this to bytes: MB × 1024 × 1024.
     # gt=0 prevents accidental zero that would reject every upload.
-    MAX_UPLOAD_SIZE_MB: int = Field(default=50, gt=0)
+    MAX_UPLOAD_SIZE_MB: int = Field(default=10, gt=0)
 
     # ------------------------------------------------------------------
     # Validators

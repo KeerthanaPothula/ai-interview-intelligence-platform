@@ -14,8 +14,10 @@ exercised. That is acceptable for unit/integration tests of the API layer.
 """
 
 import io
+import json
 import os
 import uuid
+from decimal import Decimal
 
 # ---------------------------------------------------------------------------
 # Required settings — must be set before any `from app...` import
@@ -34,6 +36,17 @@ os.environ.setdefault("DEBUG", "true")
 # to redirect writes to a pytest-managed tmp_path. This value is only used
 # by tests that run without that fixture (none should write files).
 os.environ.setdefault("UPLOAD_DIR", "uploads")
+# Disable the Week 3 pipeline globally. Without this, app.main's module-level
+# `settings = get_settings()` (read at `from app.main import app` below) and
+# every request-time `get_settings()` call in upload_audio/trigger_processing
+# would default ENABLE_AUDIO_PROCESSING=True (config.py default) — every
+# response upload in every test would enqueue a real BackgroundTask calling
+# process_response(), which loads the real Whisper model and calls the real
+# Gemini API. Setting this BEFORE `from app.main import app` ensures the
+# first get_settings() call (and therefore the @lru_cache'd value used for
+# the lifetime of the test session, absent cache_clear()) sees "false".
+# Individual tests opt back in via the processing_enabled fixture.
+os.environ.setdefault("ENABLE_AUDIO_PROCESSING", "false")
 
 # ---------------------------------------------------------------------------
 # App imports — after env vars are set
@@ -47,7 +60,12 @@ from sqlalchemy.pool import StaticPool
 from app.config import get_settings
 from app.database import Base, get_db
 from app.main import app
-from app.models.analysis import AudioResponse, RESPONSE_STATUS_UPLOADED
+from app.models.analysis import (
+    AudioResponse,
+    InterviewAnalysis,
+    RESPONSE_STATUS_UPLOADED,
+    Transcript,
+)
 from app.models.interview import (
     InterviewSession,
     Question,
@@ -85,6 +103,63 @@ def reset_database():
     Base.metadata.create_all(bind=TEST_ENGINE)
     yield
     Base.metadata.drop_all(bind=TEST_ENGINE)
+
+
+@pytest.fixture(scope="function", autouse=True)
+def _patch_processing_session_local(monkeypatch):
+    """Redirect processing_service's internal SessionLocal() calls to the test DB.
+
+    processing_service.py does `from app.database import SessionLocal` and
+    calls `SessionLocal()` directly inside _claim_and_load_context,
+    _mark_failed, and Transactions 2/3 — these calls bypass the get_db
+    dependency that the `client` fixture overrides. app.database.SessionLocal
+    is bound to app.database.engine, a `sqlite://` in-memory database that is
+    separate from conftest's TEST_ENGINE (different Engine = different
+    in-memory SQLite database) and on which Base.metadata.create_all() is
+    never called — every table is missing.
+
+    Patching the name as it exists in processing_service's own namespace
+    (the local binding created by `from app.database import SessionLocal`)
+    redirects every SessionLocal() call inside processing_service to
+    TestingSessionLocal/TEST_ENGINE — the same database the `db` and
+    `client` fixtures use, with tables created by reset_database above.
+
+    autouse=True: every test gets this patch, including tests that never
+    call processing_service — for those it is a no-op (an unused module
+    attribute is swapped and restored by monkeypatch's teardown).
+    """
+    monkeypatch.setattr(
+        "app.services.processing_service.SessionLocal", TestingSessionLocal
+    )
+
+
+@pytest.fixture(scope="function", autouse=True)
+def _patch_main_session_local(monkeypatch):
+    """Redirect app.main's startup recovery to the test DB.
+
+    app.main.py does `from app.database import SessionLocal` and its
+    lifespan handler calls SessionLocal() directly to run
+    processing_service.recover_stuck_jobs() once at startup, bypassing
+    get_db() entirely — the same pattern processing_service itself uses
+    (see _patch_processing_session_local above), and for the same reason:
+    app.database.SessionLocal is bound to app.database.engine, a separate,
+    tableless in-memory SQLite database from conftest's TEST_ENGINE.
+
+    The lifespan handler runs on every `with TestClient(app) as c:` — i.e.
+    every test that requests the `client` fixture, not just tests that
+    exercise the processing pipeline. Without this patch,
+    recover_stuck_jobs(db) would query app.database.engine's tableless
+    database and every such test would fail at TestClient startup with
+    OperationalError: no such table: audio_responses.
+
+    Patching the name as it exists in app.main's own namespace redirects
+    that call to TestingSessionLocal/TEST_ENGINE, where reset_database has
+    already created all tables.
+
+    autouse=True: every test gets this patch, including tests that never
+    use the `client` fixture — for those it is a no-op.
+    """
+    monkeypatch.setattr("app.main.SessionLocal", TestingSessionLocal)
 
 
 @pytest.fixture(scope="function")
@@ -326,3 +401,164 @@ def mock_gemini_questions(monkeypatch):
         lambda job_role, job_description, count: _MOCK_QUESTIONS[:count],
     )
     return _MOCK_QUESTIONS
+
+
+# ---------------------------------------------------------------------------
+# Week 3 fixtures — processing toggle, transcript/analysis data, AI mocks
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def processing_enabled():
+    """Temporarily enable the Week 3 pipeline for one test.
+
+    conftest.py sets ENABLE_AUDIO_PROCESSING=false globally (see top of
+    file) so that uploads never enqueue real Whisper/Gemini calls. Tests
+    that exercise the enqueue path (upload_audio's BackgroundTask, or
+    POST /responses/{id}/process returning something other than 503) request
+    this fixture to flip the gate to "true" for the duration of the test.
+
+    Saves the current ENABLE_AUDIO_PROCESSING value, sets it to "true", and
+    clears the get_settings() cache so the next get_settings() call (made
+    per-request by upload_audio/trigger_processing) observes "true". After
+    the test, the previous value is restored and the cache is cleared again
+    so subsequent tests see the original ("false") value.
+    """
+    previous = os.environ.get("ENABLE_AUDIO_PROCESSING")
+    os.environ["ENABLE_AUDIO_PROCESSING"] = "true"
+    get_settings.cache_clear()
+    yield
+    if previous is None:
+        os.environ.pop("ENABLE_AUDIO_PROCESSING", None)
+    else:
+        os.environ["ENABLE_AUDIO_PROCESSING"] = previous
+    get_settings.cache_clear()
+
+
+@pytest.fixture
+def transcript(db, audio_response):
+    """Create and return a Transcript row attached to audio_response.
+
+    Pre-generates the row's id (matching the pattern used by
+    processing_service, which generates transcript_id before INSERT) and
+    uses realistic Whisper-shaped values: English text, a BCP-47 language
+    code, and word_count computed the same way transcription_service does
+    (len(text.split())) so the row is internally consistent.
+    """
+    text = (
+        "I have about five years of experience building backend services "
+        "with Python and FastAPI, focusing on REST API design, database "
+        "schema design, and integrating third-party AI services."
+    )
+    transcript = Transcript(
+        id=uuid.uuid4(),
+        audio_response_id=audio_response.id,
+        text=text,
+        language="en",
+        duration_seconds=42,
+        word_count=len(text.split()),
+    )
+    db.add(transcript)
+    db.commit()
+    db.refresh(transcript)
+    return transcript
+
+
+@pytest.fixture
+def interview_analysis(db, audio_response, transcript):
+    """Create and return an InterviewAnalysis row attached to audio_response
+    and transcript.
+
+    Pre-generates the row's id (matching the pattern used by
+    processing_service, which generates analysis_id before INSERT). Scores
+    use Decimal values constructed from string literals — the same pattern
+    evaluation_service uses (Decimal(str(rounded_float))) to avoid IEEE 754
+    imprecision entering the NUMERIC(4,1) columns. strengths/weaknesses are
+    stored as JSON-encoded text, matching generate_evaluation's storage
+    format (json.dumps(list[str])).
+    """
+    analysis = InterviewAnalysis(
+        id=uuid.uuid4(),
+        audio_response_id=audio_response.id,
+        transcript_id=transcript.id,
+        overall_score=Decimal("7.5"),
+        communication_score=Decimal("8.0"),
+        technical_score=Decimal("7.0"),
+        problem_solving_score=Decimal("6.5"),
+        confidence_score=Decimal("8.5"),
+        strengths=json.dumps(["Clear structure", "Relevant technical examples"]),
+        weaknesses=json.dumps(["Could elaborate on trade-offs"]),
+        detailed_feedback=(
+            "The candidate demonstrated solid backend experience with clear "
+            "communication and relevant technical examples, though some "
+            "answers could go deeper on trade-offs."
+        ),
+        model_used="gemini-2.0-flash",
+    )
+    db.add(analysis)
+    db.commit()
+    db.refresh(analysis)
+    return analysis
+
+
+@pytest.fixture
+def mock_transcription(monkeypatch):
+    """Prevent real Whisper calls by patching transcribe_audio.
+
+    processing_service.py does `from app.services import transcription_service`
+    and calls `transcription_service.transcribe_audio(file_path)` — a
+    module-attribute access at call time, so patching
+    app.services.transcription_service.transcribe_audio directly (rather
+    than a name imported into processing_service's namespace) is sufficient,
+    unlike the gemini_service/question_service case documented on
+    mock_gemini_questions.
+
+    Returns the mock result dict so tests can assert against it.
+    """
+    result = {
+        "text": "I have about five years of experience building backend services.",
+        "language": "en",
+        "duration_seconds": 42,
+        "word_count": 120,
+    }
+    monkeypatch.setattr(
+        "app.services.transcription_service.transcribe_audio",
+        lambda file_path: result,
+    )
+    return result
+
+
+@pytest.fixture
+def mock_evaluation(monkeypatch):
+    """Prevent real Gemini calls by patching generate_evaluation.
+
+    processing_service.py does `from app.services import evaluation_service`
+    and calls `evaluation_service.generate_evaluation(...)` — a
+    module-attribute access at call time, so patching
+    app.services.evaluation_service.generate_evaluation directly is
+    sufficient (same reasoning as mock_transcription above).
+
+    Returns realistic scores matching the shape of
+    evaluation_service.generate_evaluation's return value: floats already
+    rounded to one decimal place (processing_service converts these to
+    Decimal(str(v)) before INSERT), and JSON-encoded strengths/weaknesses.
+    """
+    result = {
+        "overall_score": 7.5,
+        "communication_score": 8.0,
+        "technical_score": 7.0,
+        "problem_solving_score": 6.5,
+        "confidence_score": 8.5,
+        "strengths": json.dumps(["Clear structure", "Relevant technical examples"]),
+        "weaknesses": json.dumps(["Could elaborate on trade-offs"]),
+        "detailed_feedback": (
+            "The candidate demonstrated solid backend experience with clear "
+            "communication and relevant technical examples."
+        ),
+        "model_used": "gemini-2.0-flash",
+    }
+    monkeypatch.setattr(
+        "app.services.evaluation_service.generate_evaluation",
+        lambda **kwargs: result,
+    )
+    return result
