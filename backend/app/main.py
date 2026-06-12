@@ -36,6 +36,7 @@ Why docs are disabled in production:
 from __future__ import annotations
 
 import logging
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -48,6 +49,36 @@ from app.routers.interviews import router as interviews_router
 from app.routers.processing import router as processing_router
 from app.routers.responses import router as responses_router
 from app.services import processing_service
+
+# ---------------------------------------------------------------------------
+# Logging configuration
+#
+# No logging configuration existed previously: the root logger's default
+# level (WARNING) silently dropped every logger.info(...) call made
+# throughout the app (processing_service, transcription_service,
+# evaluation_service, startup recovery, session completion, etc.), and
+# logger.warning/error calls fell back to logging.lastResort — an
+# unformatted stderr handler with no timestamp.
+#
+# configure_logging() attaches a single StreamHandler to the root logger at
+# INFO level with LOG_FORMAT below. Every app.* logger created via
+# logging.getLogger(__name__) is a descendant of root and propagates to this
+# handler. logging.Formatter.converter = time.gmtime makes %(asctime)s
+# render in UTC regardless of host timezone, matching how Render displays
+# log timestamps.
+#
+# logging.basicConfig() is a no-op if the root logger already has handlers,
+# so calling configure_logging() more than once is harmless.
+# ---------------------------------------------------------------------------
+LOG_FORMAT = "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+
+
+def configure_logging() -> None:
+    logging.Formatter.converter = time.gmtime
+    logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
+
+
+configure_logging()
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +93,14 @@ _VERSION = "0.2.0"
 
 
 # ---------------------------------------------------------------------------
-# Lifespan — startup recovery
+# Lifespan — startup diagnostics, recovery, and shutdown
+#
+# Before recovery runs, a handful of logger.info() calls record the
+# process's effective configuration (version, environment, debug flag,
+# audio-processing flag, Whisper model, upload directory) once per process
+# start — useful for confirming what a given deploy is actually running
+# with, directly from the log stream, without inspecting environment
+# variables.
 #
 # recover_stuck_jobs() issues a single conditional UPDATE ... WHERE
 # status='processing' and commits. No Whisper, no Gemini, no
@@ -74,18 +112,37 @@ _VERSION = "0.2.0"
 # the same fail-fast behavior as `settings = get_settings()` above, which
 # exits immediately on invalid configuration rather than serving requests
 # against a broken database.
+#
+# The code after `yield` runs once on graceful shutdown (e.g. SIGTERM),
+# logging a single line so a process stop is visible in the log stream.
 # ---------------------------------------------------------------------------
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    logger.info(
+        "Application startup: AI Interview Intelligence Platform API v%s (environment=%s)",
+        _VERSION,
+        settings.ENVIRONMENT,
+    )
+    logger.info(
+        "Settings loaded: debug=%s, audio_processing_enabled=%s",
+        settings.DEBUG,
+        settings.ENABLE_AUDIO_PROCESSING,
+    )
+    logger.info("Whisper model configured: %s", settings.WHISPER_MODEL)
+    logger.info("Upload directory: %s", settings.UPLOAD_DIR)
+
     db = SessionLocal()
     try:
         recovered = processing_service.recover_stuck_jobs(db)
     finally:
         db.close()
     logger.info("Startup recovery: %d job(s) recovered", recovered)
+
     yield
+
+    logger.info("Application shutdown: AI Interview Intelligence Platform API")
 
 
 # ---------------------------------------------------------------------------
