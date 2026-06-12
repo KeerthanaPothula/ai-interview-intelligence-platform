@@ -18,6 +18,22 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 
 # -------------------------------------------------------------
+# System dependencies — ffmpeg
+# Whisper (openai-whisper) shells out to the ffmpeg binary to decode
+# uploaded audio (mp3, wav, webm, ogg, mp4, m4a) into the raw PCM
+# format it operates on. Without it, every transcription fails with
+# "ffmpeg is not installed or not available in PATH" — see
+# requirements.txt for the corresponding note. Installed as its own
+# layer, before requirements.txt is copied, so editing Python deps
+# never invalidates this (rarely-changing) layer.
+# --no-install-recommends keeps the apt closure minimal; the apt
+# index is removed afterwards so it isn't carried in the image layer.
+# -------------------------------------------------------------
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ffmpeg && \
+    rm -rf /var/lib/apt/lists/*
+
+# -------------------------------------------------------------
 # Dependency installation — runs as its own layer.
 # Docker only rebuilds this layer when requirements.txt changes.
 # Copying just requirements.txt before the source code is the

@@ -11,10 +11,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.config import get_settings
 from app.database import Base
 
-# Import every model module so SQLAlchemy registers the tables with
-# Base.metadata before Alembic reads it. Missing an import here means
-# Alembic silently ignores that table during autogenerate.
-import app.models.user  # noqa: F401 — side-effect import
+# Import the models package — its __init__.py imports every model module,
+# registering all tables with Base.metadata before Alembic reads it.
+# Use `import app.models` not individual files: adding a new model only
+# requires updating __init__.py; this file never needs to change again.
+import app.models  # noqa: F401 — side-effect import
 
 settings = get_settings()
 config = context.config

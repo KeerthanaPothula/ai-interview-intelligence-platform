@@ -1,10 +1,16 @@
+from __future__ import annotations
+
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, String, Uuid, func
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+
+if TYPE_CHECKING:
+    from app.models.interview import InterviewSession
 
 
 class User(Base):
@@ -121,6 +127,13 @@ class User(Base):
         DateTime(timezone=True),
         server_default=func.now(),
         comment="UTC timestamp of account creation. Set by the database.",
+    )
+
+    # Convenience navigation — lets code do `user.sessions` without a query.
+    # Cascade all, delete-orphan: deleting a User ORM object also deletes
+    # their sessions (DB-level CASCADE handles it for direct SQL deletes).
+    sessions: Mapped[list["InterviewSession"]] = relationship(
+        "InterviewSession", back_populates="user", cascade="all, delete-orphan"
     )
 
     def __repr__(self) -> str:
