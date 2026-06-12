@@ -14,7 +14,12 @@ from app.models.analysis import (
     RESPONSE_STATUS_UPLOADED,
     Transcript,
 )
-from app.models.interview import SESSION_STATUS_COMPLETED
+from app.models.interview import (
+    QUESTION_SOURCE_AI_GENERATED,
+    SESSION_STATUS_COMPLETED,
+    SESSION_STATUS_IN_PROGRESS,
+    Question,
+)
 from app.services import processing_service
 
 # ---------------------------------------------------------------------------
@@ -66,6 +71,25 @@ def _make_response(db, session, question, user, status, *, error_message=None):
     db.commit()
     db.refresh(response)
     return response
+
+
+def _make_questions(db, session, count):
+    """Create and return `count` Questions for `session`, sequence_order 1..count."""
+    questions = []
+    for i in range(1, count + 1):
+        question = Question(
+            session_id=session.id,
+            body=f"Question {i}",
+            sequence_order=i,
+            category="behavioral",
+            source=QUESTION_SOURCE_AI_GENERATED,
+        )
+        db.add(question)
+        questions.append(question)
+    db.commit()
+    for question in questions:
+        db.refresh(question)
+    return questions
 
 
 # ---------------------------------------------------------------------------
@@ -711,3 +735,132 @@ class TestGetAnalysisEndpoint:
             headers=b_headers,
         )
         assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Group I — Session Completion Criteria
+#
+# A session may only transition in_progress -> completed when
+# completed_response_count == total_question_count. Direct DB setup
+# (_make_response / _make_questions) bypasses upload_service, so each test
+# sets interview_session.status = SESSION_STATUS_IN_PROGRESS up front to
+# reflect the precondition guaranteed by Phase 5: a session always leaves
+# 'draft' before any response of it is processed.
+# ---------------------------------------------------------------------------
+
+
+class TestSessionCompletionCriteria:
+    def test_session_not_completed_after_first_response(
+        self,
+        db,
+        mock_transcription,
+        mock_evaluation,
+        interview_session,
+        registered_user,
+    ):
+        questions = _make_questions(db, interview_session, 5)
+        interview_session.status = SESSION_STATUS_IN_PROGRESS
+        db.commit()
+
+        response = _make_response(
+            db, interview_session, questions[0], registered_user, RESPONSE_STATUS_UPLOADED
+        )
+        processing_service.process_response(response.id)
+
+        db.refresh(interview_session)
+        assert interview_session.status == SESSION_STATUS_IN_PROGRESS
+
+    def test_session_not_completed_until_all_questions_answered(
+        self,
+        db,
+        mock_transcription,
+        mock_evaluation,
+        interview_session,
+        registered_user,
+    ):
+        questions = _make_questions(db, interview_session, 5)
+        interview_session.status = SESSION_STATUS_IN_PROGRESS
+        db.commit()
+
+        for question in questions[:4]:
+            response = _make_response(
+                db, interview_session, question, registered_user, RESPONSE_STATUS_UPLOADED
+            )
+            processing_service.process_response(response.id)
+
+        db.refresh(interview_session)
+        assert interview_session.status == SESSION_STATUS_IN_PROGRESS
+
+    def test_session_completed_when_all_questions_completed(
+        self,
+        db,
+        mock_transcription,
+        mock_evaluation,
+        interview_session,
+        registered_user,
+    ):
+        questions = _make_questions(db, interview_session, 5)
+        interview_session.status = SESSION_STATUS_IN_PROGRESS
+        db.commit()
+
+        for question in questions:
+            response = _make_response(
+                db, interview_session, question, registered_user, RESPONSE_STATUS_UPLOADED
+            )
+            processing_service.process_response(response.id)
+
+        db.refresh(interview_session)
+        assert interview_session.status == SESSION_STATUS_COMPLETED
+
+    def test_failed_response_does_not_complete_session(
+        self,
+        db,
+        mock_transcription,
+        mock_evaluation,
+        interview_session,
+        registered_user,
+        monkeypatch,
+    ):
+        questions = _make_questions(db, interview_session, 5)
+        interview_session.status = SESSION_STATUS_IN_PROGRESS
+        db.commit()
+
+        for question in questions[:4]:
+            response = _make_response(
+                db, interview_session, question, registered_user, RESPONSE_STATUS_UPLOADED
+            )
+            processing_service.process_response(response.id)
+
+        def _raise_transcription_error(file_path):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(
+            "app.services.transcription_service.transcribe_audio",
+            _raise_transcription_error,
+        )
+
+        failed_response = _make_response(
+            db, interview_session, questions[4], registered_user, RESPONSE_STATUS_UPLOADED
+        )
+        processing_service.process_response(failed_response.id)
+
+        db.refresh(failed_response)
+        assert failed_response.status == RESPONSE_STATUS_FAILED
+
+        db.refresh(interview_session)
+        assert interview_session.status == SESSION_STATUS_IN_PROGRESS
+
+    def test_uploaded_response_does_not_complete_session(
+        self, db, interview_session, registered_user
+    ):
+        questions = _make_questions(db, interview_session, 5)
+        interview_session.status = SESSION_STATUS_IN_PROGRESS
+        db.commit()
+
+        for question in questions:
+            _make_response(
+                db, interview_session, question, registered_user, RESPONSE_STATUS_UPLOADED
+            )
+
+        db.refresh(interview_session)
+        assert interview_session.status == SESSION_STATUS_IN_PROGRESS

@@ -691,25 +691,35 @@ def process_response(response_id: uuid.UUID) -> None:
 
             # Session completion check.
             #
-            # "Every AudioResponse in the session is completed" is read
-            # literally: COUNT(status != 'completed') == 0. A session with
-            # any response still in 'uploaded', 'processing', or 'failed'
-            # is not marked completed. In particular, a permanently-failed
-            # response holds the session open until it is reprocessed
-            # (status -> 'failed' is re-claimable by claim_response) and
-            # eventually reaches 'completed'. This is intentional: session
-            # completion signals "every answer has a result", which a
-            # failed response does not have.
-            remaining = (
+            # A session is complete only when every QUESTION has a completed
+            # response, not merely when every EXISTING AudioResponse row is
+            # 'completed'. A session with 5 questions and only 1 (completed)
+            # AudioResponse must stay 'in_progress' — 4 questions are still
+            # unanswered. Comparing COUNT(AudioResponse WHERE status='completed')
+            # against COUNT(Question) for the session correctly accounts for
+            # questions that have no AudioResponse row at all yet.
+            #
+            # A permanently-failed response holds the session open until it is
+            # reprocessed (status -> 'failed' is re-claimable by claim_response)
+            # and eventually reaches 'completed' — it is never counted here.
+            # Both counts are aggregate SQL queries; no rows are loaded into
+            # memory.
+            completed_response_count = (
                 db.query(AudioResponse)
                 .filter(
                     AudioResponse.session_id == session_id,
-                    AudioResponse.status != RESPONSE_STATUS_COMPLETED,
+                    AudioResponse.status == RESPONSE_STATUS_COMPLETED,
                 )
                 .count()
             )
 
-            if remaining == 0:
+            total_question_count = (
+                db.query(Question)
+                .filter(Question.session_id == session_id)
+                .count()
+            )
+
+            if completed_response_count == total_question_count:
                 db.query(InterviewSession).filter(
                     InterviewSession.id == session_id
                 ).update(
