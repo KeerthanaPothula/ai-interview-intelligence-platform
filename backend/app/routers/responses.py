@@ -150,7 +150,7 @@ async def upload_audio(
     #    Week 2 MVP — cleanup job will reconcile. See docstring above.
     response = upload_service.create_response_record(
         db=db,
-        session_id=session.id,
+        session=session,
         question_id=question_id,
         user_id=current_user.id,
         file_path=relative_path,

@@ -9,6 +9,11 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.models.analysis import AudioResponse, RESPONSE_STATUS_UPLOADED
+from app.models.interview import (
+    InterviewSession,
+    SESSION_STATUS_DRAFT,
+    SESSION_STATUS_IN_PROGRESS,
+)
 
 # ---------------------------------------------------------------------------
 # Allowed MIME types and extensions
@@ -201,7 +206,7 @@ def save_file(
 
 def create_response_record(
     db: Session,
-    session_id: uuid.UUID,
+    session: InterviewSession,
     question_id: uuid.UUID,
     user_id: uuid.UUID,
     file_path: str,
@@ -220,13 +225,23 @@ def create_response_record(
     Status defaults to RESPONSE_STATUS_UPLOADED ('uploaded'). The Week 3
     pipeline transitions it to 'processing' → 'completed' or 'failed'.
 
+    Session state machine: this is the first AudioResponse ever recorded for
+    a session exactly when session.status is still SESSION_STATUS_DRAFT —
+    advance it to SESSION_STATUS_IN_PROGRESS here so draft-only operations
+    (question regeneration, session metadata edits) are rejected from this
+    point on. Any later upload finds session.status already
+    'in_progress' (or beyond), so this branch does not fire again — the
+    transition happens exactly once.
+
     commit() + refresh() ensures the caller receives the server-generated
-    created_at and id values from the DB.
+    created_at and id values from the DB. The session status change is
+    flushed in the same commit, so the AudioResponse insert and the session
+    transition are atomic.
     """
     row_id = response_id if response_id is not None else uuid.uuid4()
     response = AudioResponse(
         id=row_id,
-        session_id=session_id,
+        session_id=session.id,
         question_id=question_id,
         user_id=user_id,
         file_path=file_path,
@@ -235,6 +250,10 @@ def create_response_record(
         status=RESPONSE_STATUS_UPLOADED,
     )
     db.add(response)
+
+    if session.status == SESSION_STATUS_DRAFT:
+        session.status = SESSION_STATUS_IN_PROGRESS
+
     db.commit()
     db.refresh(response)
     return response
