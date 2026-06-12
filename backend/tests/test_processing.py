@@ -469,6 +469,37 @@ class TestTriggerProcessingEndpoint:
 
 
 class TestProcessingStatusEndpoint:
+    def test_processing_status_uploaded(self, client, auth_headers, audio_response):
+        # audio_response fixture is created with status='uploaded' and has
+        # no transcript or analysis rows.
+        response = client.get(
+            f"/api/v1/responses/{audio_response.id}/processing-status",
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == RESPONSE_STATUS_UPLOADED
+        assert data["transcript_id"] is None
+        assert data["analysis_id"] is None
+
+    def test_processing_status_processing(
+        self, client, auth_headers, db, audio_response
+    ):
+        db.query(AudioResponse).filter(AudioResponse.id == audio_response.id).update(
+            {"status": RESPONSE_STATUS_PROCESSING}, synchronize_session=False
+        )
+        db.commit()
+
+        response = client.get(
+            f"/api/v1/responses/{audio_response.id}/processing-status",
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == RESPONSE_STATUS_PROCESSING
+
     def test_processing_status_returns_completed(
         self, client, auth_headers, db, audio_response, transcript, interview_analysis
     ):
@@ -487,6 +518,30 @@ class TestProcessingStatusEndpoint:
         assert data["status"] == RESPONSE_STATUS_COMPLETED
         assert data["transcript_id"] == str(transcript.id)
         assert data["analysis_id"] == str(interview_analysis.id)
+
+    def test_processing_status_failed(self, client, auth_headers, db, audio_response):
+        db.query(AudioResponse).filter(AudioResponse.id == audio_response.id).update(
+            {"status": RESPONSE_STATUS_FAILED, "error_message": "Whisper timeout"},
+            synchronize_session=False,
+        )
+        db.commit()
+
+        response = client.get(
+            f"/api/v1/responses/{audio_response.id}/processing-status",
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == RESPONSE_STATUS_FAILED
+        assert data["error_message"] == "Whisper timeout"
+
+    def test_processing_status_not_found_returns_404(self, client, auth_headers):
+        response = client.get(
+            f"/api/v1/responses/{uuid.uuid4()}/processing-status",
+            headers=auth_headers,
+        )
+        assert response.status_code == 404
 
     def test_processing_status_other_user_returns_404(self, client, audio_response):
         b_headers = _register_and_get_headers(client, _USER_B)
