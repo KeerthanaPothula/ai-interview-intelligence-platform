@@ -141,6 +141,30 @@ class Settings(BaseSettings):
     MAX_UPLOAD_SIZE_MB: int = Field(default=10, gt=0)
 
     # ------------------------------------------------------------------
+    # CORS
+    # ------------------------------------------------------------------
+
+    # Allowed frontend origins for cross-origin requests, as a
+    # comma-separated string in the environment (e.g.
+    # "http://localhost:3000,http://localhost:5173"), parsed into a list
+    # below. Defaults to an empty list — no origins are allowed and
+    # credentialed CORS is disabled (see main.py) until this is configured.
+    #
+    # Declared as `str | list[str]` rather than `list[str]` because
+    # pydantic-settings attempts to JSON-decode env values for fields typed
+    # as `list[str]`, which fails for a plain comma-separated string before
+    # parse_cors_origins below ever runs. Allowing `str` in the type lets
+    # pydantic-settings pass the raw string through to the validator.
+    CORS_ORIGINS: str | list[str] = []
+
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, v: str | list[str]) -> list[str]:
+        if isinstance(v, str):
+            return [origin.strip() for origin in v.split(",") if origin.strip()]
+        return v
+
+    # ------------------------------------------------------------------
     # Validators
     # field_validator runs after the field's own type coercion,
     # so `v` is already the correct Python type when it arrives here.

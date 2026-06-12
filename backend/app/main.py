@@ -167,19 +167,24 @@ app = FastAPI(
 # ---------------------------------------------------------------------------
 # CORS
 #
-# Week 2: wildcard origins allow the frontend dev server (any port) and
-# Postman/curl to call the API without CORS preflight failures.
+# allow_origins is environment-driven (CORS_ORIGINS, see config.py) — a
+# comma-separated list of exact frontend origins, e.g.
+# "http://localhost:3000,http://localhost:5173" for local development or
+# "https://your-frontend-domain.com" for production. No code change is
+# needed to switch between environments.
 #
-# Week 5: replace allow_origins=["*"] with the specific frontend domain
-# (e.g. ["https://app.example.com"]) before production deployment.
-# Wildcard origins with allow_credentials=True is accepted by browsers only
-# when the server's response does NOT include Access-Control-Allow-Credentials;
-# many browsers silently drop credentials in that case — revisit before launch.
+# allow_credentials=True is only safe paired with explicit origins —
+# allow_origins=["*"] with allow_credentials=True is rejected by browsers
+# (or silently strips credentials) because the spec forbids combining a
+# wildcard origin with Access-Control-Allow-Credentials: true. Gating
+# allow_credentials on CORS_ORIGINS being non-empty means an unconfigured
+# deployment fails closed (no allowed origins, no credentialed CORS) rather
+# than falling back to an insecure wildcard.
 # ---------------------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=settings.CORS_ORIGINS,
+    allow_credentials=bool(settings.CORS_ORIGINS),
     allow_methods=["*"],
     allow_headers=["*"],
 )
