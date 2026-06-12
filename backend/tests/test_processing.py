@@ -566,3 +566,93 @@ class TestTranscriptTruncation:
         assert len(transcript.text) == len(long_text)
 
         get_settings.cache_clear()
+
+
+# ---------------------------------------------------------------------------
+# Group G — Router Tests: GET /responses/{response_id}/transcript
+# ---------------------------------------------------------------------------
+
+
+class TestGetTranscriptEndpoint:
+    def test_get_transcript_returns_200(
+        self, client, auth_headers, audio_response, transcript
+    ):
+        response = client.get(
+            f"/api/v1/responses/{audio_response.id}/transcript",
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["id"] == str(transcript.id)
+        assert data["audio_response_id"] == str(audio_response.id)
+        assert data["text"] == transcript.text
+        assert data["language"] == transcript.language
+        assert data["word_count"] == transcript.word_count
+
+    def test_get_transcript_missing_returns_404(
+        self, client, auth_headers, audio_response
+    ):
+        # audio_response exists but no Transcript row has been created yet.
+        response = client.get(
+            f"/api/v1/responses/{audio_response.id}/transcript",
+            headers=auth_headers,
+        )
+        assert response.status_code == 404
+
+    def test_get_transcript_other_user_returns_404(
+        self, client, audio_response, transcript
+    ):
+        # transcript belongs to a response owned by registered_user (Alice).
+        b_headers = _register_and_get_headers(client, _USER_B)
+
+        response = client.get(
+            f"/api/v1/responses/{audio_response.id}/transcript",
+            headers=b_headers,
+        )
+        assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Group H — Router Tests: GET /responses/{response_id}/analysis
+# ---------------------------------------------------------------------------
+
+
+class TestGetAnalysisEndpoint:
+    def test_get_analysis_returns_200(
+        self, client, auth_headers, audio_response, interview_analysis
+    ):
+        response = client.get(
+            f"/api/v1/responses/{audio_response.id}/analysis",
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["id"] == str(interview_analysis.id)
+        assert data["audio_response_id"] == str(audio_response.id)
+        assert data["transcript_id"] == str(interview_analysis.transcript_id)
+        assert data["overall_score"] == str(interview_analysis.overall_score)
+        assert data["model_used"] == interview_analysis.model_used
+
+    def test_get_analysis_missing_returns_404(
+        self, client, auth_headers, audio_response
+    ):
+        # audio_response exists but no InterviewAnalysis row has been created yet.
+        response = client.get(
+            f"/api/v1/responses/{audio_response.id}/analysis",
+            headers=auth_headers,
+        )
+        assert response.status_code == 404
+
+    def test_get_analysis_other_user_returns_404(
+        self, client, audio_response, interview_analysis
+    ):
+        # interview_analysis belongs to a response owned by registered_user (Alice).
+        b_headers = _register_and_get_headers(client, _USER_B)
+
+        response = client.get(
+            f"/api/v1/responses/{audio_response.id}/analysis",
+            headers=b_headers,
+        )
+        assert response.status_code == 404

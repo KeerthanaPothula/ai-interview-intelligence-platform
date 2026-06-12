@@ -12,7 +12,7 @@ from fastapi import (
     UploadFile,
     status,
 )
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.config import get_settings
 from app.core.deps import get_current_user
@@ -23,6 +23,8 @@ from app.models.user import User
 from app.schemas.analysis import (
     AudioResponseResponse,
     AudioResponseStatusResponse,
+    InterviewAnalysisResponse,
+    TranscriptResponse,
 )
 from app.services import interview_service, processing_service, upload_service
 
@@ -242,3 +244,91 @@ def get_response_status(
         raise HTTPException(status_code=404, detail="Response not found.")
 
     return AudioResponseStatusResponse.model_validate(response)
+
+
+@router.get(
+    "/responses/{response_id}/transcript",
+    response_model=TranscriptResponse,
+    summary="Get the Whisper transcript for an audio response",
+)
+def get_transcript(
+    response_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> TranscriptResponse:
+    """Return the Whisper transcript produced for one audio response.
+
+    Ownership is enforced entirely in SQL: the WHERE clause filters on both
+    AudioResponse.id and AudioResponse.user_id in the same query. A response
+    that exists but belongs to another user produces the same `None` result
+    — and therefore the same HTTP 404 — as a response that does not exist
+    at all. HTTP 403 is never returned.
+
+    joinedload(AudioResponse.transcript) eagerly loads the one-to-one
+    transcript relationship in the same SQL statement (a single LEFT OUTER
+    JOIN), avoiding a second lazy-load SELECT when response.transcript is
+    accessed below.
+
+    Authentication: Bearer token required.
+
+    Returns HTTP 404 if response_id does not exist, belongs to another user,
+    or has not yet been transcribed (transcript is None — status is
+    'uploaded', 'processing', or 'failed' before Transaction 2 commits).
+    """
+    response = (
+        db.query(AudioResponse)
+        .options(joinedload(AudioResponse.transcript))
+        .filter(
+            AudioResponse.id == response_id,
+            AudioResponse.user_id == current_user.id,
+        )
+        .first()
+    )
+    if response is None or response.transcript is None:
+        raise HTTPException(status_code=404, detail="Transcript not found.")
+
+    return TranscriptResponse.model_validate(response.transcript)
+
+
+@router.get(
+    "/responses/{response_id}/analysis",
+    response_model=InterviewAnalysisResponse,
+    summary="Get the AI evaluation for an audio response",
+)
+def get_analysis(
+    response_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> InterviewAnalysisResponse:
+    """Return the Gemini AI evaluation produced for one audio response.
+
+    Ownership is enforced entirely in SQL: the WHERE clause filters on both
+    AudioResponse.id and AudioResponse.user_id in the same query. A response
+    that exists but belongs to another user produces the same `None` result
+    — and therefore the same HTTP 404 — as a response that does not exist
+    at all. HTTP 403 is never returned.
+
+    joinedload(AudioResponse.analysis) eagerly loads the one-to-one analysis
+    relationship in the same SQL statement (a single LEFT OUTER JOIN),
+    avoiding a second lazy-load SELECT when response.analysis is accessed
+    below.
+
+    Authentication: Bearer token required.
+
+    Returns HTTP 404 if response_id does not exist, belongs to another user,
+    or has not yet been evaluated (analysis is None — status is 'uploaded',
+    'processing', or 'failed' before Transaction 3 commits).
+    """
+    response = (
+        db.query(AudioResponse)
+        .options(joinedload(AudioResponse.analysis))
+        .filter(
+            AudioResponse.id == response_id,
+            AudioResponse.user_id == current_user.id,
+        )
+        .first()
+    )
+    if response is None or response.analysis is None:
+        raise HTTPException(status_code=404, detail="Analysis not found.")
+
+    return InterviewAnalysisResponse.model_validate(response.analysis)
