@@ -1,0 +1,55 @@
+# -------------------------------------------------------------
+# Build context for this Dockerfile is ./backend (see docker-compose.yml
+# and the Render service config). Patterns below are relative to that
+# directory.
+#
+# Excluding these keeps the production image smaller, avoids
+# invalidating the pip-install layer with unrelated file changes, and
+# prevents local dev artifacts / user-uploaded data from being baked
+# into the image.
+# -------------------------------------------------------------
+
+# Virtual environments (not used inside the image — dependencies are
+# installed directly from requirements.txt)
+.venv
+venv
+env
+
+# Git metadata — not needed at runtime; harmless no-op for the
+# ./backend build context today, kept in case the context ever changes
+.git
+.gitignore
+
+# Python bytecode and build artifacts
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+build
+dist
+*.egg-info
+*.egg
+
+# Test / lint / type-check caches and reports
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.coverage
+htmlcov
+.tox
+
+# Test suite — not needed at runtime
+tests
+
+# Local uploads — runtime data, never baked into the image
+# (see docs/DEPLOYMENT.md for the production storage strategy)
+uploads
+
+# Editor / OS files
+.vscode
+.idea
+.DS_Store
+
+# Environment files — secrets must never be baked into the image
+.env
+.env.*

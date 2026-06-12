@@ -67,8 +67,25 @@ COPY . .
 # Does not actually publish the port — docker-compose handles that.
 EXPOSE 8000
 
-# Default start command.
-# docker-compose overrides this with its own `command:` key in dev,
-# but this makes the image runnable standalone with:
-#   docker run --env-file .env aiip-backend
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# -------------------------------------------------------------
+# Production startup command.
+#
+# --reload is intentionally NOT used here: it enables Uvicorn's
+# file-watcher/auto-restart, which is a development-only feature and
+# adds unnecessary overhead in a deployed container. Local development
+# uses docker-compose's own `command:` override (with --reload and a
+# bind-mounted source tree) instead — that override takes precedence
+# over this CMD and is unaffected by this change.
+#
+# Workers: deliberately a single worker (Uvicorn's default when
+# --workers is omitted). transcription_service.py loads the Whisper
+# model once per process into a module-level singleton and guards
+# concurrent transcriptions with a process-local
+# threading.Semaphore(1). Running multiple worker processes would load
+# a separate copy of the Whisper model into memory per worker
+# (multiplying memory usage) and give each worker its own semaphore,
+# defeating the "one transcription at a time" guarantee. Horizontal
+# scaling should be done via additional service instances (or a shared
+# job queue, in a future phase), not via --workers.
+# -------------------------------------------------------------
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
