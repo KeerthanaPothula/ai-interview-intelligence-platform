@@ -87,5 +87,14 @@ EXPOSE 8000
 # defeating the "one transcription at a time" guarantee. Horizontal
 # scaling should be done via additional service instances (or a shared
 # job queue, in a future phase), not via --workers.
+#
+# Port: Render (and most PaaS hosts) assign the container a port at
+# runtime via the PORT environment variable and route external traffic
+# to it — a hardcoded --port 8000 would not be reachable. Shell-form
+# CMD (rather than exec-form JSON array) is required so ${PORT:-8000}
+# is expanded by the shell: it binds to Render's assigned port in
+# production and falls back to 8000 for local `docker run` /
+# docker-compose, where EXPOSE 8000 and the published port mapping
+# still apply.
 # -------------------------------------------------------------
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
