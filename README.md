@@ -1,2 +1,265 @@
-# ai-interview-intelligence-platform
-Production-grade AI Interview Intelligence Platform using FastAPI, React, Whisper, NLP, Emotion Detection, and LLM-powered candidate evaluation.
+# AI Interview Intelligence Platform
+
+![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)
+![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-yellow.svg)
+
+A full-stack platform for AI-assisted mock interview practice. Candidates
+create an interview session for a target job role, receive AI-generated
+interview questions, record audio answers, and get back an automatic
+transcript plus an AI evaluation across five scoring dimensions with
+concrete strengths, weaknesses, and feedback.
+
+---
+
+## Project Overview
+
+The platform combines:
+
+- **Question generation** — Google Gemini generates role-specific interview
+  questions from a job title and description.
+- **Audio response capture** — candidates upload a recorded answer per
+  question.
+- **Local transcription** — OpenAI Whisper (CPU) transcribes the audio
+  on the server, with no external API call required.
+- **AI evaluation** — Gemini scores each transcript on communication,
+  technical depth, problem solving, and confidence, plus an overall score
+  and written feedback.
+- **Asynchronous processing UI** — the frontend polls a processing-status
+  endpoint and renders the transcript and analysis as soon as they're ready.
+
+Built as a portfolio-quality, production-shaped project: JWT auth with
+per-user data isolation, Alembic-migrated PostgreSQL schema, hardened CORS,
+structured logging, a Dockerized backend, and a documented Render deployment
+path.
+
+---
+
+## Features
+
+**Authentication & Security**
+- Email/password registration and login (JWT bearer tokens)
+- Per-user ownership enforcement on every resource (other users' data
+  returns `404`, never `403`, to avoid leaking existence)
+- Environment-driven CORS allowlist (no wildcard origins)
+
+**Interview Sessions**
+- Create, list, update, and delete interview sessions (title, job role, job
+  description)
+- Session status lifecycle: `draft → in_progress → processing → completed`
+
+**AI Question Generation**
+- Generate role-specific interview questions via Gemini, categorized and
+  ordered
+
+**Audio Upload & Processing**
+- Multipart audio upload per question, with file-size and content-type
+  validation
+- Background processing pipeline: Whisper transcription → Gemini evaluation
+- Per-response status tracking (`uploaded → processing → completed/failed`)
+  with stuck-job recovery on startup
+
+**Transcript & Analysis**
+- Full transcript with detected language, word count, and duration
+- Five AI-generated scores (overall, communication, technical, problem
+  solving, confidence) plus strengths, weaknesses, and detailed feedback
+
+**Frontend**
+- React + TypeScript SPA: auth pages, session list/detail, question/upload
+  flow
+- Live processing-status polling (3s interval, stops on terminal state)
+- Generic, user-friendly error handling — raw API errors are never shown
+
+---
+
+## Architecture
+
+```mermaid
+flowchart LR
+    User[Candidate] -->|HTTPS| FE[React Frontend\nVite + TypeScript]
+    FE -->|JWT Bearer| API[FastAPI Backend]
+    API --> DB[(PostgreSQL)]
+    API --> Whisper[Whisper\nTranscription]
+    API --> Gemini[Gemini API\nQuestions + Evaluation]
+```
+
+This is a high-level view. The full request flow and the audio processing
+pipeline (with status transitions) are diagrammed in
+[docs/architecture.md](docs/architecture.md).
+
+---
+
+## Tech Stack
+
+| Layer | Technologies |
+|---|---|
+| **Backend** | FastAPI, SQLAlchemy 2.x, Alembic, Pydantic v2 / pydantic-settings, python-jose (JWT), bcrypt, Uvicorn |
+| **AI / ML** | Google Gemini (`google-genai`) for question generation & evaluation, OpenAI Whisper + PyTorch (CPU) for transcription |
+| **Database** | PostgreSQL 16 (SQLite for the test suite) |
+| **Frontend** | React 19, TypeScript, Vite, React Router v6 |
+| **Testing** | pytest + httpx (backend, 94 tests), Vitest + React Testing Library (frontend, 14 tests) |
+| **Infrastructure** | Docker, Docker Compose (local), Render (Web Service + Static Site + managed PostgreSQL) |
+
+---
+
+## Screenshots
+
+> Screenshots are not yet committed. See
+> [docs/screenshots.md](docs/screenshots.md) for the exact list of captures
+> needed, their filenames, and where they belong in this README.
+
+| # | View | File |
+|---|---|---|
+| 1 | Login page | `docs/screenshots/01-login.png` |
+| 2 | Registration page | `docs/screenshots/02-register.png` |
+| 3 | Session list | `docs/screenshots/03-session-list.png` |
+| 4 | Session details | `docs/screenshots/04-session-detail.png` |
+| 5 | Generated questions | `docs/screenshots/05-questions.png` |
+| 6 | Audio upload | `docs/screenshots/06-upload.png` |
+| 7 | Processing state | `docs/screenshots/07-processing.png` |
+| 8 | Transcript view | `docs/screenshots/08-transcript.png` |
+| 9 | Analysis view | `docs/screenshots/09-analysis.png` |
+
+---
+
+## System Design
+
+- **Ownership model**: every query for a session/question/response/transcript
+  /analysis is scoped to `WHERE user_id = current_user.id` (via the owning
+  session). A resource that exists but belongs to another user returns `404`,
+  identical to a resource that doesn't exist — this prevents enumeration.
+- **Processing pipeline**: an audio upload creates an `AudioResponse` with
+  status `uploaded`. A background task transitions it to `processing`, runs
+  Whisper transcription (bounded by `WHISPER_TIMEOUT_SECONDS`), then Gemini
+  evaluation (transcript truncated to `MAX_TRANSCRIPT_CHARS`), and finally
+  `completed` or `failed` (with a generic error surfaced to the client — raw
+  exception text is never returned). On startup, any response stuck in
+  `processing` (e.g. from a crash) is recovered back to `failed`.
+- **Polling, not websockets**: the frontend polls
+  `GET /responses/{id}/processing-status` every 3 seconds and stops once a
+  terminal state (`completed`/`failed`) is reached — simple, stateless, and
+  proxy/CDN-friendly.
+- **CORS**: `allow_origins` is driven entirely by the `CORS_ORIGINS` env var
+  (comma-separated exact origins). `allow_credentials` is only enabled when
+  at least one origin is configured — an unconfigured deployment fails closed
+  rather than falling back to a wildcard.
+
+---
+
+## API Overview
+
+All routes except `/health`, `/api/v1/auth/register`, and
+`/api/v1/auth/login` require `Authorization: Bearer <token>`.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/health` | Liveness check (no DB access) |
+| `POST` | `/api/v1/auth/register` | Create a new user |
+| `POST` | `/api/v1/auth/login` | Exchange email + password for a JWT |
+| `GET` | `/api/v1/auth/me` | Get the current authenticated user |
+| `POST` | `/api/v1/interviews/` | Create an interview session |
+| `GET` | `/api/v1/interviews/` | List the current user's sessions |
+| `GET` | `/api/v1/interviews/{session_id}` | Get a session and its questions |
+| `PATCH` | `/api/v1/interviews/{session_id}` | Update a draft session |
+| `DELETE` | `/api/v1/interviews/{session_id}` | Delete a session |
+| `POST` | `/api/v1/interviews/{session_id}/questions/generate` | Generate questions via Gemini |
+| `GET` | `/api/v1/interviews/{session_id}/questions` | List a session's questions |
+| `POST` | `/api/v1/interviews/{session_id}/responses` | Upload an audio response (multipart) |
+| `GET` | `/api/v1/interviews/{session_id}/responses` | List audio responses for a session |
+| `GET` | `/api/v1/responses/{response_id}/status` | Get a response's status |
+| `POST` | `/api/v1/responses/{response_id}/process` | Trigger background processing |
+| `GET` | `/api/v1/responses/{response_id}/processing-status` | Poll processing status (used by the UI) |
+| `GET` | `/api/v1/responses/{response_id}/transcript` | Get the Whisper transcript |
+| `GET` | `/api/v1/responses/{response_id}/analysis` | Get the Gemini evaluation |
+
+Interactive docs (`/docs`, `/redoc`) are available when `DEBUG=true` and
+disabled in production.
+
+---
+
+## Local Setup
+
+### Backend
+
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+
+cp ../.env.example ../.env         # fill in DATABASE_URL, JWT_SECRET_KEY, GEMINI_API_KEY
+alembic upgrade head
+uvicorn app.main:app --reload
+```
+
+API available at `http://localhost:8000` (`/docs` when `DEBUG=true`).
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+cp .env.example .env               # VITE_API_BASE_URL=http://localhost:8000
+npm run dev
+```
+
+App available at `http://localhost:5173`.
+
+### Tests
+
+```bash
+# Backend (94 tests)
+cd backend && pytest
+
+# Frontend (14 tests)
+cd frontend && npm run test
+```
+
+---
+
+## Docker Setup
+
+```bash
+cp .env.example .env               # fill in secrets
+docker-compose up --build
+docker-compose exec backend alembic upgrade head   # first run only
+```
+
+This starts PostgreSQL and the FastAPI backend (`http://localhost:8000`)
+with live-reload and a bind-mounted source tree. See
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for the migration and persistent
+storage strategy used in production.
+
+---
+
+## Render Deployment
+
+The backend (Docker Web Service + managed PostgreSQL + persistent Disk) and
+frontend (Static Site) are deployable to [Render](https://render.com) with
+no code changes beyond what's already in this repo. Full step-by-step
+instructions — including environment variables, the Alembic pre-deploy
+command, the SPA rewrite rule, and a troubleshooting guide — are in
+[docs/RENDER_DEPLOYMENT.md](docs/RENDER_DEPLOYMENT.md).
+
+---
+
+## Future Improvements
+
+- In-browser audio recording (`MediaRecorder`) instead of file upload only
+- Emotion/sentiment signals from audio (tone, pace) alongside transcript
+  analysis
+- Object storage (S3/R2) for uploaded audio instead of a local Disk, enabling
+  horizontal scaling
+- A job queue (e.g. Celery/RQ) for the processing pipeline instead of
+  in-process background tasks
+- CI pipeline (lint, type-check, test) on every push/PR
+- Session-level summary report aggregating all question scores
+
+---
+
+## License
+
+Released under the [MIT License](LICENSE).
