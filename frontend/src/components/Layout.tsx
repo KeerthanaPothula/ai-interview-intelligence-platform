@@ -1,0 +1,26 @@
+import { Link, Navigate, Outlet } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+
+export function Layout() {
+  const { isAuthenticated, logout } = useAuth();
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return (
+    <div className="app-shell">
+      <header className="app-header">
+        <Link to="/" className="app-title">
+          AI Interview Intelligence Platform
+        </Link>
+        <button type="button" onClick={logout}>
+          Log out
+        </button>
+      </header>
+      <main className="app-main">
+        <Outlet />
+      </main>
+    </div>
+  );
+}

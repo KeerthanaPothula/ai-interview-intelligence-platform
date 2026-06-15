@@ -1,0 +1,107 @@
+import { useEffect, useState, type FormEvent } from 'react';
+import { ApiError, createSession, listSessions } from '../api/client';
+import { SessionCard } from '../components/SessionCard';
+import { useAuth } from '../context/AuthContext';
+import type { SessionListResponse } from '../api/types';
+
+export function SessionsListPage() {
+  const { token } = useAuth();
+  const [sessions, setSessions] = useState<SessionListResponse[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const [title, setTitle] = useState('');
+  const [jobRole, setJobRole] = useState('');
+  const [jobDescription, setJobDescription] = useState('');
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+
+  useEffect(() => {
+    if (!token) return;
+    listSessions(token)
+      .then(setSessions)
+      .catch(() => setLoadError('Unable to load your interview sessions right now.'))
+      .finally(() => setLoading(false));
+  }, [token]);
+
+  async function handleCreate(event: FormEvent) {
+    event.preventDefault();
+    if (!token) return;
+
+    setCreateError(null);
+    setCreating(true);
+    try {
+      const session = await createSession(
+        { title, job_role: jobRole, job_description: jobDescription },
+        token,
+      );
+      setSessions((prev) => [
+        {
+          id: session.id,
+          title: session.title,
+          job_role: session.job_role,
+          status: session.status,
+          created_at: session.created_at,
+          updated_at: session.updated_at,
+        },
+        ...prev,
+      ]);
+      setTitle('');
+      setJobRole('');
+      setJobDescription('');
+    } catch (err) {
+      setCreateError(
+        err instanceof ApiError ? err.message : 'Unable to create the session. Please try again.',
+      );
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  return (
+    <div className="sessions-page">
+      <section className="create-session">
+        <h2>New Interview Session</h2>
+        <form onSubmit={handleCreate}>
+          <label>
+            Title
+            <input value={title} onChange={(event) => setTitle(event.target.value)} required />
+          </label>
+          <label>
+            Job role
+            <input value={jobRole} onChange={(event) => setJobRole(event.target.value)} required />
+          </label>
+          <label>
+            Job description
+            <textarea
+              value={jobDescription}
+              onChange={(event) => setJobDescription(event.target.value)}
+              required
+              minLength={20}
+              rows={4}
+            />
+            <span className="field-hint">At least 20 characters — used to generate interview questions.</span>
+          </label>
+          {createError && <p className="status-error-text">{createError}</p>}
+          <button type="submit" disabled={creating}>
+            {creating ? 'Creating…' : 'Create Session'}
+          </button>
+        </form>
+      </section>
+
+      <section className="sessions-list">
+        <h2>Your Sessions</h2>
+        {loading && <p>Loading sessions…</p>}
+        {loadError && <p className="status-error-text">{loadError}</p>}
+        {!loading && !loadError && sessions.length === 0 && (
+          <p>No interview sessions yet. Create one above to get started.</p>
+        )}
+        <div className="session-grid">
+          {sessions.map((session) => (
+            <SessionCard key={session.id} session={session} />
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
