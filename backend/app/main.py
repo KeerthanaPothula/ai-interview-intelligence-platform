@@ -46,8 +46,11 @@ from app.config import get_settings
 from app.database import SessionLocal
 from app.routers.analytics import router as analytics_router
 from app.routers.auth import router as auth_router
+from app.routers.documents import router as documents_router
 from app.routers.follow_up import router as follow_up_router
 from app.routers.interviews import router as interviews_router
+from app.routers.live_interview import router as live_interview_router
+from app.routers.prediction import router as prediction_router
 from app.routers.processing import router as processing_router
 from app.routers.reports import router as reports_router
 from app.routers.responses import router as responses_router
@@ -216,6 +219,15 @@ app.include_router(follow_up_router)
 
 # reports_router already has prefix="/api/v1/interviews" — no extra prefix.
 app.include_router(reports_router)
+
+# live_interview_router already has prefix="/api/v1/live-interviews" — no extra prefix.
+app.include_router(live_interview_router)
+
+# documents_router already has prefix="/api/v1/documents" — no extra prefix.
+app.include_router(documents_router)
+
+# prediction_router uses full /api/v1/... paths inline — no extra prefix.
+app.include_router(prediction_router)
 
 # ---------------------------------------------------------------------------
 # Health check

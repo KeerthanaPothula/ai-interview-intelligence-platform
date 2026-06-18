@@ -200,3 +200,98 @@ export interface SessionReportResponse {
   model_used: string | null;
   created_at: string;
 }
+
+// ---------------------------------------------------------------------------
+// Live Conversational AI Interviewer (backend/app/schemas/conversation.py)
+// ---------------------------------------------------------------------------
+
+export interface LiveConversationTurnResponse {
+  id: string;
+  live_session_id: string;
+  turn_number: number;
+  question_text: string;
+  difficulty_level: number;
+  response_text: string | null;
+  audio_response_id: string | null;
+  created_at: string;
+}
+
+export interface LiveInterviewSessionResponse {
+  id: string;
+  user_id: string;
+  job_role: string;
+  job_description: string;
+  status: 'active' | 'completed';
+  current_turn: number;
+  max_turns: number;
+  created_at: string;
+  completed_at: string | null;
+  turns: LiveConversationTurnResponse[];
+  current_question: LiveConversationTurnResponse | null;
+}
+
+export interface EndInterviewResponse {
+  session_id: string;
+  status: string;
+  total_turns: number;
+  summary: string;
+  turns: LiveConversationTurnResponse[];
+}
+
+// ---------------------------------------------------------------------------
+// Resume & RAG (backend/app/schemas/documents.py)
+// ---------------------------------------------------------------------------
+
+export interface ResumeDocumentResponse {
+  id: string;
+  user_id: string;
+  filename: string;
+  extracted_text: string | null;
+  created_at: string;
+  chunk_count: number;
+}
+
+export interface RAGQuestionItem {
+  body: string;
+  category: string;
+  sequence_order: number;
+}
+
+export interface RAGQuestionsResponse {
+  session_id: string;
+  questions: RAGQuestionItem[];
+  resume_context_used: boolean;
+  chunks_retrieved: number;
+}
+
+// ---------------------------------------------------------------------------
+// Prediction & Coaching (backend/app/schemas/prediction.py)
+// ---------------------------------------------------------------------------
+
+export interface InterviewPredictionResponse {
+  id: string;
+  session_id: string;
+  success_probability: number | null;
+  percentile_rank: number | null;
+  predicted_outcome: string | null;
+  model_version: string | null;
+  created_at: string;
+}
+
+export interface CoachingPlanResponse {
+  id: string;
+  session_id: string;
+  plan_7_day: string[] | null;
+  plan_14_day: string[] | null;
+  plan_30_day: string[] | null;
+  focus_areas: string[] | null;
+  model_used: string | null;
+  created_at: string;
+}
+
+export interface BenchmarkResponse {
+  user_average_score: number | null;
+  percentile_rank: number | null;
+  total_platform_responses: number;
+  user_responses_analyzed: number;
+}

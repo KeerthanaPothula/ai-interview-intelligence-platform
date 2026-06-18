@@ -11,7 +11,10 @@ A full-stack platform for AI-assisted mock interview practice. Candidates
 create an interview session for a target job role, receive AI-generated
 interview questions, record audio answers, and get back an automatic
 transcript plus an AI evaluation across five scoring dimensions with
-concrete strengths, weaknesses, and feedback.
+concrete strengths, weaknesses, and feedback. The platform also features
+a live conversational AI interviewer, resume-aware RAG question generation,
+ML-powered success prediction, percentile benchmarking, and an AI career
+coach that generates 7/14/30-day improvement plans.
 
 ---
 
@@ -88,11 +91,40 @@ path.
   (Beginner → Highly Competitive)
 - `POST /interviews/{id}/report/generate` + `GET /interviews/{id}/report`
 
+**Live Conversational AI Interviewer** *(Phase 17)*
+- Multi-turn, context-aware AI interview: Gemini generates follow-up questions
+  that build on prior answers and increase in difficulty (warm-up → advanced)
+- `POST /live-interviews/` (start + first question) · `POST /{id}/next-question`
+  · `GET /{id}/conversation` · `POST /{id}/end` (summary generation)
+- Frontend: `LiveInterviewPage` with progress bar, difficulty badges, and
+  collapsible conversation history
+
+**Resume + Job Description RAG System** *(Phase 18)*
+- Upload PDF/DOCX resumes — text extracted, chunked (200-word overlapping
+  windows), and embedded via sentence-transformers (all-MiniLM-L6-v2)
+- Embeddings stored as JSON in SQLite/PostgreSQL (no pgvector required)
+- `POST /documents/resume/upload` · `GET /documents/resume/current`
+- `POST /documents/interviews/{id}/generate-rag-questions` — top-k cosine
+  similarity retrieval drives personalised Gemini question generation
+
+**Interview Benchmarking & Predictive Analytics** *(Phase 19)*
+- Logistic regression trained on 2000 synthetic samples at startup — predicts
+  success probability and outcome (Strong Pass / Pass / Borderline / Fail)
+- Percentile ranking: user's avg score compared to all platform users
+- `POST /interviews/{id}/predict` · `GET /analytics/benchmarks`
+- Dashboard: RadarChart skill-breakdown + benchmark stat cards
+
+**AI Career Coach** *(Phase 19)*
+- Gemini-generated 7/14/30-day personalised improvement plans using session
+  metrics, readiness level, and identified weaknesses
+- `POST /interviews/{id}/coaching-plan` · `GET /interviews/{id}/coaching-plan`
+
 **Frontend**
 - React + TypeScript SPA: auth pages, session list/detail, question/upload
-  flow, analytics dashboard (`/dashboard`)
+  flow, analytics dashboard (`/dashboard`), live interview (`/live-interview`)
 - Live processing-status polling (3s interval, stops on terminal state)
 - VoiceAnalyticsCard per response with confidence badge and metric grid
+- Dashboard: LineChart score trends + RadarChart skill breakdown + benchmark percentile
 - Generic, user-friendly error handling — raw API errors are never shown
 
 ---
@@ -103,10 +135,12 @@ path.
 flowchart LR
     User[Candidate] -->|HTTPS| FE[React Frontend\nVite + TypeScript]
     FE -->|JWT Bearer| API[FastAPI Backend]
-    API --> DB[(PostgreSQL)]
+    API --> DB[(PostgreSQL / SQLite)]
     API --> Whisper[Whisper\nTranscription]
     API --> Librosa[Librosa\nVoice Analytics]
-    API --> Gemini[Gemini API\nQuestions + Evaluation\n+ Follow-ups + Reports]
+    API --> STrans[sentence-transformers\nRAG Embeddings]
+    API --> SKLearn[scikit-learn\nSuccess Prediction]
+    API --> Gemini[Gemini API\nQuestions + Evaluation\n+ Follow-ups + Reports\n+ Live Interviews\n+ RAG Questions\n+ Career Coaching]
 ```
 
 This is a high-level view. The full request flow and the audio processing
@@ -120,10 +154,10 @@ pipeline (with status transitions) are diagrammed in
 | Layer | Technologies |
 |---|---|
 | **Backend** | FastAPI, SQLAlchemy 2.x, Alembic, Pydantic v2 / pydantic-settings, python-jose (JWT), bcrypt, Uvicorn |
-| **AI / ML** | Google Gemini (`google-genai`) for question generation, evaluation, follow-ups & session reports; OpenAI Whisper + PyTorch (CPU) for transcription; librosa for voice analytics |
+| **AI / ML** | Google Gemini (`google-genai`) for question generation, evaluation, follow-ups, session reports, live interviews, RAG questions & career coaching; OpenAI Whisper + PyTorch (CPU) for transcription; librosa for voice analytics; sentence-transformers (all-MiniLM-L6-v2) for RAG embeddings; scikit-learn logistic regression for success prediction |
 | **Database** | PostgreSQL 16 (SQLite for the test suite) |
-| **Frontend** | React 19, TypeScript, Vite, React Router v6 |
-| **Testing** | pytest + httpx (backend, 128 tests), Vitest + React Testing Library (frontend, 24 tests) |
+| **Frontend** | React 19, TypeScript, Vite, React Router v6, Recharts (LineChart + RadarChart) |
+| **Testing** | pytest + httpx (backend, 170 tests), Vitest + React Testing Library (frontend, 31 tests) |
 | **Infrastructure** | Docker, Docker Compose (local), Render (Web Service + Static Site + managed PostgreSQL) |
 
 ---

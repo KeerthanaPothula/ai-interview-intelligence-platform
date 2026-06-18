@@ -10,6 +10,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
 if TYPE_CHECKING:
+    from app.models.conversation import LiveInterviewSession
+    from app.models.documents import DocumentChunk, ResumeDocument
     from app.models.interview import InterviewSession
 
 
@@ -129,11 +131,29 @@ class User(Base):
         comment="UTC timestamp of account creation. Set by the database.",
     )
 
-    # Convenience navigation — lets code do `user.sessions` without a query.
-    # Cascade all, delete-orphan: deleting a User ORM object also deletes
-    # their sessions (DB-level CASCADE handles it for direct SQL deletes).
     sessions: Mapped[list["InterviewSession"]] = relationship(
         "InterviewSession", back_populates="user", cascade="all, delete-orphan"
+    )
+
+    live_interview_sessions: Mapped[list["LiveInterviewSession"]] = relationship(
+        "LiveInterviewSession",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+    resume_documents: Mapped[list["ResumeDocument"]] = relationship(
+        "ResumeDocument",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+    document_chunks: Mapped[list["DocumentChunk"]] = relationship(
+        "DocumentChunk",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
 
     def __repr__(self) -> str:

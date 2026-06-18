@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { AuthProvider } from './context/AuthContext';
 import { DashboardPage } from './pages/DashboardPage';
+import { LiveInterviewPage } from './pages/LiveInterviewPage';
 import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
 import { SessionDetailPage } from './pages/SessionDetailPage';
@@ -18,6 +19,7 @@ export default function App() {
             <Route path="/" element={<SessionsListPage />} />
             <Route path="/sessions/:sessionId" element={<SessionDetailPage />} />
             <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/live-interview" element={<LiveInterviewPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

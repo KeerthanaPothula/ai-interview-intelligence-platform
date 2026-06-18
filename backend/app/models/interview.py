@@ -22,6 +22,7 @@ from app.database import Base
 if TYPE_CHECKING:
     from app.models.analysis import AudioResponse
     from app.models.features import FollowUpQuestion, SessionReport
+    from app.models.prediction import CoachingPlan, InterviewPrediction
     from app.models.user import User
 
 # ---------------------------------------------------------------------------
@@ -157,6 +158,20 @@ class InterviewSession(Base):
 
     report: Mapped[SessionReport | None] = relationship(
         "SessionReport",
+        back_populates="session",
+        uselist=False,
+        passive_deletes=True,
+    )
+
+    prediction: Mapped[InterviewPrediction | None] = relationship(
+        "InterviewPrediction",
+        back_populates="session",
+        uselist=False,
+        passive_deletes=True,
+    )
+
+    coaching_plan: Mapped[CoachingPlan | None] = relationship(
+        "CoachingPlan",
         back_populates="session",
         uselist=False,
         passive_deletes=True,

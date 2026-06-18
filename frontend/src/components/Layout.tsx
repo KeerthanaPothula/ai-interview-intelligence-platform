@@ -17,6 +17,7 @@ export function Layout() {
         <nav className="app-nav">
           <Link to="/" className="nav-link">Sessions</Link>
           <Link to="/dashboard" className="nav-link">Dashboard</Link>
+          <Link to="/live-interview" className="nav-link">Live Interview</Link>
         </nav>
         <button type="button" onClick={logout}>
           Log out

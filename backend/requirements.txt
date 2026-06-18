@@ -135,3 +135,26 @@ ruff==0.8.1
 # soundfile provides the audio file decoder backend; numba is optional but
 # greatly accelerates librosa's spectral transforms (JIT compilation).
 librosa==0.10.2
+
+
+# -------------------------------------------------------------
+# Phase 17-19 — Conversational AI, RAG, Predictive Analytics
+# -------------------------------------------------------------
+
+# PDF text extraction — used by document_extraction_service to pull text from
+# resume/JD PDFs uploaded by candidates. Pure-Python, no C extensions.
+pypdf==4.3.1
+
+# DOCX text extraction — extracts text from Word documents for the RAG system.
+python-docx==1.1.2
+
+# Sentence embedding model — all-MiniLM-L6-v2 produces 384-dim embeddings
+# for semantic similarity search in the RAG question-generation pipeline.
+# Model weights (~90 MB) are downloaded from HuggingFace Hub on first use.
+# Requires transformers + torch (already present via openai-whisper).
+sentence-transformers==3.0.1
+
+# ML toolkit — scikit-learn logistic regression is used by prediction_service
+# to estimate interview success probability from session score features.
+# Trained on synthetic data at module load time (no external data required).
+scikit-learn==1.5.2

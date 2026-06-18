@@ -1,12 +1,19 @@
 import type {
   AnalyticsOverviewResponse,
   AudioResponseResponse,
+  BenchmarkResponse,
+  CoachingPlanResponse,
   ConversationTurnResponse,
+  EndInterviewResponse,
   FollowUpQuestionResponse,
   FollowUpRequest,
   InterviewAnalysisResponse,
+  InterviewPredictionResponse,
+  LiveInterviewSessionResponse,
   ProcessingStatusResponse,
   QuestionResponse,
+  RAGQuestionsResponse,
+  ResumeDocumentResponse,
   SessionCreate,
   SessionDetailResponse,
   SessionListResponse,
@@ -270,4 +277,134 @@ export function getReport(sessionId: string, token: string): Promise<SessionRepo
     {},
     token,
   );
+}
+
+// ---------------------------------------------------------------------------
+// Live Conversational AI Interviewer
+// ---------------------------------------------------------------------------
+
+export function startLiveInterview(
+  data: { job_role: string; job_description: string; max_turns: number },
+  token: string,
+): Promise<LiveInterviewSessionResponse> {
+  return request<LiveInterviewSessionResponse>(
+    '/api/v1/live-interviews/',
+    { method: 'POST', body: JSON.stringify(data) },
+    token,
+  );
+}
+
+export function nextLiveQuestion(
+  sessionId: string,
+  body: { response_text?: string; audio_response_id?: string },
+  token: string,
+): Promise<LiveInterviewSessionResponse> {
+  return request<LiveInterviewSessionResponse>(
+    `/api/v1/live-interviews/${sessionId}/next-question`,
+    { method: 'POST', body: JSON.stringify(body) },
+    token,
+  );
+}
+
+export function getLiveConversation(
+  sessionId: string,
+  token: string,
+): Promise<LiveInterviewSessionResponse> {
+  return request<LiveInterviewSessionResponse>(
+    `/api/v1/live-interviews/${sessionId}/conversation`,
+    {},
+    token,
+  );
+}
+
+export function endLiveInterview(
+  sessionId: string,
+  token: string,
+): Promise<EndInterviewResponse> {
+  return request<EndInterviewResponse>(
+    `/api/v1/live-interviews/${sessionId}/end`,
+    { method: 'POST' },
+    token,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Resume & RAG
+// ---------------------------------------------------------------------------
+
+export function uploadResume(file: File, token: string): Promise<ResumeDocumentResponse> {
+  const formData = new FormData();
+  formData.append('file', file);
+  return request<ResumeDocumentResponse>('/api/v1/documents/resume/upload', {
+    method: 'POST',
+    body: formData,
+  }, token);
+}
+
+export function getCurrentResume(token: string): Promise<ResumeDocumentResponse> {
+  return request<ResumeDocumentResponse>('/api/v1/documents/resume/current', {}, token);
+}
+
+export function generateRagQuestions(
+  sessionId: string,
+  count: number,
+  token: string,
+): Promise<RAGQuestionsResponse> {
+  return request<RAGQuestionsResponse>(
+    `/api/v1/documents/interviews/${sessionId}/generate-rag-questions`,
+    { method: 'POST', body: JSON.stringify({ count }) },
+    token,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Prediction & Coaching
+// ---------------------------------------------------------------------------
+
+export function generatePrediction(
+  sessionId: string,
+  token: string,
+): Promise<InterviewPredictionResponse> {
+  return request<InterviewPredictionResponse>(
+    `/api/v1/interviews/${sessionId}/predict`,
+    { method: 'POST' },
+    token,
+  );
+}
+
+export function getPrediction(
+  sessionId: string,
+  token: string,
+): Promise<InterviewPredictionResponse> {
+  return request<InterviewPredictionResponse>(
+    `/api/v1/interviews/${sessionId}/prediction`,
+    {},
+    token,
+  );
+}
+
+export function generateCoachingPlan(
+  sessionId: string,
+  token: string,
+): Promise<CoachingPlanResponse> {
+  return request<CoachingPlanResponse>(
+    `/api/v1/interviews/${sessionId}/coaching-plan`,
+    { method: 'POST' },
+    token,
+  );
+}
+
+export function getCoachingPlan(
+  sessionId: string,
+  token: string,
+): Promise<CoachingPlanResponse> {
+  return request<CoachingPlanResponse>(
+    `/api/v1/interviews/${sessionId}/coaching-plan`,
+    {},
+    token,
+  );
+}
+
+export function getBenchmarks(token: string): Promise<BenchmarkResponse> {
+  return request<BenchmarkResponse>('/api/v1/analytics/benchmarks', {}, token);
 }
