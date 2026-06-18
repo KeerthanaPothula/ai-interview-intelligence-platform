@@ -18,6 +18,7 @@ from app.config import get_settings
 from app.core.deps import get_current_user
 from app.database import get_db
 from app.models.analysis import AudioResponse
+from app.models.features import VoiceAnalysis
 from app.models.interview import Question
 from app.models.user import User
 from app.schemas.analysis import (
@@ -26,6 +27,7 @@ from app.schemas.analysis import (
     InterviewAnalysisResponse,
     TranscriptResponse,
 )
+from app.schemas.features import VoiceAnalysisResponse
 from app.services import interview_service, processing_service, upload_service
 
 router = APIRouter(
@@ -332,3 +334,40 @@ def get_analysis(
         raise HTTPException(status_code=404, detail="Analysis not found.")
 
     return InterviewAnalysisResponse.model_validate(response.analysis)
+
+
+@router.get(
+    "/responses/{response_id}/voice-analysis",
+    response_model=VoiceAnalysisResponse,
+    summary="Get the voice analytics for an audio response",
+)
+def get_voice_analysis(
+    response_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> VoiceAnalysisResponse:
+    """Return the librosa voice analytics produced for one audio response.
+
+    Returns HTTP 404 if the response does not exist, belongs to another user,
+    or has not yet been processed by the voice analytics engine.
+    """
+    response = (
+        db.query(AudioResponse)
+        .filter(
+            AudioResponse.id == response_id,
+            AudioResponse.user_id == current_user.id,
+        )
+        .first()
+    )
+    if response is None:
+        raise HTTPException(status_code=404, detail="Response not found.")
+
+    voice = (
+        db.query(VoiceAnalysis)
+        .filter(VoiceAnalysis.audio_response_id == response_id)
+        .first()
+    )
+    if voice is None:
+        raise HTTPException(status_code=404, detail="Voice analysis not found.")
+
+    return VoiceAnalysisResponse.model_validate(voice)

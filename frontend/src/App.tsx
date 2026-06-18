@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { AuthProvider } from './context/AuthContext';
+import { DashboardPage } from './pages/DashboardPage';
 import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
 import { SessionDetailPage } from './pages/SessionDetailPage';
@@ -16,6 +17,7 @@ export default function App() {
           <Route element={<Layout />}>
             <Route path="/" element={<SessionsListPage />} />
             <Route path="/sessions/:sessionId" element={<SessionDetailPage />} />
+            <Route path="/dashboard" element={<DashboardPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

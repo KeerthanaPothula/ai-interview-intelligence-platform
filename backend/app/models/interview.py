@@ -21,6 +21,7 @@ from app.database import Base
 
 if TYPE_CHECKING:
     from app.models.analysis import AudioResponse
+    from app.models.features import FollowUpQuestion, SessionReport
     from app.models.user import User
 
 # ---------------------------------------------------------------------------
@@ -146,6 +147,21 @@ class InterviewSession(Base):
         passive_deletes=True,
     )
 
+    follow_up_questions: Mapped[list[FollowUpQuestion]] = relationship(
+        "FollowUpQuestion",
+        back_populates="session",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="FollowUpQuestion.created_at",
+    )
+
+    report: Mapped[SessionReport | None] = relationship(
+        "SessionReport",
+        back_populates="session",
+        uselist=False,
+        passive_deletes=True,
+    )
+
     def __repr__(self) -> str:
         return (
             f"<InterviewSession id={self.id} "
@@ -218,6 +234,12 @@ class Question(Base):
     audio_responses: Mapped[list[AudioResponse]] = relationship(
         "AudioResponse",
         back_populates="question",
+        passive_deletes=True,
+    )
+
+    follow_up_questions: Mapped[list[FollowUpQuestion]] = relationship(
+        "FollowUpQuestion",
+        back_populates="original_question",
         passive_deletes=True,
     )
 

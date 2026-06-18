@@ -390,3 +390,154 @@ a {
 .status-error-text {
   color: var(--color-error-text);
 }
+
+/* ------------------------------------------------------------------ */
+/* Voice Analytics Card                                                 */
+/* ------------------------------------------------------------------ */
+
+.voice-analytics-card {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 1rem;
+  margin-top: 0.75rem;
+}
+
+.voice-analytics-card h3 {
+  margin-top: 0;
+}
+
+.voice-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.voice-metric-row {
+  display: flex;
+  justify-content: space-between;
+  background-color: var(--color-bg);
+  border-radius: 4px;
+  padding: 0.4rem 0.6rem;
+}
+
+.voice-metric-label {
+  color: var(--color-muted);
+}
+
+.voice-metric-value {
+  font-weight: 700;
+}
+
+.confidence-badge {
+  display: inline-block;
+  padding: 0.3rem 0.75rem;
+  border-radius: 20px;
+  font-weight: 700;
+  font-size: 0.9rem;
+  margin-bottom: 0.5rem;
+}
+
+.confidence-badge--high {
+  background-color: var(--color-success-bg);
+  color: var(--color-success-text);
+}
+
+.confidence-badge--mid {
+  background-color: var(--color-info-bg);
+  color: var(--color-info-text);
+}
+
+.confidence-badge--low {
+  background-color: var(--color-error-bg);
+  color: var(--color-error-text);
+}
+
+/* ------------------------------------------------------------------ */
+/* Analytics Dashboard                                                  */
+/* ------------------------------------------------------------------ */
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.stat-card {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 1.25rem 1rem;
+  text-align: center;
+}
+
+.stat-value {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.stat-label {
+  font-size: 0.8rem;
+  color: var(--color-muted);
+  margin-top: 0.25rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.chart-card {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.chart-card h2 {
+  margin-top: 0;
+  font-size: 1.1rem;
+  color: var(--color-muted);
+}
+
+.empty-state {
+  text-align: center;
+  color: var(--color-muted);
+  padding: 2rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* Navigation                                                           */
+/* ------------------------------------------------------------------ */
+
+.app-nav {
+  display: flex;
+  gap: 1rem;
+}
+
+.nav-link {
+  color: var(--color-surface);
+  text-decoration: none;
+  font-size: 0.9rem;
+  opacity: 0.85;
+}
+
+.nav-link:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
+/* ------------------------------------------------------------------ */
+/* Responsive                                                           */
+/* ------------------------------------------------------------------ */
+
+@media (max-width: 600px) {
+  .stat-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .voice-metrics {
+    grid-template-columns: 1fr;
+  }
+}

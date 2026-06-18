@@ -14,6 +14,10 @@ export function Layout() {
         <Link to="/" className="app-title">
           AI Interview Intelligence Platform
         </Link>
+        <nav className="app-nav">
+          <Link to="/" className="nav-link">Sessions</Link>
+          <Link to="/dashboard" className="nav-link">Dashboard</Link>
+        </nav>
         <button type="button" onClick={logout}>
           Log out
         </button>

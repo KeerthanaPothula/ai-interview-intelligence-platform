@@ -1,11 +1,17 @@
 import { useEffect, useState } from 'react';
-import { getAnalysis, getTranscript } from '../api/client';
+import { getAnalysis, getTranscript, getVoiceAnalysis } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useProcessingStatus } from '../hooks/useProcessingStatus';
-import type { AudioResponseResponse, InterviewAnalysisResponse, TranscriptResponse } from '../api/types';
+import type {
+  AudioResponseResponse,
+  InterviewAnalysisResponse,
+  TranscriptResponse,
+  VoiceAnalysisResponse,
+} from '../api/types';
 import { AnalysisCard } from './AnalysisCard';
 import { ProcessingStatusCard } from './ProcessingStatusCard';
 import { TranscriptCard } from './TranscriptCard';
+import { VoiceAnalyticsCard } from './VoiceAnalyticsCard';
 
 export function ResponseCard({ response }: { response: AudioResponseResponse }) {
   const { token } = useAuth();
@@ -13,6 +19,7 @@ export function ResponseCard({ response }: { response: AudioResponseResponse }) 
 
   const [transcript, setTranscript] = useState<TranscriptResponse | null>(null);
   const [analysis, setAnalysis] = useState<InterviewAnalysisResponse | null>(null);
+  const [voiceAnalysis, setVoiceAnalysis] = useState<VoiceAnalysisResponse | null>(null);
   const [loadingResults, setLoadingResults] = useState(false);
   const [resultsError, setResultsError] = useState(false);
 
@@ -23,11 +30,16 @@ export function ResponseCard({ response }: { response: AudioResponseResponse }) 
     setLoadingResults(true);
     setResultsError(false);
 
-    Promise.all([getTranscript(response.id, token), getAnalysis(response.id, token)])
-      .then(([transcriptData, analysisData]) => {
+    Promise.all([
+      getTranscript(response.id, token),
+      getAnalysis(response.id, token),
+      getVoiceAnalysis(response.id, token).catch(() => null),
+    ])
+      .then(([transcriptData, analysisData, voiceData]) => {
         if (cancelled) return;
         setTranscript(transcriptData);
         setAnalysis(analysisData);
+        setVoiceAnalysis(voiceData);
       })
       .catch(() => {
         if (cancelled) return;
@@ -54,6 +66,7 @@ export function ResponseCard({ response }: { response: AudioResponseResponse }) 
         </p>
       )}
 
+      {voiceAnalysis && <VoiceAnalyticsCard voiceAnalysis={voiceAnalysis} />}
       {transcript && <TranscriptCard transcript={transcript} />}
       {analysis && <AnalysisCard analysis={analysis} />}
     </div>

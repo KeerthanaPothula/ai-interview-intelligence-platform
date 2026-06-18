@@ -25,7 +25,8 @@ from app.models.interview import (
     InterviewSession,
     Question,
 )
-from app.services import evaluation_service, transcription_service
+from app.models.features import VoiceAnalysis
+from app.services import evaluation_service, transcription_service, voice_analysis_service
 
 logger = logging.getLogger(__name__)
 
@@ -449,6 +450,86 @@ def _mark_failed(response_id: uuid.UUID, error_message: str) -> None:
 
 
 # =============================================================================
+# Voice analytics helper
+# =============================================================================
+
+
+def _try_insert_voice_analysis(
+    *,
+    response_id: uuid.UUID,
+    file_path: str,
+    transcript_text: str,
+    word_count: int,
+    duration_seconds: int | None,
+) -> None:
+    """Run voice analytics and persist the result — best-effort, never raises.
+
+    Skipped if a VoiceAnalysis row already exists for this response_id
+    (idempotent retry: prior attempt already completed this step).
+    Any exception (librosa missing, corrupt audio, DB error) is caught,
+    logged as a warning, and swallowed so the main pipeline continues.
+    """
+    db = SessionLocal()
+    try:
+        existing = (
+            db.query(VoiceAnalysis)
+            .filter(VoiceAnalysis.audio_response_id == response_id)
+            .first()
+        )
+        if existing is not None:
+            logger.info(
+                "VoiceAnalysis already exists, skipping: response_id=%s", response_id
+            )
+            return
+    finally:
+        db.close()
+
+    try:
+        metrics = voice_analysis_service.analyze_audio(
+            file_path=file_path,
+            transcript_text=transcript_text,
+            word_count=word_count,
+            duration_seconds=duration_seconds,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Voice analysis failed for response_id=%s (non-fatal): %s",
+            response_id,
+            exc,
+        )
+        return
+
+    db = SessionLocal()
+    try:
+        voice_row = VoiceAnalysis(
+            id=uuid.uuid4(),
+            audio_response_id=response_id,
+            speaking_rate=metrics["speaking_rate"],
+            average_pause_duration=metrics["average_pause_duration"],
+            total_pause_time=metrics["total_pause_time"],
+            long_pause_count=metrics["long_pause_count"],
+            filler_word_count=metrics["filler_word_count"],
+            energy_consistency=metrics["energy_consistency"],
+            confidence_score=metrics["confidence_score"],
+        )
+        db.add(voice_row)
+        db.commit()
+        logger.info(
+            "VoiceAnalysis created: response_id=%s, confidence=%d",
+            response_id,
+            metrics["confidence_score"],
+        )
+    except Exception as exc:
+        logger.warning(
+            "Failed to persist VoiceAnalysis for response_id=%s (non-fatal): %s",
+            response_id,
+            exc,
+        )
+    finally:
+        db.close()
+
+
+# =============================================================================
 # Main entrypoint
 # =============================================================================
 
@@ -538,6 +619,9 @@ def process_response(response_id: uuid.UUID) -> None:
     logger.info("process_response: pipeline started for response_id=%s", response_id)
 
     try:
+        # Compute full path once — needed for both Whisper and voice analytics.
+        full_path = str(Path(settings.UPLOAD_DIR) / file_path_rel)
+
         if existing_transcript is not None:
             # ------------------------------------------------------------
             # Idempotent retry path.
@@ -567,7 +651,6 @@ def process_response(response_id: uuid.UUID) -> None:
             # ------------------------------------------------------------
             # Whisper transcription (no DB session held)
             # ------------------------------------------------------------
-            full_path = str(Path(settings.UPLOAD_DIR) / file_path_rel)
 
             logger.info("Transcription started: response_id=%s", response_id)
             transcription_result = _transcribe_with_timeout(
@@ -618,6 +701,20 @@ def process_response(response_id: uuid.UUID) -> None:
                 response_id,
                 transcript_id,
             )
+
+        # ------------------------------------------------------------
+        # Voice analytics (no DB session held) — best-effort.
+        # Runs after Whisper so word_count/duration are available.
+        # Failures are logged and swallowed; they must not abort the
+        # evaluation pipeline.
+        # ------------------------------------------------------------
+        _try_insert_voice_analysis(
+            response_id=response_id,
+            file_path=full_path,
+            transcript_text=transcription_result["text"],
+            word_count=transcription_result["word_count"],
+            duration_seconds=transcription_result["duration_seconds"],
+        )
 
         # ------------------------------------------------------------
         # Evaluation (no DB session held)

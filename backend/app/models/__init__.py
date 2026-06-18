@@ -30,4 +30,4 @@
 # whether cross-model relationships are wired correctly.
 # ---------------------------------------------------------------------------
 
-from . import analysis, interview, user  # noqa: F401
+from . import analysis, features, interview, user  # noqa: F401

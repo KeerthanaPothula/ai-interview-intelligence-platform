@@ -23,6 +23,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
 if TYPE_CHECKING:
+    from app.models.features import VoiceAnalysis
     from app.models.interview import InterviewSession, Question
     from app.models.user import User
 
@@ -197,6 +198,13 @@ class AudioResponse(Base):
 
     analysis: Mapped[InterviewAnalysis | None] = relationship(
         "InterviewAnalysis",
+        back_populates="audio_response",
+        uselist=False,
+        passive_deletes=True,
+    )
+
+    voice_analysis: Mapped[VoiceAnalysis | None] = relationship(
+        "VoiceAnalysis",
         back_populates="audio_response",
         uselist=False,
         passive_deletes=True,

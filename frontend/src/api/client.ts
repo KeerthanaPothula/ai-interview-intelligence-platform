@@ -1,15 +1,22 @@
 import type {
+  AnalyticsOverviewResponse,
   AudioResponseResponse,
+  ConversationTurnResponse,
+  FollowUpQuestionResponse,
+  FollowUpRequest,
   InterviewAnalysisResponse,
   ProcessingStatusResponse,
   QuestionResponse,
   SessionCreate,
   SessionDetailResponse,
   SessionListResponse,
+  SessionReportResponse,
+  SessionTrendResponse,
   Token,
   TranscriptResponse,
   UserCreate,
   UserResponse,
+  VoiceAnalysisResponse,
 } from './types';
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
@@ -193,4 +200,74 @@ export function getAnalysis(
   token: string,
 ): Promise<InterviewAnalysisResponse> {
   return request<InterviewAnalysisResponse>(`/api/v1/responses/${responseId}/analysis`, {}, token);
+}
+
+export function getVoiceAnalysis(
+  responseId: string,
+  token: string,
+): Promise<VoiceAnalysisResponse> {
+  return request<VoiceAnalysisResponse>(
+    `/api/v1/responses/${responseId}/voice-analysis`,
+    {},
+    token,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Analytics Dashboard
+// ---------------------------------------------------------------------------
+
+export function getAnalyticsOverview(token: string): Promise<AnalyticsOverviewResponse> {
+  return request<AnalyticsOverviewResponse>('/api/v1/analytics/overview', {}, token);
+}
+
+export function getAnalyticsTrends(token: string): Promise<SessionTrendResponse[]> {
+  return request<SessionTrendResponse[]>('/api/v1/analytics/trends', {}, token);
+}
+
+// ---------------------------------------------------------------------------
+// Follow-Up Questions
+// ---------------------------------------------------------------------------
+
+export function generateFollowUp(
+  sessionId: string,
+  body: FollowUpRequest,
+  token: string,
+): Promise<FollowUpQuestionResponse> {
+  return request<FollowUpQuestionResponse>(
+    `/api/v1/interviews/${sessionId}/follow-up-question`,
+    { method: 'POST', body: JSON.stringify(body) },
+    token,
+  );
+}
+
+export function getConversationHistory(
+  sessionId: string,
+  token: string,
+): Promise<ConversationTurnResponse[]> {
+  return request<ConversationTurnResponse[]>(
+    `/api/v1/interviews/${sessionId}/conversation-history`,
+    {},
+    token,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Session Reports
+// ---------------------------------------------------------------------------
+
+export function generateReport(sessionId: string, token: string): Promise<SessionReportResponse> {
+  return request<SessionReportResponse>(
+    `/api/v1/interviews/${sessionId}/report/generate`,
+    { method: 'POST' },
+    token,
+  );
+}
+
+export function getReport(sessionId: string, token: string): Promise<SessionReportResponse> {
+  return request<SessionReportResponse>(
+    `/api/v1/interviews/${sessionId}/report`,
+    {},
+    token,
+  );
 }

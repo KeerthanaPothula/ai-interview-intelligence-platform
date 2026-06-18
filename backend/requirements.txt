@@ -124,3 +124,14 @@ black==24.10.0
 
 # Linter — covers flake8, isort, and more in a single fast tool
 ruff==0.8.1
+
+
+# -------------------------------------------------------------
+# Phase 16 — Voice Analytics Engine
+# -------------------------------------------------------------
+
+# Audio analysis library — librosa uses numpy/scipy (already present via torch)
+# to compute RMS energy, detect pauses, and measure speaking-rate metrics.
+# soundfile provides the audio file decoder backend; numba is optional but
+# greatly accelerates librosa's spectral transforms (JIT compilation).
+librosa==0.10.2

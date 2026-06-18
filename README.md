@@ -67,10 +67,32 @@ path.
 - Five AI-generated scores (overall, communication, technical, problem
   solving, confidence) plus strengths, weaknesses, and detailed feedback
 
+**Voice Analytics Engine** *(Phase 16)*
+- Librosa-based audio analysis pipeline: speaking rate (WPM), pause detection,
+  filler word counting (um/uh/like/you know/actually/basically), RMS energy
+  consistency, and a composite confidence score (0–100)
+- Runs as a best-effort step after Whisper — failures never abort the pipeline
+
+**AI Follow-Up Interviewer** *(Phase 16)*
+- Gemini generates targeted follow-up questions from a candidate's answer
+- `POST /interviews/{id}/follow-up-question` + `GET /interviews/{id}/conversation-history`
+
+**Analytics Dashboard** *(Phase 16)*
+- Score-trend Recharts line chart across sessions (overall, communication,
+  technical, problem solving)
+- Stat cards: total sessions, avg score, strongest/weakest skill, improvement delta
+
+**Session-Level Final Report** *(Phase 16)*
+- Gemini-generated holistic report: overall performance narrative, category
+  breakdown, strengths/weaknesses bullets, improvement plan, readiness level
+  (Beginner → Highly Competitive)
+- `POST /interviews/{id}/report/generate` + `GET /interviews/{id}/report`
+
 **Frontend**
 - React + TypeScript SPA: auth pages, session list/detail, question/upload
-  flow
+  flow, analytics dashboard (`/dashboard`)
 - Live processing-status polling (3s interval, stops on terminal state)
+- VoiceAnalyticsCard per response with confidence badge and metric grid
 - Generic, user-friendly error handling — raw API errors are never shown
 
 ---
@@ -83,7 +105,8 @@ flowchart LR
     FE -->|JWT Bearer| API[FastAPI Backend]
     API --> DB[(PostgreSQL)]
     API --> Whisper[Whisper\nTranscription]
-    API --> Gemini[Gemini API\nQuestions + Evaluation]
+    API --> Librosa[Librosa\nVoice Analytics]
+    API --> Gemini[Gemini API\nQuestions + Evaluation\n+ Follow-ups + Reports]
 ```
 
 This is a high-level view. The full request flow and the audio processing
@@ -97,10 +120,10 @@ pipeline (with status transitions) are diagrammed in
 | Layer | Technologies |
 |---|---|
 | **Backend** | FastAPI, SQLAlchemy 2.x, Alembic, Pydantic v2 / pydantic-settings, python-jose (JWT), bcrypt, Uvicorn |
-| **AI / ML** | Google Gemini (`google-genai`) for question generation & evaluation, OpenAI Whisper + PyTorch (CPU) for transcription |
+| **AI / ML** | Google Gemini (`google-genai`) for question generation, evaluation, follow-ups & session reports; OpenAI Whisper + PyTorch (CPU) for transcription; librosa for voice analytics |
 | **Database** | PostgreSQL 16 (SQLite for the test suite) |
 | **Frontend** | React 19, TypeScript, Vite, React Router v6 |
-| **Testing** | pytest + httpx (backend, 94 tests), Vitest + React Testing Library (frontend, 14 tests) |
+| **Testing** | pytest + httpx (backend, 128 tests), Vitest + React Testing Library (frontend, 24 tests) |
 | **Infrastructure** | Docker, Docker Compose (local), Render (Web Service + Static Site + managed PostgreSQL) |
 
 ---
