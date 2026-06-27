@@ -9,6 +9,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -108,6 +109,14 @@ class FollowUpQuestion(Base):
     """
 
     __tablename__ = "follow_up_questions"
+    __table_args__ = (
+        Index("ix_follow_up_questions_session_id", "session_id"),
+        Index("ix_follow_up_questions_original_question_id", "original_question_id"),
+        Index(
+            "ix_follow_up_questions_parent_audio_response_id",
+            "parent_audio_response_id",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
 

@@ -7,6 +7,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
 
 from app.config import get_settings
+from app.core.constants import API_V1_PREFIX
 from app.core.deps import get_current_user
 from app.database import get_db
 from app.models.analysis import (
@@ -21,7 +22,7 @@ from app.services import processing_service
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
-    prefix="/api/v1",
+    prefix=API_V1_PREFIX,
     tags=["processing"],
 )
 

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import (
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -53,6 +54,9 @@ class DocumentChunk(Base):
     """Stores chunked text with JSON-serialised embeddings (no pgvector required)."""
 
     __tablename__ = "document_chunks"
+    __table_args__ = (
+        Index("ix_document_chunks_resume_document_id", "resume_document_id"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
 
@@ -71,7 +75,9 @@ class DocumentChunk(Base):
     chunk_text: Mapped[str] = mapped_column(Text, nullable=False)
     embedding_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    source_type: Mapped[str] = mapped_column(String(50), nullable=False, default="resume")
+    source_type: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="resume"
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

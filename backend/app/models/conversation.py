@@ -8,6 +8,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -51,7 +52,9 @@ class LiveInterviewSession(Base):
 
     job_role: Mapped[str] = mapped_column(String(200), nullable=False)
     job_description: Mapped[str] = mapped_column(Text, nullable=False)
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default=_STATUS_ACTIVE)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=_STATUS_ACTIVE
+    )
     current_turn: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     max_turns: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
 
@@ -74,6 +77,9 @@ class LiveInterviewSession(Base):
 
 class ConversationTurn(Base):
     __tablename__ = "conversation_turns"
+    __table_args__ = (
+        Index("ix_conversation_turns_audio_response_id", "audio_response_id"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
 
@@ -88,7 +94,15 @@ class ConversationTurn(Base):
     difficulty_level: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
     response_text: Mapped[str | None] = mapped_column(Text, nullable=True)
-    audio_response_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    audio_response_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid,
+        ForeignKey(
+            "audio_responses.id",
+            ondelete="SET NULL",
+            name="fk_conversation_turns_audio_response_id",
+        ),
+        nullable=True,
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

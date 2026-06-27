@@ -4,35 +4,21 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
+from app.core.constants import API_V1_PREFIX
 from app.core.deps import get_current_user
+from app.core.exceptions import ResourceNotFound
 from app.database import get_db
 from app.models.analysis import AudioResponse, InterviewAnalysis, Transcript
 from app.models.features import SessionReport, VoiceAnalysis
-from app.models.interview import InterviewSession, Question
+from app.models.interview import Question
 from app.models.user import User
 from app.schemas.features import SessionReportResponse
-from app.services import report_service
+from app.services import interview_service, report_service
 
-router = APIRouter(prefix="/api/v1/interviews", tags=["Reports"])
-
-
-def _get_owned_session_or_404(
-    db: Session, session_id: uuid.UUID, user_id: uuid.UUID
-) -> InterviewSession:
-    session = (
-        db.query(InterviewSession)
-        .filter(
-            InterviewSession.id == session_id,
-            InterviewSession.user_id == user_id,
-        )
-        .first()
-    )
-    if session is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
-    return session
+router = APIRouter(prefix=f"{API_V1_PREFIX}/interviews", tags=["Reports"])
 
 
 @router.post(
@@ -46,7 +32,7 @@ def generate_report(
     db: Session = Depends(get_db),
 ) -> SessionReportResponse:
     """Generate (or regenerate) a holistic session report using Gemini."""
-    session = _get_owned_session_or_404(db, session_id, current_user.id)
+    session = interview_service.get_session_or_404(db, session_id, current_user.id)
 
     # Collect all questions and transcripts for the session.
     questions = (
@@ -69,9 +55,7 @@ def generate_report(
         if resp is None:
             continue
         transcript = (
-            db.query(Transcript)
-            .filter(Transcript.audio_response_id == resp.id)
-            .first()
+            db.query(Transcript).filter(Transcript.audio_response_id == resp.id).first()
         )
         questions_and_transcripts.append(
             {
@@ -104,10 +88,7 @@ def generate_report(
         .filter(AudioResponse.session_id == session_id)
         .all()
     )
-    voice_analytics = [
-        {"confidence_score": v.confidence_score}
-        for v in voice_rows
-    ]
+    voice_analytics = [{"confidence_score": v.confidence_score} for v in voice_rows]
 
     report_data = report_service.generate_session_report(
         job_role=session.job_role,
@@ -119,9 +100,7 @@ def generate_report(
 
     # Upsert: delete existing report if present, then insert fresh.
     existing = (
-        db.query(SessionReport)
-        .filter(SessionReport.session_id == session_id)
-        .first()
+        db.query(SessionReport).filter(SessionReport.session_id == session_id).first()
     )
     if existing is not None:
         db.delete(existing)
@@ -142,17 +121,14 @@ def get_report(
     db: Session = Depends(get_db),
 ) -> SessionReportResponse:
     """Retrieve the existing session report (404 if not yet generated)."""
-    _get_owned_session_or_404(db, session_id, current_user.id)
+    interview_service.get_session_or_404(db, session_id, current_user.id)
 
     report = (
-        db.query(SessionReport)
-        .filter(SessionReport.session_id == session_id)
-        .first()
+        db.query(SessionReport).filter(SessionReport.session_id == session_id).first()
     )
     if report is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No report found for this session. POST to /report/generate first.",
+        raise ResourceNotFound(
+            "No report found for this session. POST to /report/generate first."
         )
 
     return SessionReportResponse.model_validate(report)

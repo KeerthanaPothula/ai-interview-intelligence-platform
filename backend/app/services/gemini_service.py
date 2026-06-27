@@ -17,8 +17,6 @@ from app.models.interview import (
 
 logger = logging.getLogger(__name__)
 
-_GEMINI_MODEL = "gemini-2.0-flash"
-
 # Compiled once at module load — matches both ```json ... ``` and ``` ... ```
 # Gemini wraps JSON in markdown fences even when instructed not to. The fence
 # may use "json" as the language tag or no tag at all. The pattern uses
@@ -174,17 +172,18 @@ def generate_questions(
 
     Gemini 2.x compatibility:
         Uses client.models.generate_content() from the google-genai v2 SDK.
-        The model string "gemini-2.0-flash" is declared as a module constant
-        (_GEMINI_MODEL) so it can be updated in one place without touching
-        this function's signature. The SDK response always exposes .text for
-        text-mode generation; structured output (response_schema) is a future
-        option if stricter output validation is needed.
+        The model name comes from settings.GEMINI_MODEL (centralized config)
+        so it can be updated in one place without touching this function's
+        signature. The SDK response always exposes .text for text-mode
+        generation; structured output (response_schema) is a future option
+        if stricter output validation is needed.
     """
     prompt = _build_prompt(job_role, job_description, count)
+    model = get_settings().GEMINI_MODEL
 
     try:
         response = _client.models.generate_content(
-            model=_GEMINI_MODEL,
+            model=model,
             contents=prompt,
         )
         raw_text: str = response.text

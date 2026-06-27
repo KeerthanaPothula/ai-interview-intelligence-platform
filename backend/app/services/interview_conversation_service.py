@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-import json
 import logging
 
 import google.genai as genai
 
 from app.config import get_settings
+from app.core.ai_reliability import call_gemini_with_retry
 
 logger = logging.getLogger(__name__)
 
-_MODEL = "gemini-2.0-flash"
 _client: genai.Client | None = None
 
 
@@ -21,7 +20,7 @@ def _get_client() -> genai.Client:
         settings = get_settings()
         _client = genai.Client(
             api_key=settings.GEMINI_API_KEY,
-            http_options={"timeout": 30},
+            http_options={"timeout": settings.GEMINI_TIMEOUT_SECONDS},
         )
     return _client
 
@@ -29,6 +28,7 @@ def _get_client() -> genai.Client:
 def generate_opening_question(job_role: str, job_description: str) -> str:
     """Generate the first question for a live interview."""
     client = _get_client()
+    settings = get_settings()
     prompt = (
         f"You are an experienced technical interviewer for a {job_role} position.\n\n"
         f"Job Description:\n{job_description[:1000]}\n\n"
@@ -36,7 +36,12 @@ def generate_opening_question(job_role: str, job_description: str) -> str:
         "It should be a behavioral question suitable for the beginning of an interview. "
         "Return ONLY the question text, no preamble."
     )
-    response = client.models.generate_content(model=_MODEL, contents=prompt)
+    response = call_gemini_with_retry(
+        lambda: client.models.generate_content(
+            model=settings.GEMINI_MODEL, contents=prompt
+        ),
+        operation="Opening question generation",
+    )
     return response.text.strip()
 
 
@@ -53,6 +58,7 @@ def generate_follow_up_question(
     Returns (question_text, difficulty_level) where difficulty_level is 1-5.
     """
     client = _get_client()
+    settings = get_settings()
 
     difficulty = min(5, max(1, round(1 + (current_turn / max(max_turns - 1, 1)) * 4)))
 
@@ -83,7 +89,12 @@ def generate_follow_up_question(
         "edge cases, or specific technical challenges. "
         "Return ONLY the question text, no preamble or explanation."
     )
-    response = client.models.generate_content(model=_MODEL, contents=prompt)
+    response = call_gemini_with_retry(
+        lambda: client.models.generate_content(
+            model=settings.GEMINI_MODEL, contents=prompt
+        ),
+        operation="Follow-up interview question generation",
+    )
     return response.text.strip(), difficulty
 
 
@@ -94,6 +105,7 @@ def generate_interview_summary(
 ) -> str:
     """Generate a brief closing summary when the interview ends."""
     client = _get_client()
+    settings = get_settings()
 
     history_text = "\n".join(
         f"Q{t['turn_number']}: {t['question_text']}\n"
@@ -108,5 +120,10 @@ def generate_interview_summary(
         "highlight strengths and one area to work on. Be encouraging but honest. "
         "Return only the summary text."
     )
-    response = client.models.generate_content(model=_MODEL, contents=prompt)
+    response = call_gemini_with_retry(
+        lambda: client.models.generate_content(
+            model=settings.GEMINI_MODEL, contents=prompt
+        ),
+        operation="Interview summary generation",
+    )
     return response.text.strip()

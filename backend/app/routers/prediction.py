@@ -5,14 +5,15 @@ from __future__ import annotations
 import json
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from fastapi import APIRouter, Depends
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.constants import API_V1_PREFIX
+from app.core.exceptions import ResourceNotFound, ValidationError
 from app.database import get_db
 from app.models.analysis import AudioResponse, InterviewAnalysis
 from app.models.features import VoiceAnalysis, SessionReport
-from app.models.interview import InterviewSession
 from app.models.prediction import CoachingPlan, InterviewPrediction
 from app.routers.auth import get_current_user
 from app.schemas.prediction import (
@@ -20,33 +21,30 @@ from app.schemas.prediction import (
     CoachingPlanResponse,
     InterviewPredictionResponse,
 )
-from app.services import benchmark_service, career_coach_service, prediction_service
+from app.services import (
+    benchmark_service,
+    career_coach_service,
+    interview_service,
+    prediction_service,
+)
 from app.models.user import User
 
 router = APIRouter(tags=["Prediction & Coaching"])
 
 
-def _get_session_or_404(
-    session_id: uuid.UUID, user_id: uuid.UUID, db: Session
-) -> InterviewSession:
-    session = db.execute(
-        select(InterviewSession).where(
-            InterviewSession.id == session_id,
-            InterviewSession.user_id == user_id,
-        )
-    ).scalar_one_or_none()
-    if session is None:
-        raise HTTPException(status_code=404, detail="Interview session not found")
-    return session
-
-
 def _get_session_averages(session_id: uuid.UUID, db: Session) -> dict:
     """Aggregate score averages and voice metrics for a session."""
-    analyses = db.execute(
-        select(InterviewAnalysis)
-        .join(AudioResponse, InterviewAnalysis.audio_response_id == AudioResponse.id)
-        .where(AudioResponse.session_id == session_id)
-    ).scalars().all()
+    analyses = (
+        db.execute(
+            select(InterviewAnalysis)
+            .join(
+                AudioResponse, InterviewAnalysis.audio_response_id == AudioResponse.id
+            )
+            .where(AudioResponse.session_id == session_id)
+        )
+        .scalars()
+        .all()
+    )
 
     if not analyses:
         return {}
@@ -55,11 +53,15 @@ def _get_session_averages(session_id: uuid.UUID, db: Session) -> dict:
         clean = [float(v) for v in vals if v is not None]
         return sum(clean) / len(clean) if clean else 5.0
 
-    voices = db.execute(
-        select(VoiceAnalysis)
-        .join(AudioResponse, VoiceAnalysis.audio_response_id == AudioResponse.id)
-        .where(AudioResponse.session_id == session_id)
-    ).scalars().all()
+    voices = (
+        db.execute(
+            select(VoiceAnalysis)
+            .join(AudioResponse, VoiceAnalysis.audio_response_id == AudioResponse.id)
+            .where(AudioResponse.session_id == session_id)
+        )
+        .scalars()
+        .all()
+    )
 
     return {
         "overall_score": _avg([a.overall_score for a in analyses]),
@@ -73,7 +75,7 @@ def _get_session_averages(session_id: uuid.UUID, db: Session) -> dict:
 
 
 @router.post(
-    "/api/v1/interviews/{session_id}/predict",
+    f"{API_V1_PREFIX}/interviews/{{session_id}}/predict",
     response_model=InterviewPredictionResponse,
     status_code=201,
 )
@@ -83,24 +85,32 @@ def generate_prediction(
     current_user: User = Depends(get_current_user),
 ):
     """Generate a success probability prediction for this session."""
-    session = _get_session_or_404(session_id, current_user.id, db)
+    interview_service.get_session_or_404(db, session_id, current_user.id)
     metrics = _get_session_averages(session_id, db)
 
     if not metrics:
-        raise HTTPException(
-            status_code=422,
-            detail="No analyses found for this session. Process some responses first.",
+        raise ValidationError(
+            "No analyses found for this session. Process some responses first."
         )
 
     prob, outcome = prediction_service.predict_success(**metrics)
 
-    # Compute percentile vs all platform users
-    all_scores_stmt = (
-        select(InterviewAnalysis.overall_score)
+    # Compute percentile vs all platform users via COUNT aggregates instead of
+    # fetching every InterviewAnalysis row in the platform into Python.
+    user_score = metrics["overall_score"]
+    total_count = db.execute(
+        select(func.count(InterviewAnalysis.overall_score)).join(
+            AudioResponse, InterviewAnalysis.audio_response_id == AudioResponse.id
+        )
+    ).scalar_one()
+    below_count = db.execute(
+        select(func.count(InterviewAnalysis.overall_score))
         .join(AudioResponse, InterviewAnalysis.audio_response_id == AudioResponse.id)
+        .where(InterviewAnalysis.overall_score < user_score)
+    ).scalar_one()
+    percentile = prediction_service.compute_percentile_from_counts(
+        below_count, total_count
     )
-    all_scores = [float(s) for s in db.execute(all_scores_stmt).scalars().all() if s]
-    percentile = prediction_service.compute_percentile(metrics["overall_score"], all_scores)
 
     # Upsert
     existing = db.execute(
@@ -121,11 +131,11 @@ def generate_prediction(
     db.add(pred)
     db.commit()
     db.refresh(pred)
-    return pred
+    return InterviewPredictionResponse.model_validate(pred)
 
 
 @router.get(
-    "/api/v1/interviews/{session_id}/prediction",
+    f"{API_V1_PREFIX}/interviews/{{session_id}}/prediction",
     response_model=InterviewPredictionResponse,
 )
 def get_prediction(
@@ -133,17 +143,17 @@ def get_prediction(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _get_session_or_404(session_id, current_user.id, db)
+    interview_service.get_session_or_404(db, session_id, current_user.id)
     pred = db.execute(
         select(InterviewPrediction).where(InterviewPrediction.session_id == session_id)
     ).scalar_one_or_none()
     if pred is None:
-        raise HTTPException(status_code=404, detail="No prediction generated yet")
-    return pred
+        raise ResourceNotFound("No prediction generated yet.")
+    return InterviewPredictionResponse.model_validate(pred)
 
 
 @router.post(
-    "/api/v1/interviews/{session_id}/coaching-plan",
+    f"{API_V1_PREFIX}/interviews/{{session_id}}/coaching-plan",
     response_model=CoachingPlanResponse,
     status_code=201,
 )
@@ -153,14 +163,11 @@ def generate_coaching_plan(
     current_user: User = Depends(get_current_user),
 ):
     """Generate a personalised 7/14/30-day coaching plan via Gemini."""
-    session = _get_session_or_404(session_id, current_user.id, db)
+    session = interview_service.get_session_or_404(db, session_id, current_user.id)
     metrics = _get_session_averages(session_id, db)
 
     if not metrics:
-        raise HTTPException(
-            status_code=422,
-            detail="No analyses found for this session.",
-        )
+        raise ValidationError("No analyses found for this session.")
 
     # Load weaknesses from session report if available
     weaknesses: list[str] = []
@@ -210,7 +217,7 @@ def generate_coaching_plan(
 
 
 @router.get(
-    "/api/v1/interviews/{session_id}/coaching-plan",
+    f"{API_V1_PREFIX}/interviews/{{session_id}}/coaching-plan",
     response_model=CoachingPlanResponse,
 )
 def get_coaching_plan(
@@ -218,16 +225,16 @@ def get_coaching_plan(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _get_session_or_404(session_id, current_user.id, db)
+    interview_service.get_session_or_404(db, session_id, current_user.id)
     plan = db.execute(
         select(CoachingPlan).where(CoachingPlan.session_id == session_id)
     ).scalar_one_or_none()
     if plan is None:
-        raise HTTPException(status_code=404, detail="No coaching plan generated yet")
+        raise ResourceNotFound("No coaching plan generated yet.")
     return _coaching_response(plan)
 
 
-@router.get("/api/v1/analytics/benchmarks", response_model=BenchmarkResponse)
+@router.get(f"{API_V1_PREFIX}/analytics/benchmarks", response_model=BenchmarkResponse)
 def get_benchmarks(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),

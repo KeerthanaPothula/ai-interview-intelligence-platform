@@ -80,6 +80,12 @@ class Settings(BaseSettings):
 
     GEMINI_API_KEY: str = Field(..., min_length=1)
 
+    # Single source of truth for the Gemini model name used by every
+    # service. Previously each service hardcoded its own "gemini-2.0-flash"
+    # module constant; centralizing here means upgrading models is a
+    # one-line config change instead of a multi-file find-and-replace.
+    GEMINI_MODEL: str = "gemini-2.0-flash"
+
     # How many questions to request from Gemini per session.
     # ge=1 and le=20 enforce sensible bounds at startup.
     # The Gemini prompt receives this value directly as the requested count.
@@ -89,6 +95,17 @@ class Settings(BaseSettings):
     # gt=0 prevents an accidental zero that would make every request time out immediately.
     # The timeout applies to the full HTTP round-trip (connect + read).
     GEMINI_TIMEOUT_SECONDS: int = Field(default=30, gt=0)
+
+    # Maximum number of attempts (including the first) for a Gemini call
+    # before app.core.ai_reliability.call_gemini_with_retry gives up and
+    # raises AIServiceError. ge=1 so retries can be disabled (1 = no retry)
+    # without becoming an invalid value.
+    GEMINI_MAX_RETRIES: int = Field(default=3, ge=1)
+
+    # Base delay in seconds for exponential backoff between retries:
+    # attempt N waits backoff_base * 2^(N-1) seconds. gt=0 prevents a
+    # zero-delay busy-retry loop against a struggling upstream.
+    GEMINI_RETRY_BACKOFF_SECONDS: float = Field(default=1.0, gt=0)
 
     # ------------------------------------------------------------------
     # Whisper  (consumed from Week 2 onward)
@@ -124,6 +141,24 @@ class Settings(BaseSettings):
     # the job to be marked failed with a "timed out" error message.
     # gt=0: zero would immediately time out every transcription job.
     WHISPER_TIMEOUT_SECONDS: int = Field(default=300, gt=0)
+
+    # ------------------------------------------------------------------
+    # RAG (Retrieval-Augmented Generation)  — resume-personalised questions
+    # ------------------------------------------------------------------
+
+    # Word count per chunk when splitting resume/document text for embedding.
+    RAG_CHUNK_SIZE: int = Field(default=200, gt=0)
+
+    # Word overlap between consecutive chunks, to avoid losing context at
+    # chunk boundaries. Must be smaller than RAG_CHUNK_SIZE or every chunk
+    # would advance by zero (or a negative) word count.
+    RAG_CHUNK_OVERLAP: int = Field(default=50, ge=0)
+
+    @model_validator(mode="after")
+    def rag_overlap_must_be_smaller_than_chunk_size(self) -> "Settings":
+        if self.RAG_CHUNK_OVERLAP >= self.RAG_CHUNK_SIZE:
+            raise ValueError("RAG_CHUNK_OVERLAP must be smaller than RAG_CHUNK_SIZE.")
+        return self
 
     # ------------------------------------------------------------------
     # File Uploads  (consumed from Week 2 onward)

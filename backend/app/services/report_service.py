@@ -9,10 +9,9 @@ from typing import Any
 from google import genai
 
 from app.config import get_settings
+from app.core.ai_reliability import call_gemini_with_retry, parse_json_response
 
 logger = logging.getLogger(__name__)
-
-_MODEL = "gemini-2.0-flash"
 
 READINESS_LEVELS = [
     "Beginner",
@@ -27,7 +26,7 @@ def _build_client() -> genai.Client:
     settings = get_settings()
     return genai.Client(
         api_key=settings.GEMINI_API_KEY,
-        http_options={"timeout": 45},
+        http_options={"timeout": settings.GEMINI_TIMEOUT_SECONDS},
     )
 
 
@@ -69,6 +68,7 @@ def generate_session_report(
         strengths (JSON str), weaknesses (JSON str), improvement_plan (JSON str),
         readiness_level, model_used.
     """
+
     # ------------------------------------------------------------------
     # Aggregate numeric scores
     # ------------------------------------------------------------------
@@ -126,19 +126,16 @@ def generate_session_report(
     )
 
     client = _get_client()
-    response = client.models.generate_content(model=_MODEL, contents=prompt)
-    raw = response.text.strip()
-
-    # Strip accidental markdown fences
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"Gemini returned invalid JSON for session report: {exc}") from exc
+    settings = get_settings()
+    response = call_gemini_with_retry(
+        lambda: client.models.generate_content(
+            model=settings.GEMINI_MODEL, contents=prompt
+        ),
+        operation="Session report generation",
+    )
+    parsed = parse_json_response(
+        response.text, operation="Session report generation", expect=dict
+    )
 
     strengths = parsed.get("strengths", [])
     weaknesses = parsed.get("weaknesses", [])
@@ -165,5 +162,5 @@ def generate_session_report(
         "weaknesses": json.dumps(weaknesses),
         "improvement_plan": json.dumps(improvement_plan),
         "readiness_level": readiness_level,
-        "model_used": _MODEL,
+        "model_used": settings.GEMINI_MODEL,
     }

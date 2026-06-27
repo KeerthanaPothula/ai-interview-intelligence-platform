@@ -7,17 +7,17 @@ import logging
 from google import genai
 
 from app.config import get_settings
+from app.core.ai_reliability import call_gemini_with_retry
+from app.core.exceptions import AIServiceError
 
 logger = logging.getLogger(__name__)
-
-_MODEL = "gemini-2.0-flash"
 
 
 def _build_client() -> genai.Client:
     settings = get_settings()
     return genai.Client(
         api_key=settings.GEMINI_API_KEY,
-        http_options={"timeout": 30},
+        http_options={"timeout": settings.GEMINI_TIMEOUT_SECONDS},
     )
 
 
@@ -63,11 +63,22 @@ def generate_follow_up_question(
     )
 
     client = _get_client()
-    response = client.models.generate_content(model=_MODEL, contents=prompt)
+    settings = get_settings()
+    response = call_gemini_with_retry(
+        lambda: client.models.generate_content(
+            model=settings.GEMINI_MODEL, contents=prompt
+        ),
+        operation="Follow-up question generation",
+    )
     question_text = response.text.strip()
 
     if not question_text:
-        raise ValueError("Gemini returned an empty follow-up question")
+        logger.error(
+            "Gemini returned an empty follow-up question for job_role=%r", job_role
+        )
+        raise AIServiceError(
+            "Follow-up question generation returned an empty response. Please try again."
+        )
 
     logger.info(
         "Follow-up question generated for job_role=%r (length=%d chars)",

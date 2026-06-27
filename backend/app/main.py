@@ -43,6 +43,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
+from app.core.constants import API_V1_PREFIX
+from app.core.exceptions import register_exception_handlers
 from app.database import SessionLocal
 from app.routers.analytics import router as analytics_router
 from app.routers.auth import router as auth_router
@@ -196,11 +198,24 @@ app.add_middleware(
 )
 
 # ---------------------------------------------------------------------------
+# Global exception handling
+#
+# Registers handlers for AppException (and its subclasses — ResourceNotFound,
+# UnauthorizedAccess, ValidationError, AIServiceError, FileValidationError),
+# RequestValidationError, and a catch-all Exception handler that logs the
+# full traceback and returns a generic 500. FastAPI/Starlette dispatch to the
+# most specific registered handler, so existing `raise HTTPException(...)`
+# call sites throughout the routers are unaffected and keep using FastAPI's
+# built-in HTTPException handler.
+# ---------------------------------------------------------------------------
+register_exception_handlers(app)
+
+# ---------------------------------------------------------------------------
 # Routers
 # ---------------------------------------------------------------------------
 
-# auth_router has prefix="/auth"; adding "/api/v1" here → /api/v1/auth/...
-app.include_router(auth_router, prefix="/api/v1")
+# auth_router has prefix="/auth"; adding API_V1_PREFIX here → /api/v1/auth/...
+app.include_router(auth_router, prefix=API_V1_PREFIX)
 
 # interviews_router already has prefix="/api/v1/interviews" — no extra prefix.
 app.include_router(interviews_router)

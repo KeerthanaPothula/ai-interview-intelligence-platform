@@ -9,6 +9,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from app.core.constants import API_V1_PREFIX
+from app.core.exceptions import ResourceNotFound
 from app.database import get_db
 from app.models.conversation import (
     LIVE_SESSION_STATUS_ACTIVE,
@@ -26,7 +28,7 @@ from app.schemas.conversation import (
 from app.services import interview_conversation_service
 from app.models.user import User
 
-router = APIRouter(prefix="/api/v1/live-interviews", tags=["Live Interviews"])
+router = APIRouter(prefix=f"{API_V1_PREFIX}/live-interviews", tags=["Live Interviews"])
 
 
 def _get_session_or_404(
@@ -42,7 +44,7 @@ def _get_session_or_404(
     )
     result = db.execute(stmt).scalar_one_or_none()
     if result is None:
-        raise HTTPException(status_code=404, detail="Live interview session not found")
+        raise ResourceNotFound("Live interview session not found.")
     return result
 
 
@@ -79,11 +81,15 @@ def start_live_interview(
     db.commit()
     db.refresh(session)
 
-    turns = db.execute(
-        select(ConversationTurn)
-        .where(ConversationTurn.live_session_id == session.id)
-        .order_by(ConversationTurn.turn_number)
-    ).scalars().all()
+    turns = (
+        db.execute(
+            select(ConversationTurn)
+            .where(ConversationTurn.live_session_id == session.id)
+            .order_by(ConversationTurn.turn_number)
+        )
+        .scalars()
+        .all()
+    )
 
     data = LiveInterviewSessionResponse.model_validate(session)
     data.turns = [t for t in turns]
@@ -102,7 +108,9 @@ def next_question(
     session = _get_session_or_404(session_id, current_user.id, db)
 
     if session.status == LIVE_SESSION_STATUS_COMPLETED:
-        raise HTTPException(status_code=409, detail="Interview session is already completed")
+        raise HTTPException(
+            status_code=409, detail="Interview session is already completed"
+        )
 
     if session.current_turn >= session.max_turns:
         raise HTTPException(
@@ -111,11 +119,15 @@ def next_question(
         )
 
     # Save response to the current (last) turn
-    current_turns = db.execute(
-        select(ConversationTurn)
-        .where(ConversationTurn.live_session_id == session.id)
-        .order_by(ConversationTurn.turn_number)
-    ).scalars().all()
+    current_turns = (
+        db.execute(
+            select(ConversationTurn)
+            .where(ConversationTurn.live_session_id == session.id)
+            .order_by(ConversationTurn.turn_number)
+        )
+        .scalars()
+        .all()
+    )
 
     if current_turns and (body.response_text or body.audio_response_id):
         last_turn = current_turns[-1]
@@ -133,12 +145,14 @@ def next_question(
         for t in current_turns
     ]
 
-    next_q_text, difficulty = interview_conversation_service.generate_follow_up_question(
-        job_role=session.job_role,
-        job_description=session.job_description,
-        conversation_history=history,
-        current_turn=session.current_turn,
-        max_turns=session.max_turns,
+    next_q_text, difficulty = (
+        interview_conversation_service.generate_follow_up_question(
+            job_role=session.job_role,
+            job_description=session.job_description,
+            conversation_history=history,
+            current_turn=session.current_turn,
+            max_turns=session.max_turns,
+        )
     )
 
     new_turn_number = session.current_turn + 1
@@ -152,11 +166,15 @@ def next_question(
     session.current_turn = new_turn_number
     db.commit()
 
-    all_turns = db.execute(
-        select(ConversationTurn)
-        .where(ConversationTurn.live_session_id == session.id)
-        .order_by(ConversationTurn.turn_number)
-    ).scalars().all()
+    all_turns = (
+        db.execute(
+            select(ConversationTurn)
+            .where(ConversationTurn.live_session_id == session.id)
+            .order_by(ConversationTurn.turn_number)
+        )
+        .scalars()
+        .all()
+    )
 
     data = LiveInterviewSessionResponse.model_validate(session)
     data.turns = list(all_turns)
@@ -173,11 +191,15 @@ def get_conversation(
     """Get the full conversation history for a live interview session."""
     session = _get_session_or_404(session_id, current_user.id, db)
 
-    turns = db.execute(
-        select(ConversationTurn)
-        .where(ConversationTurn.live_session_id == session.id)
-        .order_by(ConversationTurn.turn_number)
-    ).scalars().all()
+    turns = (
+        db.execute(
+            select(ConversationTurn)
+            .where(ConversationTurn.live_session_id == session.id)
+            .order_by(ConversationTurn.turn_number)
+        )
+        .scalars()
+        .all()
+    )
 
     data = LiveInterviewSessionResponse.model_validate(session)
     data.turns = list(turns)
@@ -195,16 +217,26 @@ def end_interview(
     session = _get_session_or_404(session_id, current_user.id, db)
 
     if session.status == LIVE_SESSION_STATUS_COMPLETED:
-        raise HTTPException(status_code=409, detail="Interview session is already completed")
+        raise HTTPException(
+            status_code=409, detail="Interview session is already completed"
+        )
 
-    turns = db.execute(
-        select(ConversationTurn)
-        .where(ConversationTurn.live_session_id == session.id)
-        .order_by(ConversationTurn.turn_number)
-    ).scalars().all()
+    turns = (
+        db.execute(
+            select(ConversationTurn)
+            .where(ConversationTurn.live_session_id == session.id)
+            .order_by(ConversationTurn.turn_number)
+        )
+        .scalars()
+        .all()
+    )
 
     history = [
-        {"turn_number": t.turn_number, "question_text": t.question_text, "response_text": t.response_text}
+        {
+            "turn_number": t.turn_number,
+            "question_text": t.question_text,
+            "response_text": t.response_text,
+        }
         for t in turns
     ]
 

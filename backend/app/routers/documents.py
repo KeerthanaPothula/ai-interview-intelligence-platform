@@ -10,9 +10,14 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
+from app.core.constants import API_V1_PREFIX
 from app.database import get_db
 from app.models.documents import DocumentChunk, ResumeDocument
-from app.models.interview import InterviewSession, Question, QUESTION_SOURCE_AI_GENERATED
+from app.models.interview import (
+    InterviewSession,
+    Question,
+    QUESTION_SOURCE_AI_GENERATED,
+)
 from app.routers.auth import get_current_user
 from app.schemas.documents import (
     RAGQuestionsRequest,
@@ -23,7 +28,7 @@ from app.schemas.documents import (
 from app.services import document_extraction_service, rag_service
 from app.models.user import User
 
-router = APIRouter(prefix="/api/v1/documents", tags=["Documents"])
+router = APIRouter(prefix=f"{API_V1_PREFIX}/documents", tags=["Documents"])
 
 _ALLOWED_MIME = {
     "application/pdf",
@@ -114,10 +119,13 @@ def get_current_resume(
     if doc is None:
         raise HTTPException(status_code=404, detail="No resume uploaded yet")
 
-    chunk_count = db.execute(
-        select(DocumentChunk)
-        .where(DocumentChunk.resume_document_id == doc.id)
-    ).scalars().all()
+    chunk_count = (
+        db.execute(
+            select(DocumentChunk).where(DocumentChunk.resume_document_id == doc.id)
+        )
+        .scalars()
+        .all()
+    )
 
     resp = ResumeDocumentResponse.model_validate(doc)
     resp.chunk_count = len(chunk_count)

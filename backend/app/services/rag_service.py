@@ -11,14 +11,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
+from app.core.ai_reliability import call_gemini_with_retry, parse_json_response
 from app.models.documents import DocumentChunk
 from app.services import embedding_service
 
 logger = logging.getLogger(__name__)
 
-_MODEL = "gemini-2.0-flash"
-_CHUNK_SIZE = 200
-_CHUNK_OVERLAP = 50
 _client: genai.Client | None = None
 
 
@@ -28,13 +26,21 @@ def _get_client() -> genai.Client:
         settings = get_settings()
         _client = genai.Client(
             api_key=settings.GEMINI_API_KEY,
-            http_options={"timeout": 30},
+            http_options={"timeout": settings.GEMINI_TIMEOUT_SECONDS},
         )
     return _client
 
 
-def chunk_text(text: str, chunk_size: int = _CHUNK_SIZE, overlap: int = _CHUNK_OVERLAP) -> list[str]:
+def chunk_text(
+    text: str,
+    chunk_size: int | None = None,
+    overlap: int | None = None,
+) -> list[str]:
     """Split text into overlapping word-count chunks."""
+    settings = get_settings()
+    chunk_size = chunk_size if chunk_size is not None else settings.RAG_CHUNK_SIZE
+    overlap = overlap if overlap is not None else settings.RAG_CHUNK_OVERLAP
+
     words = text.split()
     if not words:
         return []
@@ -62,7 +68,9 @@ def store_chunks(
             embedding = embedding_service.encode_text(chunk_text_str)
             embedding_json = json.dumps(embedding)
         except Exception:
-            logger.warning("Embedding failed for chunk %d — storing without embedding", idx)
+            logger.warning(
+                "Embedding failed for chunk %d — storing without embedding", idx
+            )
             embedding_json = None
 
         chunk = DocumentChunk(
@@ -125,7 +133,9 @@ def generate_rag_questions(
     """Generate personalised interview questions from retrieved resume context."""
     client = _get_client()
 
-    context = "\n\n".join(f"[Resume excerpt {i + 1}]: {chunk}" for i, chunk in enumerate(relevant_chunks))
+    context = "\n\n".join(
+        f"[Resume excerpt {i + 1}]: {chunk}" for i, chunk in enumerate(relevant_chunks)
+    )
 
     prompt = (
         f"You are an expert technical interviewer hiring for a {job_role}.\n\n"
@@ -139,12 +149,16 @@ def generate_rag_questions(
         '[{"body": "question text", "category": "technical|behavioral|situational", "sequence_order": 1}, ...]'
     )
 
-    response = client.models.generate_content(model=_MODEL, contents=prompt)
-    raw = response.text.strip()
-    if raw.startswith("```"):
-        raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-
-    questions = json.loads(raw)
+    settings = get_settings()
+    response = call_gemini_with_retry(
+        lambda: client.models.generate_content(
+            model=settings.GEMINI_MODEL, contents=prompt
+        ),
+        operation="RAG question generation",
+    )
+    questions = parse_json_response(
+        response.text, operation="RAG question generation", expect=list
+    )
     for i, q in enumerate(questions):
         q["sequence_order"] = i + 1
         q.setdefault("category", "behavioral")

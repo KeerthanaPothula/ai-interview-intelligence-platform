@@ -48,7 +48,9 @@ def _build_model():
             + noise
         )
         labels.append(1 if score >= 5.5 else 0)
-        features.append([overall, comm, tech, problem, confidence, speaking_rate, fillers])
+        features.append(
+            [overall, comm, tech, problem, confidence, speaking_rate, fillers]
+        )
 
     X = np.array(features, dtype=np.float32)
     y = np.array(labels, dtype=np.int32)
@@ -88,8 +90,17 @@ def predict_success(
 
     clf, scaler = _get_model()
     features = np.array(
-        [[overall_score, communication_score, technical_score, problem_solving_score,
-          avg_confidence, avg_speaking_rate, avg_filler_words]],
+        [
+            [
+                overall_score,
+                communication_score,
+                technical_score,
+                problem_solving_score,
+                avg_confidence,
+                avg_speaking_rate,
+                avg_filler_words,
+            ]
+        ],
         dtype=np.float32,
     )
     features_scaled = scaler.transform(features)
@@ -112,4 +123,15 @@ def compute_percentile(user_score: float, all_scores: list[float]) -> float:
     if not all_scores:
         return 50.0
     below = sum(1 for s in all_scores if s < user_score)
-    return round(100.0 * below / len(all_scores), 1)
+    return compute_percentile_from_counts(below, len(all_scores))
+
+
+def compute_percentile_from_counts(below: int, total: int) -> float:
+    """Return percentile rank (0-100) given a precomputed below/total count.
+
+    Lets callers compute `below` and `total` via a SQL aggregate (COUNT)
+    instead of fetching every row into Python just to count them.
+    """
+    if not total:
+        return 50.0
+    return round(100.0 * below / total, 1)

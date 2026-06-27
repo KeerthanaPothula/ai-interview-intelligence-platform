@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
+from app.core.constants import API_V1_PREFIX
 from app.core.deps import get_current_user
+from app.core.pagination import PaginationParams, pagination_params
 from app.database import get_db
 from app.models.interview import SESSION_STATUS_DRAFT
 from app.models.user import User
@@ -19,7 +21,7 @@ from app.schemas.interview import (
 from app.services import interview_service, question_service
 
 router = APIRouter(
-    prefix="/api/v1/interviews",
+    prefix=f"{API_V1_PREFIX}/interviews",
     tags=["Interviews"],
 )
 
@@ -59,10 +61,7 @@ def create_session(
     summary="List the authenticated user's interview sessions",
 )
 def list_sessions(
-    skip: int = Query(default=0, ge=0, description="Number of sessions to skip."),
-    limit: int = Query(
-        default=20, ge=1, le=100, description="Maximum sessions to return."
-    ),
+    pagination: PaginationParams = Depends(pagination_params),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[SessionListResponse]:
@@ -75,7 +74,7 @@ def list_sessions(
     Authentication: Bearer token required.
     """
     sessions = interview_service.list_sessions(
-        db, current_user.id, skip=skip, limit=limit
+        db, current_user.id, skip=pagination.skip, limit=pagination.limit
     )
     return [SessionListResponse.model_validate(s) for s in sessions]
 

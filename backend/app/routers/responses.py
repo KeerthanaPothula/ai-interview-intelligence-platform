@@ -15,6 +15,7 @@ from fastapi import (
 from sqlalchemy.orm import Session, joinedload
 
 from app.config import get_settings
+from app.core.constants import API_V1_PREFIX
 from app.core.deps import get_current_user
 from app.database import get_db
 from app.models.analysis import AudioResponse
@@ -31,7 +32,7 @@ from app.schemas.features import VoiceAnalysisResponse
 from app.services import interview_service, processing_service, upload_service
 
 router = APIRouter(
-    prefix="/api/v1",
+    prefix=API_V1_PREFIX,
     tags=["Responses"],
 )
 

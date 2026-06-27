@@ -13,8 +13,6 @@ from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-_GEMINI_MODEL = "gemini-2.0-flash"
-
 # Same fence pattern as gemini_service — Gemini wraps JSON in markdown fences
 # even when instructed not to. re.DOTALL allows the inner content to span lines.
 _FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
@@ -129,7 +127,9 @@ def _normalize_score(key: str, raw: object) -> float:
     try:
         score = round(float(raw), 1)  # type: ignore[arg-type]
     except (TypeError, ValueError):
-        logger.error("Score field '%s' is not numeric: type=%s", key, type(raw).__name__)
+        logger.error(
+            "Score field '%s' is not numeric: type=%s", key, type(raw).__name__
+        )
         raise HTTPException(
             status_code=502,
             detail=f"Evaluation returned a non-numeric value for '{key}'.",
@@ -187,13 +187,14 @@ def generate_evaluation(
     )
 
     prompt = _build_prompt(transcript_text, question, job_role, job_description)
+    model = get_settings().GEMINI_MODEL
 
     # ------------------------------------------------------------------
     # Gemini call — same error handling pattern as gemini_service
     # ------------------------------------------------------------------
     try:
         response = _client.models.generate_content(
-            model=_GEMINI_MODEL,
+            model=model,
             contents=prompt,
         )
         raw_text: str = response.text
@@ -278,7 +279,8 @@ def generate_evaluation(
         isinstance(item, str) for item in strengths_raw
     ):
         logger.error(
-            "Gemini evaluation: 'strengths' is not a list of strings (role=%s)", job_role
+            "Gemini evaluation: 'strengths' is not a list of strings (role=%s)",
+            job_role,
         )
         raise HTTPException(
             status_code=502,
@@ -289,7 +291,8 @@ def generate_evaluation(
         isinstance(item, str) for item in weaknesses_raw
     ):
         logger.error(
-            "Gemini evaluation: 'weaknesses' is not a list of strings (role=%s)", job_role
+            "Gemini evaluation: 'weaknesses' is not a list of strings (role=%s)",
+            job_role,
         )
         raise HTTPException(
             status_code=502,
@@ -313,7 +316,7 @@ def generate_evaluation(
     logger.info(
         "Evaluation complete: role=%s, model=%s, overall=%.1f",
         job_role,
-        _GEMINI_MODEL,
+        model,
         scores["overall_score"],
     )
 
@@ -322,5 +325,5 @@ def generate_evaluation(
         "strengths": json.dumps(strengths_raw),
         "weaknesses": json.dumps(weaknesses_raw),
         "detailed_feedback": detailed_feedback,
-        "model_used": _GEMINI_MODEL,
+        "model_used": model,
     }

@@ -5,6 +5,7 @@ import uuid
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from app.core.exceptions import ResourceNotFound
 from app.models.interview import (
     InterviewSession,
     SESSION_STATUS_DRAFT,
@@ -63,7 +64,7 @@ def get_session_or_404(
         .first()
     )
     if session is None:
-        raise HTTPException(status_code=404, detail="Session not found.")
+        raise ResourceNotFound("Session not found.")
     return session
 
 

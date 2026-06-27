@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.core.constants import API_V1_PREFIX
 from app.core.deps import get_current_user
 from app.database import get_db
 from app.models.analysis import AudioResponse, InterviewAnalysis
@@ -15,7 +16,7 @@ from app.models.interview import InterviewSession
 from app.models.user import User
 from app.schemas.features import AnalyticsOverviewResponse, SessionTrendResponse
 
-router = APIRouter(prefix="/api/v1/analytics", tags=["Analytics"])
+router = APIRouter(prefix=f"{API_V1_PREFIX}/analytics", tags=["Analytics"])
 
 
 @router.get("/overview", response_model=AnalyticsOverviewResponse)
@@ -27,9 +28,7 @@ def get_analytics_overview(
     user_id: uuid.UUID = current_user.id
 
     total_sessions = (
-        db.query(InterviewSession)
-        .filter(InterviewSession.user_id == user_id)
-        .count()
+        db.query(InterviewSession).filter(InterviewSession.user_id == user_id).count()
     )
     completed_sessions = (
         db.query(InterviewSession)
@@ -82,7 +81,9 @@ def get_analytics_overview(
     if total_responses_analyzed >= 2:
         base_q = (
             db.query(InterviewAnalysis.overall_score, InterviewAnalysis.created_at)
-            .join(AudioResponse, InterviewAnalysis.audio_response_id == AudioResponse.id)
+            .join(
+                AudioResponse, InterviewAnalysis.audio_response_id == AudioResponse.id
+            )
             .filter(AudioResponse.user_id == user_id)
             .order_by(InterviewAnalysis.created_at)
         )
@@ -128,7 +129,9 @@ def get_analytics_trends(
                 func.avg(InterviewAnalysis.problem_solving_score).label("ps"),
                 func.avg(InterviewAnalysis.confidence_score).label("conf"),
             )
-            .join(AudioResponse, InterviewAnalysis.audio_response_id == AudioResponse.id)
+            .join(
+                AudioResponse, InterviewAnalysis.audio_response_id == AudioResponse.id
+            )
             .filter(AudioResponse.session_id == session.id)
             .one()
         )

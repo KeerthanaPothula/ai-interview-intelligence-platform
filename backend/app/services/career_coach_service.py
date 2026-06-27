@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-import json
 import logging
 
 import google.genai as genai
 
 from app.config import get_settings
+from app.core.ai_reliability import call_gemini_with_retry, parse_json_response
 
 logger = logging.getLogger(__name__)
 
-_MODEL = "gemini-2.0-flash"
 _client: genai.Client | None = None
 
 
@@ -21,7 +20,7 @@ def _get_client() -> genai.Client:
         settings = get_settings()
         _client = genai.Client(
             api_key=settings.GEMINI_API_KEY,
-            http_options={"timeout": 30},
+            http_options={"timeout": settings.GEMINI_TIMEOUT_SECONDS},
         )
     return _client
 
@@ -68,11 +67,15 @@ def generate_coaching_plan(
         "}"
     )
 
-    response = client.models.generate_content(model=_MODEL, contents=prompt)
-    raw = response.text.strip()
-    if raw.startswith("```"):
-        raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-
-    parsed = json.loads(raw)
-    parsed["model_used"] = _MODEL
+    settings = get_settings()
+    response = call_gemini_with_retry(
+        lambda: client.models.generate_content(
+            model=settings.GEMINI_MODEL, contents=prompt
+        ),
+        operation="Coaching plan generation",
+    )
+    parsed = parse_json_response(
+        response.text, operation="Coaching plan generation", expect=dict
+    )
+    parsed["model_used"] = settings.GEMINI_MODEL
     return parsed
