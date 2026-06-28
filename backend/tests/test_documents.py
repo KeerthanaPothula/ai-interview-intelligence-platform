@@ -4,14 +4,37 @@ import io
 import json
 import uuid
 
+from app.config import get_settings
 
-_EXTRACTED_TEXT = "Experienced Python engineer with 5 years of FastAPI and PostgreSQL expertise."
+_EXTRACTED_TEXT = (
+    "Experienced Python engineer with 5 years of FastAPI and PostgreSQL expertise."
+)
 _RAG_QUESTIONS = [
-    {"body": "Tell me about your FastAPI experience.", "category": "technical", "sequence_order": 1},
-    {"body": "How have you optimised PostgreSQL queries?", "category": "technical", "sequence_order": 2},
-    {"body": "Describe a challenging project.", "category": "behavioral", "sequence_order": 3},
-    {"body": "How do you handle deadlines?", "category": "situational", "sequence_order": 4},
-    {"body": "Walk me through a system you designed.", "category": "technical", "sequence_order": 5},
+    {
+        "body": "Tell me about your FastAPI experience.",
+        "category": "technical",
+        "sequence_order": 1,
+    },
+    {
+        "body": "How have you optimised PostgreSQL queries?",
+        "category": "technical",
+        "sequence_order": 2,
+    },
+    {
+        "body": "Describe a challenging project.",
+        "category": "behavioral",
+        "sequence_order": 3,
+    },
+    {
+        "body": "How do you handle deadlines?",
+        "category": "situational",
+        "sequence_order": 4,
+    },
+    {
+        "body": "Walk me through a system you designed.",
+        "category": "technical",
+        "sequence_order": 5,
+    },
 ]
 
 
@@ -79,6 +102,59 @@ def test_upload_resume_requires_auth(client):
     assert resp.status_code == 401
 
 
+def test_upload_resume_spoofed_content_returns_422(client, auth_headers):
+    """Content-Type claims application/pdf but the bytes don't start with
+    the PDF magic bytes (%PDF) — the Phase 3 magic-byte check must reject
+    this even though the declared MIME type passed the allow-list check."""
+    spoofed = io.BytesIO(b"not actually a pdf file" + b"x" * 2048)
+    resp = client.post(
+        "/api/v1/documents/resume/upload",
+        files={"file": ("resume.pdf", spoofed, "application/pdf")},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 422
+
+
+def test_upload_resume_oversized_returns_413(client, auth_headers, monkeypatch):
+    monkeypatch.setenv("MAX_RESUME_UPLOAD_SIZE_MB", "1")
+    get_settings.cache_clear()
+
+    oversized = io.BytesIO(b"%PDF-1.4 " + b"x" * (2 * 1024 * 1024))
+    resp = client.post(
+        "/api/v1/documents/resume/upload",
+        files={"file": ("resume.pdf", oversized, "application/pdf")},
+        headers=auth_headers,
+    )
+
+    get_settings.cache_clear()
+    assert resp.status_code == 413
+
+
+def test_upload_resume_sanitizes_path_traversal_filename(
+    client, auth_headers, upload_dir, monkeypatch
+):
+    monkeypatch.setattr(
+        "app.routers.documents.document_extraction_service.extract_text",
+        _mock_extract,
+    )
+    monkeypatch.setattr(
+        "app.routers.documents.rag_service.chunk_text", lambda text, **kw: [text]
+    )
+    monkeypatch.setattr(
+        "app.routers.documents.rag_service.store_chunks", lambda **kw: 1
+    )
+
+    resp = client.post(
+        "/api/v1/documents/resume/upload",
+        files={"file": ("../../etc/passwd.pdf", _make_pdf(), "application/pdf")},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 201, resp.text
+    data = resp.json()
+    assert "/" not in data["filename"]
+    assert ".." not in data["filename"]
+
+
 # ---------------------------------------------------------------------------
 # GET /api/v1/documents/resume/current
 # ---------------------------------------------------------------------------
@@ -94,8 +170,12 @@ def test_get_current_resume_after_upload(client, auth_headers, upload_dir, monke
         "app.routers.documents.document_extraction_service.extract_text",
         _mock_extract,
     )
-    monkeypatch.setattr("app.routers.documents.rag_service.chunk_text", lambda text, **kw: [text])
-    monkeypatch.setattr("app.routers.documents.rag_service.store_chunks", lambda **kw: 1)
+    monkeypatch.setattr(
+        "app.routers.documents.rag_service.chunk_text", lambda text, **kw: [text]
+    )
+    monkeypatch.setattr(
+        "app.routers.documents.rag_service.store_chunks", lambda **kw: 1
+    )
 
     client.post(
         "/api/v1/documents/resume/upload",
@@ -126,8 +206,12 @@ def test_generate_rag_questions_success(
         "app.routers.documents.document_extraction_service.extract_text",
         _mock_extract,
     )
-    monkeypatch.setattr("app.routers.documents.rag_service.chunk_text", lambda text, **kw: [text])
-    monkeypatch.setattr("app.routers.documents.rag_service.store_chunks", lambda **kw: 1)
+    monkeypatch.setattr(
+        "app.routers.documents.rag_service.chunk_text", lambda text, **kw: [text]
+    )
+    monkeypatch.setattr(
+        "app.routers.documents.rag_service.store_chunks", lambda **kw: 1
+    )
     monkeypatch.setattr(
         "app.routers.documents.rag_service.retrieve_relevant_chunks",
         lambda **kw: [_EXTRACTED_TEXT],

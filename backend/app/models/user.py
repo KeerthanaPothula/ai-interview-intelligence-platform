@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, String, Uuid, func
+from sqlalchemy import DateTime, Integer, String, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from app.models.conversation import LiveInterviewSession
     from app.models.documents import DocumentChunk, ResumeDocument
     from app.models.interview import InterviewSession
+    from app.models.refresh_token import RefreshToken
 
 
 class User(Base):
@@ -131,6 +132,63 @@ class User(Base):
         comment="UTC timestamp of account creation. Set by the database.",
     )
 
+    # ------------------------------------------------------------------
+    # Phase 3 — Login protection (brute-force / lockout)
+    #
+    # failed_login_attempts counts consecutive wrong-password attempts
+    # since the last successful login or lockout. It resets to 0 on
+    # every successful login and every time a new lockout is applied.
+    #
+    # locked_until: when set and in the future, login is rejected with
+    # HTTP 423 regardless of whether the supplied password is correct.
+    # Null means the account is not currently locked.
+    #
+    # lockout_count tracks how many times this account has been locked,
+    # ever. auth_service uses it to compute progressive backoff:
+    # duration doubles with each successive lockout, capped by
+    # Settings.ACCOUNT_LOCKOUT_MAX_DURATION_MINUTES.
+    # ------------------------------------------------------------------
+    failed_login_attempts: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+        comment="Consecutive failed login attempts since last success or lockout.",
+    )
+
+    locked_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="If set and in the future, login is rejected (account locked).",
+    )
+
+    lockout_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+        comment="Total number of times this account has been locked. Drives "
+        "progressive lockout-duration backoff.",
+    )
+
+    # ------------------------------------------------------------------
+    # Phase 3 — JWT token versioning
+    #
+    # Embedded as the "ver" claim in every access token issued for this
+    # user. get_current_user rejects a token whose "ver" claim does not
+    # match the current column value. Incrementing this column (on
+    # logout-all-devices or password change) instantly invalidates every
+    # previously issued access token without needing a blacklist store —
+    # the cheapest form of revocation for a value that changes rarely.
+    # ------------------------------------------------------------------
+    token_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+        comment="Incremented to invalidate all previously issued access tokens.",
+    )
+
     sessions: Mapped[list["InterviewSession"]] = relationship(
         "InterviewSession", back_populates="user", cascade="all, delete-orphan"
     )
@@ -151,6 +209,13 @@ class User(Base):
 
     document_chunks: Mapped[list["DocumentChunk"]] = relationship(
         "DocumentChunk",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+    refresh_tokens: Mapped[list["RefreshToken"]] = relationship(
+        "RefreshToken",
         back_populates="user",
         cascade="all, delete-orphan",
         passive_deletes=True,

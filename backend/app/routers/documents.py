@@ -5,12 +5,18 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.core.constants import API_V1_PREFIX
+from app.core.file_validation import (
+    looks_like_declared_document_type,
+    sanitize_filename,
+    scan_for_malware,
+)
+from app.core.security_logging import log_upload_rejected
 from app.database import get_db
 from app.models.documents import DocumentChunk, ResumeDocument
 from app.models.interview import (
@@ -34,27 +40,58 @@ _ALLOWED_MIME = {
     "application/pdf",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 }
-_MAX_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB
+
+
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
 
 
 @router.post("/resume/upload", response_model=ResumeDocumentResponse, status_code=201)
 async def upload_resume(
+    request: Request,
     file: UploadFile,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Upload a PDF or DOCX resume. Extracts text and stores embeddings for RAG."""
+    settings = get_settings()
+    max_size_bytes = settings.MAX_RESUME_UPLOAD_SIZE_MB * 1024 * 1024
+    ip = _client_ip(request)
+
     if file.content_type not in _ALLOWED_MIME:
+        log_upload_rejected(current_user.id, ip, "unsupported_mime_type")
         raise HTTPException(
             status_code=415,
             detail=f"Unsupported file type: {file.content_type}. Upload PDF or DOCX.",
         )
 
     content = await file.read()
-    if len(content) > _MAX_SIZE_BYTES:
-        raise HTTPException(status_code=413, detail="File too large (max 5 MB)")
+    if len(content) > max_size_bytes:
+        log_upload_rejected(current_user.id, ip, "file_too_large")
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large (max {settings.MAX_RESUME_UPLOAD_SIZE_MB} MB)",
+        )
 
-    settings = get_settings()
+    # Magic-byte check: Content-Type is client-supplied and spoofable.
+    # Verify the file's actual leading bytes match the declared document type.
+    if not looks_like_declared_document_type(content, file.content_type):
+        log_upload_rejected(current_user.id, ip, "content_mismatch")
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"File content does not match the declared type "
+                f"'{file.content_type}'."
+            ),
+        )
+
+    if not scan_for_malware(content):
+        log_upload_rejected(current_user.id, ip, "malware_scan_failed")
+        raise HTTPException(
+            status_code=422,
+            detail="Uploaded file failed malware scanning.",
+        )
+
     upload_dir = Path(settings.UPLOAD_DIR) / "resumes" / str(current_user.id)
     upload_dir.mkdir(parents=True, exist_ok=True)
 
@@ -81,7 +118,7 @@ async def upload_resume(
     doc = ResumeDocument(
         id=doc_id,
         user_id=current_user.id,
-        filename=file.filename or "resume",
+        filename=sanitize_filename(file.filename or "resume"),
         file_path=str(file_path),
         extracted_text=extracted_text,
     )

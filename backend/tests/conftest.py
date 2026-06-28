@@ -134,6 +134,24 @@ def _patch_processing_session_local(monkeypatch):
 
 
 @pytest.fixture(scope="function", autouse=True)
+def _reset_login_rate_limiter():
+    """Clear the in-memory login rate limiter's hit counts between tests.
+
+    login_rate_limiter (app/core/rate_limit.py) is a module-level singleton
+    shared by every request in the process. Without resetting it, login
+    attempts accumulated by earlier tests (via the auth_token/registered_user
+    fixtures used throughout the suite) would count toward later tests'
+    RATE_LIMIT_LOGIN_ATTEMPTS budget, eventually causing unrelated tests to
+    fail with 429 instead of their expected status code.
+    """
+    from app.core.rate_limit import login_rate_limiter
+
+    login_rate_limiter.clear()
+    yield
+    login_rate_limiter.clear()
+
+
+@pytest.fixture(scope="function", autouse=True)
 def _patch_main_session_local(monkeypatch):
     """Redirect app.main's startup recovery to the test DB.
 
@@ -337,12 +355,17 @@ def audio_response(db, interview_session, interview_question, registered_user):
 def fake_audio_file():
     """Return a BytesIO of 4096 bytes — above the 1024-byte minimum.
 
+    Prefixed with the WebM/Matroska EBML magic bytes (0x1A45DFA3) so the
+    Phase 3 magic-byte check in upload_service.validate_upload accepts it
+    when declared as audio/webm (the MIME type used by every test that
+    relies on this fixture).
+
     Use in upload tests as the file body:
         files={"file": ("test.webm", fake_audio_file, "audio/webm")}
 
     Function-scoped: each test gets a fresh BytesIO with the cursor at 0.
     """
-    return io.BytesIO(b"x" * 4096)
+    return io.BytesIO(b"\x1a\x45\xdf\xa3" + b"x" * 4092)
 
 
 # ---------------------------------------------------------------------------

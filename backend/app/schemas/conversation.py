@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 class StartLiveInterviewRequest(BaseModel):
     job_role: str = Field(..., min_length=2, max_length=200)
-    job_description: str = Field(..., min_length=20)
+    job_description: str = Field(..., min_length=20, max_length=10000)
     max_turns: int = Field(default=5, ge=3, le=10)
 
 
@@ -26,7 +26,7 @@ class ConversationTurnResponse(BaseModel):
 
 
 class NextQuestionRequest(BaseModel):
-    response_text: str | None = None
+    response_text: str | None = Field(default=None, max_length=5000)
     audio_response_id: uuid.UUID | None = None
 
 

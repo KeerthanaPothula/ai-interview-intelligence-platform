@@ -8,6 +8,7 @@ from fastapi import HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
+from app.core.file_validation import looks_like_declared_audio_type, scan_for_malware
 from app.models.analysis import AudioResponse, RESPONSE_STATUS_UPLOADED
 from app.models.interview import (
     InterviewSession,
@@ -135,6 +136,22 @@ async def validate_upload(file: UploadFile) -> tuple[bytes, int, str, str]:
                 f"File size {file_size} bytes is too small to be a valid audio file. "
                 f"Minimum is {_MIN_FILE_BYTES} bytes."
             ),
+        )
+
+    # Magic-byte check: the Content-Type header and filename extension
+    # checked above are both client-supplied and spoofable. Verifying the
+    # file's actual leading bytes against the signature expected for the
+    # declared MIME type catches a payload that merely claims to be audio.
+    if not looks_like_declared_audio_type(content, mime_type):
+        raise HTTPException(
+            status_code=422,
+            detail=(f"File content does not match the declared type '{mime_type}'."),
+        )
+
+    if not scan_for_malware(content):
+        raise HTTPException(
+            status_code=422,
+            detail="Uploaded file failed malware scanning.",
         )
 
     return content, file_size, mime_type, extension

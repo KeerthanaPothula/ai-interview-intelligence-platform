@@ -47,4 +47,14 @@ def get_current_user(
     if user is None:
         raise credentials_exception
 
+    # Token versioning: a token issued before "ver" claims existed has no
+    # "ver" key, which is treated as version 0 — matching the default
+    # token_version=0 every existing user starts with, so pre-Phase-3
+    # tokens keep working unchanged. Bumping token_version (logout-all,
+    # password change) instantly invalidates every token signed with an
+    # older version, without needing a blacklist store.
+    token_version = payload.get("ver", 0)
+    if token_version != user.token_version:
+        raise credentials_exception
+
     return user

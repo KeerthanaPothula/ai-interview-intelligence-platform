@@ -36,7 +36,25 @@ class UserResponse(BaseModel):
 
 
 class Token(BaseModel):
-    """Returned by the login endpoint."""
+    """Returned by the login and refresh endpoints.
+
+    refresh_token defaults to None so this schema also still matches the
+    pre-Phase-3 login response shape for any client that only reads
+    access_token/token_type.
+    """
 
     access_token: str
+    refresh_token: str | None = None
     token_type: str = "bearer"
+
+
+class RefreshRequest(BaseModel):
+    """Request body for POST /auth/refresh and POST /auth/logout."""
+
+    refresh_token: str = Field(..., min_length=20, max_length=512)
+
+
+class DetailResponse(BaseModel):
+    """Generic {"detail": "..."} acknowledgement, e.g. for logout."""
+
+    detail: str

@@ -48,12 +48,14 @@ def _upload(
 ):
     """POST a multipart upload to /api/v1/interviews/{session_id}/responses.
 
-    Provides a consistent interface for upload tests. file_content defaults to
-    4096 bytes — above the 1024-byte minimum — so each call produces a new
-    BytesIO with the cursor at position 0.
+    Provides a consistent interface for upload tests. file_content defaults
+    to 4096 bytes prefixed with the WebM EBML magic bytes (0x1A45DFA3) —
+    above the 1024-byte minimum and matching the default mime_type
+    "audio/webm" so the Phase 3 magic-byte check accepts it — so each call
+    produces a new BytesIO with the cursor at position 0.
     """
     if file_content is None:
-        file_content = io.BytesIO(b"x" * 4096)
+        file_content = io.BytesIO(b"\x1a\x45\xdf\xa3" + b"x" * 4092)
     return client.post(
         f"/api/v1/interviews/{session_id}/responses",
         headers=auth_headers,
@@ -205,6 +207,27 @@ class TestAudioUpload:
 
         get_settings.cache_clear()
         assert response.status_code == 413
+
+    def test_upload_spoofed_content_returns_422(
+        self,
+        client,
+        auth_headers,
+        interview_session,
+        interview_question,
+        upload_dir,
+    ):
+        # Declared MIME type ("audio/webm") and extension (".webm") both pass
+        # their allow-list checks, but the actual leading bytes don't match
+        # the WebM EBML magic-byte signature — the Phase 3 magic-byte check
+        # must still reject this as a 422.
+        response = _upload(
+            client,
+            auth_headers,
+            interview_session.id,
+            interview_question.id,
+            file_content=io.BytesIO(b"not webm content at all " + b"x" * 4072),
+        )
+        assert response.status_code == 422
 
     def test_upload_empty_file_returns_422(
         self,

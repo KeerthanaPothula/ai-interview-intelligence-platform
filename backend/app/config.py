@@ -175,6 +175,11 @@ class Settings(BaseSettings):
     # gt=0 prevents accidental zero that would reject every upload.
     MAX_UPLOAD_SIZE_MB: int = Field(default=10, gt=0)
 
+    # Ceiling for accepted resume uploads (PDF/DOCX) in megabytes.
+    # Resumes are plain text-bearing documents, not audio/video — a much
+    # smaller cap than MAX_UPLOAD_SIZE_MB is appropriate.
+    MAX_RESUME_UPLOAD_SIZE_MB: int = Field(default=5, gt=0)
+
     # ------------------------------------------------------------------
     # CORS
     # ------------------------------------------------------------------
@@ -238,6 +243,72 @@ class Settings(BaseSettings):
                 "Set DEBUG=false before deploying."
             )
         return self
+
+    # ------------------------------------------------------------------
+    # Phase 3 — Login rate limiting & account lockout
+    #
+    # The limiter (app/core/rate_limit.py) is an in-memory, single-process
+    # fixed-window counter. It is deliberately not Redis-backed: this
+    # project has no Redis infrastructure configured anywhere, and adding
+    # one purely for rate limiting would be a disproportionate
+    # architecture change for a single-worker deployment. Known
+    # limitation: state does not survive a process restart and is not
+    # shared across multiple Uvicorn/Gunicorn workers — see SECURITY.md.
+    # ------------------------------------------------------------------
+
+    # Maximum login attempts permitted from a single client IP within
+    # RATE_LIMIT_LOGIN_WINDOW_SECONDS before further attempts are
+    # rejected with HTTP 429. Applies regardless of which email is used,
+    # so it also throttles email-enumeration attempts across accounts.
+    RATE_LIMIT_LOGIN_ATTEMPTS: int = Field(default=5, ge=1)
+
+    # Width of the fixed window (seconds) used by RATE_LIMIT_LOGIN_ATTEMPTS.
+    RATE_LIMIT_LOGIN_WINDOW_SECONDS: int = Field(default=60, gt=0)
+
+    # Number of consecutive failed password attempts against one account
+    # before that account is temporarily locked, independent of the
+    # IP-based limiter above.
+    ACCOUNT_LOCKOUT_THRESHOLD: int = Field(default=5, ge=1)
+
+    # Base lockout duration in minutes. Each successive lockout for the
+    # same account doubles this value (progressive backoff), capped at
+    # ACCOUNT_LOCKOUT_MAX_DURATION_MINUTES.
+    ACCOUNT_LOCKOUT_DURATION_MINUTES: int = Field(default=15, gt=0)
+
+    # Ceiling on the progressive lockout duration so a repeatedly
+    # targeted account is never locked indefinitely by the doubling
+    # formula.
+    ACCOUNT_LOCKOUT_MAX_DURATION_MINUTES: int = Field(default=1440, gt=0)
+
+    # ------------------------------------------------------------------
+    # Phase 3 — Refresh tokens
+    # ------------------------------------------------------------------
+
+    # Refresh token lifetime in days. Refresh tokens are long-lived
+    # compared to access tokens and are stored hashed in the
+    # refresh_tokens table so individual tokens can be revoked.
+    REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=30, gt=0)
+
+    # ------------------------------------------------------------------
+    # Phase 3 — Security headers middleware
+    # Environment-aware: HSTS is meaningless (and actively harmful) over
+    # plain HTTP in local development, so SecurityHeadersMiddleware only
+    # emits Strict-Transport-Security when ENVIRONMENT == "production".
+    # ------------------------------------------------------------------
+
+    # Content-Security-Policy header value. Default is restrictive
+    # (same-origin only); override per-deployment if the API ever serves
+    # browser-rendered content directly (it currently does not — this is
+    # primarily a defense-in-depth header for an API-only backend).
+    CSP_POLICY: str = "default-src 'self'; frame-ancestors 'none'"
+
+    # max-age for Strict-Transport-Security, in seconds. Only sent when
+    # ENVIRONMENT == "production" (see SecurityHeadersMiddleware).
+    HSTS_MAX_AGE_SECONDS: int = Field(default=31536000, gt=0)
+
+    # Permissions-Policy header value. Disables browser features this API
+    # never needs.
+    PERMISSIONS_POLICY: str = "geolocation=(), microphone=(), camera=(), payment=()"
 
 
 @lru_cache

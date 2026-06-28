@@ -45,6 +45,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.core.constants import API_V1_PREFIX
 from app.core.exceptions import register_exception_handlers
+from app.core.security_headers import SecurityHeadersMiddleware
 from app.database import SessionLocal
 from app.routers.analytics import router as analytics_router
 from app.routers.auth import router as auth_router
@@ -196,6 +197,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ---------------------------------------------------------------------------
+# Security headers
+#
+# Adds Content-Security-Policy, X-Frame-Options, X-Content-Type-Options,
+# Referrer-Policy, and Permissions-Policy to every response.
+# Strict-Transport-Security is added only when ENVIRONMENT == "production"
+# (see SecurityHeadersMiddleware) — sending HSTS over plain-HTTP local
+# development would tell browsers to force HTTPS against a server that
+# does not serve it.
+# ---------------------------------------------------------------------------
+app.add_middleware(SecurityHeadersMiddleware, settings=settings)
 
 # ---------------------------------------------------------------------------
 # Global exception handling

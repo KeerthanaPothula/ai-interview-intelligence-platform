@@ -12,7 +12,13 @@ def _upload(client, auth_headers, session_id, question_id):
     return client.post(
         f"/api/v1/interviews/{session_id}/responses",
         headers=auth_headers,
-        files={"file": ("answer.webm", io.BytesIO(b"x" * 4096), "audio/webm")},
+        files={
+            "file": (
+                "answer.webm",
+                io.BytesIO(b"\x1a\x45\xdf\xa3" + b"x" * 4092),
+                "audio/webm",
+            )
+        },
         data={"question_id": str(question_id)},
     )
 

@@ -9,9 +9,10 @@
 #
 # Models registered by each module:
 #
-#   user.py      → User
-#   interview.py → InterviewSession, Question
-#   analysis.py  → AudioResponse, Transcript, InterviewAnalysis
+#   user.py          → User
+#   interview.py     → InterviewSession, Question
+#   analysis.py      → AudioResponse, Transcript, InterviewAnalysis
+#   refresh_token.py → RefreshToken
 #
 # How to use in alembic/env.py:
 #
@@ -30,4 +31,13 @@
 # whether cross-model relationships are wired correctly.
 # ---------------------------------------------------------------------------
 
-from . import analysis, conversation, documents, features, interview, prediction, user  # noqa: F401
+from . import (  # noqa: F401
+    analysis,
+    conversation,
+    documents,
+    features,
+    interview,
+    prediction,
+    refresh_token,
+    user,
+)

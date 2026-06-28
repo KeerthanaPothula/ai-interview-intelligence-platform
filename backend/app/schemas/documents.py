@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ResumeDocumentResponse(BaseModel):
@@ -18,7 +18,10 @@ class ResumeDocumentResponse(BaseModel):
 
 
 class RAGQuestionsRequest(BaseModel):
-    count: int = 5
+    # Bounded the same as MAX_QUESTIONS_PER_SESSION (app/config.py): an
+    # unbounded count would let a caller force an arbitrarily large Gemini
+    # prompt/response, inflating token usage and latency.
+    count: int = Field(default=5, ge=1, le=20)
 
 
 class RAGQuestionItem(BaseModel):

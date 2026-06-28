@@ -29,10 +29,12 @@ class SessionCreate(BaseModel):
     job_description: str = Field(
         ...,
         min_length=20,
+        max_length=10000,
         description=(
             "Full job description text used by Gemini to generate relevant "
             "questions. Must be at least 20 characters so Gemini has enough "
-            "context to produce meaningful questions."
+            "context to produce meaningful questions. Capped at 10,000 "
+            "characters to bound Gemini prompt size and token usage."
         ),
     )
 
@@ -64,6 +66,7 @@ class SessionUpdate(BaseModel):
     job_description: str | None = Field(
         None,
         min_length=20,
+        max_length=10000,
         description="New job description. Omit to leave unchanged.",
     )
 

@@ -125,6 +125,11 @@ black==24.10.0
 # Linter — covers flake8, isort, and more in a single fast tool
 ruff==0.8.1
 
+# Dependency vulnerability scanner — checks installed packages against the
+# PyPA Advisory Database. Run with: pip-audit -r requirements.txt
+# See SECURITY.md for the full dependency-audit workflow.
+pip-audit==2.7.3
+
 
 # -------------------------------------------------------------
 # Phase 16 — Voice Analytics Engine
