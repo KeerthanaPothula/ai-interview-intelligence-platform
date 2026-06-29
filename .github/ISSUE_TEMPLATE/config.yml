@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Ask a question / start a discussion
+    url: https://github.com/KeerthanaPothula/ai-interview-intelligence-platform/discussions
+    about: For questions or open-ended ideas that aren't yet a concrete bug or feature request, please use Discussions instead of an issue.

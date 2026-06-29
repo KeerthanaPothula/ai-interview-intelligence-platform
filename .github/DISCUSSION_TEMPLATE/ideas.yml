@@ -1,0 +1,23 @@
+title: "[Idea] "
+labels: ["idea"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for open-ended ideas that aren't yet a concrete, scoped
+        feature request — see [docs/CONTRIBUTING.md](../../docs/CONTRIBUTING.md)
+        for when to file a feature request issue instead.
+  - type: textarea
+    id: idea
+    attributes:
+      label: The idea
+      description: What are you thinking, and what prompted it?
+    validations:
+      required: true
+  - type: textarea
+    id: tradeoffs
+    attributes:
+      label: Open questions / trade-offs
+      description: What's unresolved about this idea that's worth discussing before it becomes an issue?
+    validations:
+      required: false

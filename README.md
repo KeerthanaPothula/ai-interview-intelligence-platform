@@ -1,326 +1,436 @@
+<div align="center">
+
 # AI Interview Intelligence Platform
 
-![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)
-![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
-![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
+**AI-powered mock interview practice: question generation, audio transcription,
+multi-dimensional evaluation, voice analytics, live conversational interviews,
+resume-aware RAG questions, success prediction, and AI career coaching.**
+
+[![CI](https://github.com/KeerthanaPothula/ai-interview-intelligence-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/KeerthanaPothula/ai-interview-intelligence-platform/actions/workflows/ci.yml)
+[![Security](https://github.com/KeerthanaPothula/ai-interview-intelligence-platform/actions/workflows/security.yml/badge.svg)](https://github.com/KeerthanaPothula/ai-interview-intelligence-platform/actions/workflows/security.yml)
+![Coverage](https://img.shields.io/badge/coverage-backend%2081%25%20%7C%20frontend%2025%25-yellow)
+![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
+![Last commit](https://img.shields.io/github/last-commit/KeerthanaPothula/ai-interview-intelligence-platform)
 
-A full-stack platform for AI-assisted mock interview practice. Candidates
-create an interview session for a target job role, receive AI-generated
-interview questions, record audio answers, and get back an automatic
-transcript plus an AI evaluation across five scoring dimensions with
-concrete strengths, weaknesses, and feedback. The platform also features
-a live conversational AI interviewer, resume-aware RAG question generation,
-ML-powered success prediction, percentile benchmarking, and an AI career
-coach that generates 7/14/30-day improvement plans.
+</div>
 
 ---
 
-## Project Overview
+## Table of contents
 
-The platform combines:
+- [Overview](#overview)
+- [Features](#features)
+- [Architecture](#architecture)
+- [Tech stack](#tech-stack)
+- [Database](#database)
+- [API](#api)
+- [Local setup](#local-setup)
+- [Deployment](#deployment)
+- [Testing](#testing)
+- [CI/CD](#cicd)
+- [Monitoring & observability](#monitoring--observability)
+- [Security](#security)
+- [Screenshots](#screenshots)
+- [Documentation](#documentation)
+- [Roadmap](#roadmap)
+- [License](#license)
 
-- **Question generation** — Google Gemini generates role-specific interview
-  questions from a job title and description.
-- **Audio response capture** — candidates upload a recorded answer per
-  question.
-- **Local transcription** — OpenAI Whisper (CPU) transcribes the audio
-  on the server, with no external API call required.
-- **AI evaluation** — Gemini scores each transcript on communication,
-  technical depth, problem solving, and confidence, plus an overall score
-  and written feedback.
-- **Asynchronous processing UI** — the frontend polls a processing-status
-  endpoint and renders the transcript and analysis as soon as they're ready.
+---
+
+## Overview
+
+Candidates create an interview session for a target job role, get
+AI-generated interview questions, record audio answers, and receive an
+automatic transcript plus a five-dimension AI evaluation with concrete
+strengths, weaknesses, and feedback. Beyond the core loop, the platform adds
+a live conversational AI interviewer, resume-aware RAG question generation,
+ML-based success prediction with percentile benchmarking, and an AI career
+coach that produces 7/14/30-day improvement plans.
 
 Built as a portfolio-quality, production-shaped project: JWT auth with
-per-user data isolation, Alembic-migrated PostgreSQL schema, hardened CORS,
-structured logging, a Dockerized backend, and a documented Render deployment
-path.
-
----
+refresh-token rotation and per-user data isolation, an Alembic-migrated
+PostgreSQL schema, hardened CORS and security headers, structured JSON
+logging with Prometheus metrics and optional OpenTelemetry tracing, a
+hardened multi-stage Docker build, and a green GitHub Actions CI/CD
+pipeline.
 
 ## Features
 
-**Authentication & Security**
-- Email/password registration and login (JWT bearer tokens)
-- Per-user ownership enforcement on every resource (other users' data
-  returns `404`, never `403`, to avoid leaking existence)
-- Environment-driven CORS allowlist (no wildcard origins)
+### AI Features
+- Gemini-powered question generation, categorized (behavioral / technical /
+  situational) and ordered
+- Shared retry/backoff + JSON-repair reliability layer
+  (`app/core/ai_reliability.py`) used by every Gemini call site
 
-**Interview Sessions**
-- Create, list, update, and delete interview sessions (title, job role, job
-  description)
-- Session status lifecycle: `draft → in_progress → processing → completed`
-
-**AI Question Generation**
-- Generate role-specific interview questions via Gemini, categorized and
-  ordered
-
-**Audio Upload & Processing**
-- Multipart audio upload per question, with file-size and content-type
-  validation
-- Background processing pipeline: Whisper transcription → Gemini evaluation
+### Interview System
+- Create, list, update, and delete interview sessions
+- Session lifecycle: `draft → in_progress → processing → completed`
 - Per-response status tracking (`uploaded → processing → completed/failed`)
-  with stuck-job recovery on startup
+  with atomic claiming and startup recovery for crashed jobs
+- **Live Conversational AI Interviewer** — multi-turn, context-aware
+  interview where each question builds on prior answers and increases in
+  difficulty
+- AI-generated follow-up questions targeting vague or interesting parts of
+  an answer
 
-**Transcript & Analysis**
-- Full transcript with detected language, word count, and duration
-- Five AI-generated scores (overall, communication, technical, problem
-  solving, confidence) plus strengths, weaknesses, and detailed feedback
-
-**Voice Analytics Engine** *(Phase 16)*
-- Librosa-based audio analysis pipeline: speaking rate (WPM), pause detection,
-  filler word counting (um/uh/like/you know/actually/basically), RMS energy
-  consistency, and a composite confidence score (0–100)
-- Runs as a best-effort step after Whisper — failures never abort the pipeline
-
-**AI Follow-Up Interviewer** *(Phase 16)*
-- Gemini generates targeted follow-up questions from a candidate's answer
-- `POST /interviews/{id}/follow-up-question` + `GET /interviews/{id}/conversation-history`
-
-**Analytics Dashboard** *(Phase 16)*
-- Score-trend Recharts line chart across sessions (overall, communication,
-  technical, problem solving)
-- Stat cards: total sessions, avg score, strongest/weakest skill, improvement delta
-
-**Session-Level Final Report** *(Phase 16)*
-- Gemini-generated holistic report: overall performance narrative, category
-  breakdown, strengths/weaknesses bullets, improvement plan, readiness level
-  (Beginner → Highly Competitive)
-- `POST /interviews/{id}/report/generate` + `GET /interviews/{id}/report`
-
-**Live Conversational AI Interviewer** *(Phase 17)*
-- Multi-turn, context-aware AI interview: Gemini generates follow-up questions
-  that build on prior answers and increase in difficulty (warm-up → advanced)
-- `POST /live-interviews/` (start + first question) · `POST /{id}/next-question`
-  · `GET /{id}/conversation` · `POST /{id}/end` (summary generation)
-- Frontend: `LiveInterviewPage` with progress bar, difficulty badges, and
-  collapsible conversation history
-
-**Resume + Job Description RAG System** *(Phase 18)*
+### Resume Intelligence
 - Upload PDF/DOCX resumes — text extracted, chunked (200-word overlapping
-  windows), and embedded via sentence-transformers (all-MiniLM-L6-v2)
-- Embeddings stored as JSON in SQLite/PostgreSQL (no pgvector required)
-- `POST /documents/resume/upload` · `GET /documents/resume/current`
-- `POST /documents/interviews/{id}/generate-rag-questions` — top-k cosine
-  similarity retrieval drives personalised Gemini question generation
+  windows), embedded via sentence-transformers (`all-MiniLM-L6-v2`)
+- Cosine-similarity retrieval over a candidate's own resume chunks drives
+  personalized, resume-grounded Gemini question generation (RAG)
 
-**Interview Benchmarking & Predictive Analytics** *(Phase 19)*
-- Logistic regression trained on 2000 synthetic samples at startup — predicts
-  success probability and outcome (Strong Pass / Pass / Borderline / Fail)
-- Percentile ranking: user's avg score compared to all platform users
-- `POST /interviews/{id}/predict` · `GET /analytics/benchmarks`
-- Dashboard: RadarChart skill-breakdown + benchmark stat cards
+### Voice Analytics
+- Librosa-based acoustic analysis: speaking rate (WPM), pause detection,
+  filler-word counting, RMS energy consistency, and a composite confidence
+  score (0–100)
+- Runs as a best-effort enrichment step — a failure here never blocks the
+  transcript/evaluation pipeline
 
-**AI Career Coach** *(Phase 19)*
-- Gemini-generated 7/14/30-day personalised improvement plans using session
-  metrics, readiness level, and identified weaknesses
-- `POST /interviews/{id}/coaching-plan` · `GET /interviews/{id}/coaching-plan`
+### Career Coaching
+- Gemini-generated 7/14/30-day personalized improvement plans, grounded in
+  a session's scores, readiness level, and identified weaknesses
+- Logistic-regression success prediction (`Strong Pass` / `Pass` /
+  `Borderline` / `Fail`) and percentile benchmarking against all platform
+  users
 
-**Frontend**
-- React + TypeScript SPA: auth pages, session list/detail, question/upload
-  flow, analytics dashboard (`/dashboard`), live interview (`/live-interview`)
-- Live processing-status polling (3s interval, stops on terminal state)
-- VoiceAnalyticsCard per response with confidence badge and metric grid
-- Dashboard: LineChart score trends + RadarChart skill breakdown + benchmark percentile
-- Generic, user-friendly error handling — raw API errors are never shown
+### Dashboard & Analytics
+- Score-trend line chart and skill-breakdown radar chart across sessions
+- Holistic, Gemini-generated session reports: performance narrative,
+  strengths/weaknesses, improvement plan, readiness level
 
----
+### Security
+- bcrypt password hashing, JWT access tokens with an instant-revocation
+  `token_version` claim, SHA-256-hashed rotating refresh tokens
+- Per-IP login rate limiting + progressive-backoff account lockout
+- Layered file-upload validation (MIME allow-list, size limit, magic-byte
+  signature check, filename sanitization)
+- Security headers (CSP, X-Frame-Options, HSTS in production, etc.) on
+  every response
+- See [SECURITY.md](SECURITY.md) for full detail and accepted trade-offs
+
+### Infrastructure
+- Multi-stage, non-root Docker build; Docker Compose for local dev
+- Alembic-migrated PostgreSQL (SQLite for tests), pre-deploy migration
+  strategy, persistent storage strategy for uploaded audio
+
+### DevOps
+- GitHub Actions CI (lint, test + coverage, build, Docker validation) and a
+  separate security workflow (`pip-audit`, `npm audit`, CodeQL)
+- Structured JSON logging, Prometheus metrics, optional OpenTelemetry
+  tracing, `/health` + `/ready` endpoints
 
 ## Architecture
 
 ```mermaid
-flowchart LR
-    User[Candidate] -->|HTTPS| FE[React Frontend\nVite + TypeScript]
-    FE -->|JWT Bearer| API[FastAPI Backend]
-    API --> DB[(PostgreSQL / SQLite)]
-    API --> Whisper[Whisper\nTranscription]
-    API --> Librosa[Librosa\nVoice Analytics]
-    API --> STrans[sentence-transformers\nRAG Embeddings]
-    API --> SKLearn[scikit-learn\nSuccess Prediction]
-    API --> Gemini[Gemini API\nQuestions + Evaluation\n+ Follow-ups + Reports\n+ Live Interviews\n+ RAG Questions\n+ Career Coaching]
+flowchart TB
+    SPA["React SPA"] -->|"HTTPS + JWT"| MW["Middleware\n(Observability + Security Headers + CORS)"]
+    MW --> Routers["FastAPI Routers"]
+    Routers --> Services["Domain Services"]
+    Services --> DB[("PostgreSQL")]
+    Services --> FS[("Uploaded audio / resumes")]
+    Services --> Gemini["Gemini API"]
+    Services --> Local["Whisper · librosa ·\nscikit-learn · sentence-transformers"]
 ```
 
-This is a high-level view. The full request flow and the audio processing
-pipeline (with status transitions) are diagrammed in
-[docs/architecture.md](docs/architecture.md).
+This is the condensed view. Full system architecture, request-flow,
+authentication-flow, interview-workflow, and deployment diagrams (all
+Mermaid) are in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**; the
+step-by-step AI pipelines (Whisper, Gemini evaluation, voice analytics,
+RAG, live interviews, prediction, coaching) are in
+**[docs/AI_PIPELINE.md](docs/AI_PIPELINE.md)**.
 
----
+## Tech stack
 
-## Tech Stack
+### Backend
 
-| Layer | Technologies |
+| Technology | Purpose |
 |---|---|
-| **Backend** | FastAPI, SQLAlchemy 2.x, Alembic, Pydantic v2 / pydantic-settings, python-jose (JWT), bcrypt, Uvicorn |
-| **AI / ML** | Google Gemini (`google-genai`) for question generation, evaluation, follow-ups, session reports, live interviews, RAG questions & career coaching; OpenAI Whisper + PyTorch (CPU) for transcription; librosa for voice analytics; sentence-transformers (all-MiniLM-L6-v2) for RAG embeddings; scikit-learn logistic regression for success prediction |
-| **Database** | PostgreSQL 16 (SQLite for the test suite) |
-| **Frontend** | React 19, TypeScript, Vite, React Router v6, Recharts (LineChart + RadarChart) |
-| **Testing** | pytest + httpx (backend, 250 tests), Vitest + React Testing Library (frontend, 31 tests) |
-| **Infrastructure** | Docker (multi-stage, non-root), Docker Compose (local), GitHub Actions CI/CD, Render (Web Service + Static Site + managed PostgreSQL) |
-| **Observability** | Structured JSON logging with request-ID correlation, Prometheus metrics (`/metrics`), OpenTelemetry tracing (optional), `/health` + `/ready` endpoints — see [docs/INFRASTRUCTURE.md](docs/INFRASTRUCTURE.md) |
+| FastAPI | Web framework |
+| SQLAlchemy 2.x | ORM |
+| Alembic | Database migrations |
+| Pydantic v2 / pydantic-settings | Schemas + typed, validated settings |
+| python-jose | JWT signing/verification |
+| bcrypt | Password hashing |
+| Uvicorn | ASGI server |
 
----
+### Frontend
 
-## Screenshots
+| Technology | Purpose |
+|---|---|
+| React 19 | UI |
+| TypeScript | Type safety |
+| Vite | Build tool / dev server |
+| React Router v6 | Routing |
+| Recharts | Score-trend line chart + skill radar chart |
 
-> Screenshots are not yet committed. See
-> [docs/screenshots.md](docs/screenshots.md) for the exact list of captures
-> needed, their filenames, and where they belong in this README.
+### AI/ML
 
-| # | View | File |
-|---|---|---|
-| 1 | Login page | `docs/screenshots/01-login.png` |
-| 2 | Registration page | `docs/screenshots/02-register.png` |
-| 3 | Session list | `docs/screenshots/03-session-list.png` |
-| 4 | Session details | `docs/screenshots/04-session-detail.png` |
-| 5 | Generated questions | `docs/screenshots/05-questions.png` |
-| 6 | Audio upload | `docs/screenshots/06-upload.png` |
-| 7 | Processing state | `docs/screenshots/07-processing.png` |
-| 8 | Transcript view | `docs/screenshots/08-transcript.png` |
-| 9 | Analysis view | `docs/screenshots/09-analysis.png` |
+| Technology | Purpose |
+|---|---|
+| Google Gemini (`google-genai`) | Questions, evaluation, follow-ups, live interviews, RAG questions, reports, coaching |
+| OpenAI Whisper + PyTorch (CPU) | Audio transcription |
+| librosa | Voice/acoustic analytics |
+| sentence-transformers (`all-MiniLM-L6-v2`) | Resume/RAG embeddings |
+| scikit-learn | Logistic-regression success prediction |
 
----
+### Database
 
-## System Design
+| Technology | Purpose |
+|---|---|
+| PostgreSQL 16 | Production / Docker Compose |
+| SQLite (in-memory) | Test suite |
 
-- **Ownership model**: every query for a session/question/response/transcript
-  /analysis is scoped to `WHERE user_id = current_user.id` (via the owning
-  session). A resource that exists but belongs to another user returns `404`,
-  identical to a resource that doesn't exist — this prevents enumeration.
-- **Processing pipeline**: an audio upload creates an `AudioResponse` with
-  status `uploaded`. A background task transitions it to `processing`, runs
-  Whisper transcription (bounded by `WHISPER_TIMEOUT_SECONDS`), then Gemini
-  evaluation (transcript truncated to `MAX_TRANSCRIPT_CHARS`), and finally
-  `completed` or `failed` (with a generic error surfaced to the client — raw
-  exception text is never returned). On startup, any response stuck in
-  `processing` (e.g. from a crash) is recovered back to `failed`.
-- **Polling, not websockets**: the frontend polls
-  `GET /responses/{id}/processing-status` every 3 seconds and stops once a
-  terminal state (`completed`/`failed`) is reached — simple, stateless, and
-  proxy/CDN-friendly.
-- **CORS**: `allow_origins` is driven entirely by the `CORS_ORIGINS` env var
-  (comma-separated exact origins). `allow_credentials` is only enabled when
-  at least one origin is configured — an unconfigured deployment fails closed
-  rather than falling back to a wildcard.
+### DevOps
 
----
+| Technology | Purpose |
+|---|---|
+| Docker (multi-stage, non-root) | Backend image |
+| Docker Compose | Local dev (backend + PostgreSQL) |
+| GitHub Actions | CI/CD (`ci.yml`, `security.yml`) |
+| Prometheus / OpenTelemetry | Metrics / tracing |
 
-## API Overview
+### Deployment
 
-All routes except `/health`, `/api/v1/auth/register`, and
-`/api/v1/auth/login` require `Authorization: Bearer <token>`.
+| Platform | Role |
+|---|---|
+| Render | Backend (Docker Web Service + Disk) + managed PostgreSQL + Static Site |
+| Railway | Alternative backend host (Docker + Volume + PostgreSQL plugin) |
+| Vercel | Alternative frontend static host |
+
+### Testing
+
+| Technology | Purpose |
+|---|---|
+| pytest + httpx | Backend (250 tests) |
+| Vitest + React Testing Library | Frontend (31 tests) |
+
+## Database
+
+16 tables, every row traceable to a `users.id` owner, UUID primary keys
+generated in application code, cascading deletes on session/user removal.
+
+```mermaid
+erDiagram
+    USERS ||--o{ INTERVIEW_SESSIONS : creates
+    INTERVIEW_SESSIONS ||--o{ QUESTIONS : contains
+    INTERVIEW_SESSIONS ||--o{ AUDIO_RESPONSES : has
+    AUDIO_RESPONSES ||--o| TRANSCRIPTS : produces
+    AUDIO_RESPONSES ||--o| INTERVIEW_ANALYSES : "scored by"
+    AUDIO_RESPONSES ||--o| VOICE_ANALYSES : "analyzed by"
+    INTERVIEW_SESSIONS ||--o| SESSION_REPORTS : has
+    USERS ||--o{ RESUME_DOCUMENTS : uploads
+    RESUME_DOCUMENTS ||--o{ DOCUMENT_CHUNKS : "chunked into"
+```
+
+Full entity-relationship diagram (all 16 tables with complete attribute
+lists, cascade behavior, and the 7-revision migration history) is in
+**[docs/DATABASE.md](docs/DATABASE.md)**.
+
+## API
+
+27 endpoints across health/observability, auth, interview sessions,
+audio responses, processing, follow-ups, session reports, live
+conversational interviews, resume/RAG, and predictive analytics/coaching.
+All routes except `/health`, `/ready`, `/metrics`, and the auth
+register/login/refresh endpoints require `Authorization: Bearer <token>`.
+Interactive docs (`/docs`, `/redoc`) are available whenever `DEBUG=true`.
 
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/health` | Liveness check (no DB access) |
-| `GET` | `/ready` | Readiness check (DB connectivity + AI config) |
-| `GET` | `/metrics` | Prometheus metrics (when `ENABLE_METRICS=true`) |
-| `POST` | `/api/v1/auth/register` | Create a new user |
-| `POST` | `/api/v1/auth/login` | Exchange email + password for a JWT |
-| `GET` | `/api/v1/auth/me` | Get the current authenticated user |
+| `GET` | `/ready` | Readiness check (DB + AI config) |
+| `GET` | `/metrics` | Prometheus metrics |
+| `POST` | `/api/v1/auth/register` | Create a user |
+| `POST` | `/api/v1/auth/login` | Exchange credentials for access + refresh tokens |
+| `POST` | `/api/v1/auth/refresh` | Rotate a refresh token for a new token pair |
+| `GET` | `/api/v1/auth/me` | Get the current user |
 | `POST` | `/api/v1/interviews/` | Create an interview session |
-| `GET` | `/api/v1/interviews/` | List the current user's sessions |
-| `GET` | `/api/v1/interviews/{session_id}` | Get a session and its questions |
-| `PATCH` | `/api/v1/interviews/{session_id}` | Update a draft session |
-| `DELETE` | `/api/v1/interviews/{session_id}` | Delete a session |
-| `POST` | `/api/v1/interviews/{session_id}/questions/generate` | Generate questions via Gemini |
-| `GET` | `/api/v1/interviews/{session_id}/questions` | List a session's questions |
+| `POST` | `/api/v1/interviews/{id}/questions/generate` | Generate questions via Gemini |
 | `POST` | `/api/v1/interviews/{session_id}/responses` | Upload an audio response (multipart) |
-| `GET` | `/api/v1/interviews/{session_id}/responses` | List audio responses for a session |
-| `GET` | `/api/v1/responses/{response_id}/status` | Get a response's status |
-| `POST` | `/api/v1/responses/{response_id}/process` | Trigger background processing |
-| `GET` | `/api/v1/responses/{response_id}/processing-status` | Poll processing status (used by the UI) |
-| `GET` | `/api/v1/responses/{response_id}/transcript` | Get the Whisper transcript |
-| `GET` | `/api/v1/responses/{response_id}/analysis` | Get the Gemini evaluation |
+| `GET` | `/api/v1/responses/{id}/processing-status` | Poll processing status (used by the UI) |
+| `GET` | `/api/v1/responses/{id}/transcript` | Get the Whisper transcript |
+| `GET` | `/api/v1/responses/{id}/analysis` | Get the Gemini evaluation |
+| `POST` | `/api/v1/live-interviews/` | Start a live conversational interview |
+| `POST` | `/api/v1/documents/resume/upload` | Upload a resume for RAG |
+| `POST` | `/api/v1/interviews/{id}/predict` | Run success prediction |
+| `POST` | `/api/v1/interviews/{id}/coaching-plan` | Generate a career coaching plan |
 
-Interactive docs (`/docs`, `/redoc`) are available when `DEBUG=true` and
-disabled in production.
+Every endpoint — including full request/response JSON examples and error
+codes — is documented in **[docs/API.md](docs/API.md)**.
 
----
+## Local setup
 
-## Local Setup
-
-### Backend
-
-```bash
-cd backend
-python -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-
-cp ../.env.example ../.env         # fill in DATABASE_URL, JWT_SECRET_KEY, GEMINI_API_KEY
-alembic upgrade head
-uvicorn app.main:app --reload
-```
-
-API available at `http://localhost:8000` (`/docs` when `DEBUG=true`).
-
-### Frontend
+### Docker (recommended)
 
 ```bash
-cd frontend
-npm install
-cp .env.example .env               # VITE_API_BASE_URL=http://localhost:8000
-npm run dev
-```
-
-App available at `http://localhost:5173`.
-
-### Tests
-
-```bash
-# Backend (250 tests)
-cd backend && pytest
-
-# Frontend (31 tests)
-cd frontend && npm run test
-```
-
----
-
-## Docker Setup
-
-```bash
-cp .env.example .env               # fill in secrets
+cp .env.example .env   # fill in JWT_SECRET_KEY and GEMINI_API_KEY
 docker-compose up --build
 docker-compose exec backend alembic upgrade head   # first run only
 ```
 
-This starts PostgreSQL and the FastAPI backend (`http://localhost:8000`)
-with live-reload and a bind-mounted source tree. See
-[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for the migration and persistent
-storage strategy used in production, and
-[docs/INFRASTRUCTURE.md](docs/INFRASTRUCTURE.md) for CI/CD, health/readiness
-checks, metrics, and tracing.
+Backend at `http://localhost:8000`.
 
----
+### Without Docker
 
-## Render Deployment
+```bash
+# Backend
+cd backend
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+cp ../.env.example ../.env
+alembic upgrade head
+uvicorn app.main:app --reload
 
-The backend (Docker Web Service + managed PostgreSQL + persistent Disk) and
-frontend (Static Site) are deployable to [Render](https://render.com) with
-no code changes beyond what's already in this repo. Full step-by-step
-instructions — including environment variables, the Alembic pre-deploy
-command, the SPA rewrite rule, and a troubleshooting guide — are in
-[docs/RENDER_DEPLOYMENT.md](docs/RENDER_DEPLOYMENT.md).
+# Frontend (separate terminal)
+cd frontend
+npm install
+cp .env.example .env   # VITE_API_BASE_URL=http://localhost:8000
+npm run dev
+```
 
----
+Frontend at `http://localhost:5173`. Full setup, every environment
+variable, common commands, a debugging guide, and the migration workflow
+are in **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**.
 
-## Future Improvements
+## Deployment
 
-- In-browser audio recording (`MediaRecorder`) instead of file upload only
-- Emotion/sentiment signals from audio (tone, pace) alongside transcript
-  analysis
-- Object storage (S3/R2) for uploaded audio instead of a local Disk, enabling
-  horizontal scaling
-- A job queue (e.g. Celery/RQ) for the processing pipeline instead of
+The backend is a single Docker image deployable to **Render** (documented
+in full at [docs/RENDER_DEPLOYMENT.md](docs/RENDER_DEPLOYMENT.md)) or
+**Railway**; the frontend is a static Vite build deployable to Render
+Static Site or **Vercel**. Database migrations run as a pre-deploy step
+(not at application startup) and uploaded audio requires a persistent
+volume (Render Disk / Railway Volume) — see
+**[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** for the full strategy and
+platform-by-platform steps.
+
+## Testing
+
+```bash
+cd backend && pytest --cov=app --cov-report=term-missing   # 250 tests, 81% coverage
+cd frontend && npm run coverage                             # 31 tests, ~25% coverage
+```
+
+Backend coverage is healthy (81%) across auth, session CRUD, the
+processing pipeline state machine, and security controls. Frontend
+coverage is low (~25%) and concentrated on a few components built
+test-first — several pages currently have zero coverage. This gap is
+documented honestly, not hidden, in
+**[docs/TESTING.md](docs/TESTING.md)**, along with what's well-tested and
+where a new contributor could add the most value.
+
+## CI/CD
+
+Two GitHub Actions workflows run on every push to `main` and every pull
+request:
+
+- **`ci.yml`** — backend lint (`ruff` + `black`), frontend lint
+  (`eslint`), backend tests + coverage, frontend tests + coverage,
+  frontend build verification, and a Docker build validation.
+- **`security.yml`** — `pip-audit`, `npm audit`, and GitHub CodeQL static
+  analysis.
+
+Full job-by-job breakdown in **[docs/INFRASTRUCTURE.md](docs/INFRASTRUCTURE.md)**.
+
+## Monitoring & observability
+
+- **Structured JSON logging** with request-ID correlation
+  (`ObservabilityMiddleware`), slow-request warnings, and a dedicated
+  security-event logger.
+- **Prometheus metrics** at `/metrics` — HTTP request/error counts and
+  latency histograms, AI call counts/latency by provider, DB query
+  duration, background-task outcomes.
+- **OpenTelemetry tracing** (opt-in via `ENABLE_TRACING=true`) — automatic
+  HTTP/SQLAlchemy spans plus manual spans around every Gemini/Whisper/RAG
+  call site.
+- **`/health`** (liveness, no DB access) and **`/ready`** (readiness — DB
+  connectivity + AI config check) for orchestrator probes.
+
+Full detail in **[docs/INFRASTRUCTURE.md](docs/INFRASTRUCTURE.md)**.
+
+## Security
+
+- JWT access tokens with an instantly-revocable `token_version` claim;
+  refresh tokens stored only as SHA-256 hashes and rotated on every use.
+- Per-IP login rate limiting and progressive-backoff account lockout.
+- Layered file-upload validation: MIME allow-list, size ceiling,
+  magic-byte signature check, filename sanitization, and a malware-scan
+  integration point.
+- Security headers (CSP, X-Frame-Options, X-Content-Type-Options,
+  Referrer-Policy, Permissions-Policy, HSTS in production) on every
+  response.
+- Ownership enforcement returns `404` (not `403`) on cross-user access, to
+  avoid leaking resource existence.
+
+Full detail, known limitations, and upgrade paths are documented in the
+root **[SECURITY.md](SECURITY.md)** (with a short pointer at
+[docs/SECURITY.md](docs/SECURITY.md)).
+
+## Screenshots
+
+> Screenshots are not yet committed — see
+> [docs/screenshots.md](docs/screenshots.md) for the full capture list and
+> filenames. The table below marks every placeholder explicitly so it's
+> clear none of these images exist in the repo yet.
+
+| View | Status |
+|---|---|
+| Landing page | 🔲 placeholder — not yet captured |
+| Dashboard | 🔲 placeholder — not yet captured |
+| Resume upload | 🔲 placeholder — not yet captured |
+| Interview session | 🔲 placeholder — not yet captured |
+| Voice analytics | 🔲 placeholder — not yet captured |
+| Career coach | 🔲 placeholder — not yet captured |
+| Reports | 🔲 placeholder — not yet captured |
+
+## Documentation
+
+| Doc | Covers |
+|---|---|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System, request-flow, auth-flow, deployment diagrams |
+| [docs/DATABASE.md](docs/DATABASE.md) | Full ER diagram, table reference, migrations |
+| [docs/API.md](docs/API.md) | Every endpoint, with request/response examples |
+| [docs/AI_PIPELINE.md](docs/AI_PIPELINE.md) | Step-by-step AI processing pipelines |
+| [docs/SECURITY.md](docs/SECURITY.md) | Pointer to the root [SECURITY.md](SECURITY.md) |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Migrations, storage, Render/Railway/Vercel |
+| [docs/RENDER_DEPLOYMENT.md](docs/RENDER_DEPLOYMENT.md) | Step-by-step Render setup |
+| [docs/INFRASTRUCTURE.md](docs/INFRASTRUCTURE.md) | CI/CD, Docker, logging, metrics, tracing |
+| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Setup, commands, env vars, debugging, migrations |
+| [docs/TESTING.md](docs/TESTING.md) | Test suites, honest coverage numbers |
+| [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | CI, Docker, deployment issues |
+| [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | PR workflow, GitHub project setup |
+| [docs/CHANGELOG.md](docs/CHANGELOG.md) | Project history by date |
+| [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | Community standards |
+
+## Roadmap
+
+### Completed
+
+- ✅ Core interview loop: question generation, audio upload, Whisper
+  transcription, Gemini evaluation
+- ✅ JWT auth with refresh-token rotation, account lockout, rate limiting
+- ✅ Voice analytics (librosa), AI follow-up interviewer, analytics
+  dashboard, session reports
+- ✅ Live conversational AI interviews
+- ✅ Resume/JD RAG question generation
+- ✅ Predictive analytics (success prediction + percentile benchmarking)
+- ✅ AI career coaching (7/14/30-day plans)
+- ✅ Production infrastructure: observability, CI/CD, hardened Docker
+- ✅ Open-source documentation overhaul (this pass)
+
+### Future enhancements
+
+- 🔲 In-browser audio recording (`MediaRecorder`) instead of file upload only
+- 🔲 Frontend test coverage for currently-untested pages (see
+  [docs/TESTING.md](docs/TESTING.md#known-gap--this-is-the-honest-state-not-a-target))
+- 🔲 Object storage (S3/R2) for uploaded audio, enabling horizontal scaling
+- 🔲 A job queue (Celery/RQ) for the processing pipeline instead of
   in-process background tasks
-- CI pipeline (lint, type-check, test) on every push/PR
-- Session-level summary report aggregating all question scores
-
----
+- 🔲 Redis-backed rate limiting for multi-worker/multi-instance deployments
+- 🔲 A real malware-scanning backend behind the current stub hook
+- 🔲 Tagged releases with semantic versioning (see
+  [docs/CONTRIBUTING.md § Versioning](docs/CONTRIBUTING.md#versioning--releases))
 
 ## License
 

@@ -1,0 +1,24 @@
+title: "[Question] "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For "how do I..." or "why does X work this way" questions. Check
+        [docs/](../../docs/) first — in particular
+        [DEVELOPMENT.md](../../docs/DEVELOPMENT.md) and
+        [TROUBLESHOOTING.md](../../docs/TROUBLESHOOTING.md) — your question
+        may already be answered there.
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: What you've already tried / read
+      description: Helps avoid pointing you back to something you've already checked.
+    validations:
+      required: false
