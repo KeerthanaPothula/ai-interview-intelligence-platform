@@ -28,7 +28,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: "pip"
 
       # Lint/format checks are static analysis — they don't need the app's
       # runtime dependencies (FastAPI, torch, etc.) installed, only the

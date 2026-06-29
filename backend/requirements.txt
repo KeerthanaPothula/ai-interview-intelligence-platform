@@ -78,7 +78,17 @@ google-genai==1.14.0
 # on first inference. To pre-bake into the Docker image and avoid a
 # cold-start download, add to Dockerfile after pip install:
 #   RUN python -c "import whisper; whisper.load_model('base')"
-openai-whisper==20231117
+#
+# Pinned to 20250625, not the older 20231117: that release's setup.py
+# reads `import pkg_resources` to build its sdist, and pip's isolated
+# build environment installs the latest setuptools to build it — which
+# no longer ships pkg_resources, so the build fails with
+# `ModuleNotFoundError: No module named 'pkg_resources'` on a clean
+# install (reproduced in CI and via Docker; this repo's dev venvs never
+# hit it because openai-whisper was already installed before setuptools
+# moved past that point). 20250625 builds via pyproject.toml and has no
+# such dependency.
+openai-whisper==20250625
 
 # Byte-pair encoding tokenizer used by Whisper's preprocessing pipeline.
 # openai-whisper requires tiktoken>=0.3.3. Pinned to 0.13.0 — the version
