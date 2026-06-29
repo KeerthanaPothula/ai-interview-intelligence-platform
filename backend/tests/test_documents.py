@@ -1,7 +1,6 @@
 """Tests for document upload and RAG question generation endpoints."""
 
 import io
-import json
 import uuid
 
 from app.config import get_settings

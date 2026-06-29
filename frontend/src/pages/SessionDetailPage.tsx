@@ -20,6 +20,7 @@ export function SessionDetailPage() {
   useEffect(() => {
     if (!token || !sessionId) return;
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- resets loading state when sessionId/token changes
     setLoading(true);
     Promise.all([getSession(sessionId, token), listResponses(sessionId, token)])
       .then(([sessionData, responseData]) => {

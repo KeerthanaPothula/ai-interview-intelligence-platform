@@ -36,17 +36,22 @@ Why docs are disabled in production:
 from __future__ import annotations
 
 import logging
-import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
+from starlette.responses import Response
 
 from app.config import get_settings
 from app.core.constants import API_V1_PREFIX
 from app.core.exceptions import register_exception_handlers
+from app.core.logging_config import configure_logging
+from app.core.middleware import ObservabilityMiddleware
 from app.core.security_headers import SecurityHeadersMiddleware
-from app.database import SessionLocal
+from app.core.tracing import configure_tracing
+from app.database import SessionLocal, engine
 from app.routers.analytics import router as analytics_router
 from app.routers.auth import router as auth_router
 from app.routers.documents import router as documents_router
@@ -60,43 +65,24 @@ from app.routers.responses import router as responses_router
 from app.services import processing_service
 
 # ---------------------------------------------------------------------------
-# Logging configuration
-#
-# No logging configuration existed previously: the root logger's default
-# level (WARNING) silently dropped every logger.info(...) call made
-# throughout the app (processing_service, transcription_service,
-# evaluation_service, startup recovery, session completion, etc.), and
-# logger.warning/error calls fell back to logging.lastResort — an
-# unformatted stderr handler with no timestamp.
-#
-# configure_logging() attaches a single StreamHandler to the root logger at
-# INFO level with LOG_FORMAT below. Every app.* logger created via
-# logging.getLogger(__name__) is a descendant of root and propagates to this
-# handler. logging.Formatter.converter = time.gmtime makes %(asctime)s
-# render in UTC regardless of host timezone, matching how Render displays
-# log timestamps.
-#
-# logging.basicConfig() is a no-op if the root logger already has handlers,
-# so calling configure_logging() more than once is harmless.
-# ---------------------------------------------------------------------------
-LOG_FORMAT = "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
-
-
-def configure_logging() -> None:
-    logging.Formatter.converter = time.gmtime
-    logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
-
-
-configure_logging()
-
-logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
 # Settings — loaded once at startup via @lru_cache.
 # If any required env var is missing or invalid, pydantic raises ValidationError
 # here — the process exits immediately rather than serving broken requests.
 # ---------------------------------------------------------------------------
 settings = get_settings()
+
+# ---------------------------------------------------------------------------
+# Logging configuration
+#
+# configure_logging() attaches a single StreamHandler to the root logger,
+# formatted as structured JSON by default (settings.LOG_FORMAT) so log
+# aggregation tools can parse every line, with every record tagged with
+# the current request ID (see app.core.request_context) for correlation.
+# Idempotent — calling it more than once just replaces the handler.
+# ---------------------------------------------------------------------------
+configure_logging(settings.LOG_LEVEL, settings.LOG_FORMAT)
+
+logger = logging.getLogger(__name__)
 
 _VERSION = "0.2.0"
 
@@ -211,6 +197,23 @@ app.add_middleware(
 app.add_middleware(SecurityHeadersMiddleware, settings=settings)
 
 # ---------------------------------------------------------------------------
+# Observability
+#
+# Assigns/propagates a request ID (header configurable via
+# REQUEST_ID_HEADER), times every request, logs slow requests, and records
+# Prometheus HTTP metrics. Added last so it is the outermost middleware —
+# its timing covers CORS and security-header processing too.
+# ---------------------------------------------------------------------------
+app.add_middleware(ObservabilityMiddleware, settings=settings)
+
+# ---------------------------------------------------------------------------
+# Tracing
+#
+# No-op unless ENABLE_TRACING is set — see app.core.tracing.
+# ---------------------------------------------------------------------------
+configure_tracing(app, engine, settings)
+
+# ---------------------------------------------------------------------------
 # Global exception handling
 #
 # Registers handlers for AppException (and its subclasses — ResourceNotFound,
@@ -280,3 +283,78 @@ def health_check() -> dict[str, str | bool]:
         "version": _VERSION,
         "audio_processing_enabled": settings.ENABLE_AUDIO_PROCESSING,
     }
+
+
+# ---------------------------------------------------------------------------
+# Readiness check
+#
+# Unlike /health, this verifies the dependencies the app actually needs to
+# serve traffic correctly: a reachable database, and (non-blocking) that
+# the Gemini API key is configured. Orchestrators (Kubernetes, Render, ECS)
+# use this to decide whether to route traffic to an instance — a process
+# can be alive (/health == 200) while not yet ready (/ready == 503), e.g.
+# during a transient DB outage.
+#
+# The DB check runs a trivial "SELECT 1" in a worker thread with a hard
+# timeout (READINESS_DB_TIMEOUT_SECONDS) so a hanging connection can never
+# make the readiness probe itself hang past the orchestrator's own timeout.
+# ---------------------------------------------------------------------------
+
+_readiness_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="readiness")
+
+
+def _check_database() -> tuple[bool, str | None]:
+    try:
+        db = SessionLocal()
+        try:
+            db.execute(text("SELECT 1"))
+        finally:
+            db.close()
+        return True, None
+    except Exception as exc:  # noqa: BLE001 - readiness must report, not raise
+        return False, str(exc)
+
+
+@app.get("/ready", tags=["Health"], summary="Readiness check")
+def readiness_check(response: Response) -> dict[str, object]:
+    """Verify dependencies required to serve traffic.
+
+    Returns HTTP 200 when ready, HTTP 503 otherwise. Checks:
+      - Database connectivity (a real query, bounded by a timeout).
+      - AI provider configuration presence (non-blocking — checks that
+        GEMINI_API_KEY is set, does not call the Gemini API).
+    """
+    future = _readiness_executor.submit(_check_database)
+    try:
+        db_ok, db_error = future.result(timeout=settings.READINESS_DB_TIMEOUT_SECONDS)
+    except FutureTimeoutError:
+        db_ok, db_error = False, "Database check timed out."
+
+    ai_configured = bool(settings.GEMINI_API_KEY)
+
+    checks = {
+        "database": {"ok": db_ok, "error": db_error},
+        "ai_provider_configured": {"ok": ai_configured},
+    }
+    ready = db_ok and ai_configured
+
+    response.status_code = 200 if ready else 503
+    return {"status": "ready" if ready else "not_ready", "checks": checks}
+
+
+# ---------------------------------------------------------------------------
+# Metrics
+#
+# Prometheus text-format scrape endpoint. Disabled (404) when
+# ENABLE_METRICS is False, matching ObservabilityMiddleware which skips
+# recording metrics in that case too.
+# ---------------------------------------------------------------------------
+
+if settings.ENABLE_METRICS:
+
+    @app.get("/metrics", tags=["Health"], summary="Prometheus metrics")
+    def metrics() -> Response:
+        from app.core.metrics import render_metrics
+
+        body, content_type = render_metrics()
+        return Response(content=body, media_type=content_type)

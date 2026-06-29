@@ -26,7 +26,11 @@ from app.models.interview import (
     Question,
 )
 from app.models.features import VoiceAnalysis
-from app.services import evaluation_service, transcription_service, voice_analysis_service
+from app.services import (
+    evaluation_service,
+    transcription_service,
+    voice_analysis_service,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -811,9 +815,7 @@ def process_response(response_id: uuid.UUID) -> None:
             )
 
             total_question_count = (
-                db.query(Question)
-                .filter(Question.session_id == session_id)
-                .count()
+                db.query(Question).filter(Question.session_id == session_id).count()
             )
 
             if completed_response_count == total_question_count:

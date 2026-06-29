@@ -1,8 +1,31 @@
 # -------------------------------------------------------------
-# Base image — python:3.12-slim
-# slim = Debian without compilers, manpages, or docs.
-# Smaller attack surface and faster pulls than the full image.
-# 3.12 is the current stable release (security updates until 2028).
+# Stage 1/2 — builder
+# Resolves and installs Python dependencies into an isolated prefix
+# (/install) so the runtime stage below can copy over only the
+# installed packages — not pip's wheel cache, apt lists, or any
+# build-time-only files — keeping the final image smaller.
+# -------------------------------------------------------------
+FROM python:3.12-slim AS builder
+
+ENV PYTHONDONTWRITEBYTECODE=1
+WORKDIR /app
+
+# Dependency installation — runs as its own layer.
+# Docker only rebuilds this layer when requirements.txt changes.
+# Copying just requirements.txt before the source code is the
+# standard technique for maximising build cache hits.
+COPY requirements.txt .
+
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir --prefix=/install -r requirements.txt
+# --no-cache-dir prevents pip from writing a local HTTP cache inside
+# the image layer. --prefix=/install gives the runtime stage a single,
+# self-contained directory to COPY --from=builder.
+
+# -------------------------------------------------------------
+# Stage 2/2 — runtime
+# Lean image: only the installed packages, ffmpeg, and app source —
+# no pip, no build cache, no apt package index.
 # -------------------------------------------------------------
 FROM python:3.12-slim
 
@@ -23,9 +46,7 @@ WORKDIR /app
 # uploaded audio (mp3, wav, webm, ogg, mp4, m4a) into the raw PCM
 # format it operates on. Without it, every transcription fails with
 # "ffmpeg is not installed or not available in PATH" — see
-# requirements.txt for the corresponding note. Installed as its own
-# layer, before requirements.txt is copied, so editing Python deps
-# never invalidates this (rarely-changing) layer.
+# requirements.txt for the corresponding note.
 # --no-install-recommends keeps the apt closure minimal; the apt
 # index is removed afterwards so it isn't carried in the image layer.
 # -------------------------------------------------------------
@@ -33,25 +54,29 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends ffmpeg && \
     rm -rf /var/lib/apt/lists/*
 
-# -------------------------------------------------------------
-# Dependency installation — runs as its own layer.
-# Docker only rebuilds this layer when requirements.txt changes.
-# Copying just requirements.txt before the source code is the
-# standard technique for maximising build cache hits.
-# -------------------------------------------------------------
-COPY requirements.txt .
+# Packages built in the builder stage, copied as a single layer.
+COPY --from=builder /install /usr/local
 
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
-# --no-cache-dir prevents pip from writing a local HTTP cache inside
-# the image layer, keeping the final image measurably smaller.
+# -------------------------------------------------------------
+# Non-root container user
+# Running as root inside a container is unnecessary privilege: a
+# container-escape or dependency RCE then has root in the container by
+# default. uid/gid 1000 is the conventional first non-system Linux
+# user, chosen so it lines up with the default host user on most dev
+# machines for bind-mount permission compatibility.
+# -------------------------------------------------------------
+RUN groupadd --gid 1000 appuser \
+    && useradd --uid 1000 --gid appuser --shell /usr/sbin/nologin --no-create-home appuser
 
 # -------------------------------------------------------------
 # Uploads directory
-# Created here so the path exists even before the Docker volume
-# from docker-compose is mounted over it at runtime.
+# Created and owned by appuser here so the path exists — with the
+# right ownership — even before the Docker volume from docker-compose
+# is mounted over it at runtime (Docker initialises a fresh named
+# volume's content/permissions from whatever already exists at the
+# mount point in the image).
 # -------------------------------------------------------------
-RUN mkdir -p /app/uploads
+RUN mkdir -p /app/uploads && chown -R appuser:appuser /app
 
 # -------------------------------------------------------------
 # Application source
@@ -61,11 +86,26 @@ RUN mkdir -p /app/uploads
 # so this layer is effectively bypassed — it exists for production
 # builds that do not use a volume mount.
 # -------------------------------------------------------------
-COPY . .
+COPY --chown=appuser:appuser . .
+
+USER appuser
 
 # Document the port the application listens on.
 # Does not actually publish the port — docker-compose handles that.
 EXPOSE 8000
+
+# -------------------------------------------------------------
+# Health check
+# Uses Python's stdlib (urllib) instead of curl/wget so no extra
+# package has to be installed in the runtime image just for this.
+# Hits /health (not /ready) deliberately: HEALTHCHECK governs container
+# restart/orchestration liveness, and /health never touches the
+# database — matching the liveness-vs-readiness split documented in
+# docs/INFRASTRUCTURE.md. start-period gives Whisper's model load and
+# DB connection pool warmup time before failures count.
+# -------------------------------------------------------------
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)" || exit 1
 
 # -------------------------------------------------------------
 # Production startup command.

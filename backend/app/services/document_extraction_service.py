@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
+
+from app.core.tracing import get_tracer
 
 logger = logging.getLogger(__name__)
+tracer = get_tracer(__name__)
 
 _SUPPORTED_MIME = {
     "application/pdf": "pdf",
@@ -33,12 +35,14 @@ def extract_text_from_docx(file_path: str) -> str:
 
 def extract_text(file_path: str, mime_type: str) -> str:
     """Dispatch to the correct extractor based on mime_type."""
-    fmt = _SUPPORTED_MIME.get(mime_type)
-    if fmt == "pdf":
-        return extract_text_from_pdf(file_path)
-    if fmt == "docx":
-        return extract_text_from_docx(file_path)
-    raise ValueError(f"Unsupported document type: {mime_type}")
+    with tracer.start_as_current_span("resume.extract_text") as span:
+        span.set_attribute("document.mime_type", mime_type)
+        fmt = _SUPPORTED_MIME.get(mime_type)
+        if fmt == "pdf":
+            return extract_text_from_pdf(file_path)
+        if fmt == "docx":
+            return extract_text_from_docx(file_path)
+        raise ValueError(f"Unsupported document type: {mime_type}")
 
 
 def is_supported(mime_type: str) -> bool:

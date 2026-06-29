@@ -10,8 +10,10 @@ from google import genai
 
 from app.config import get_settings
 from app.core.ai_reliability import call_gemini_with_retry, parse_json_response
+from app.core.tracing import get_tracer
 
 logger = logging.getLogger(__name__)
+tracer = get_tracer(__name__)
 
 READINESS_LEVELS = [
     "Beginner",
@@ -69,98 +71,99 @@ def generate_session_report(
         readiness_level, model_used.
     """
 
-    # ------------------------------------------------------------------
-    # Aggregate numeric scores
-    # ------------------------------------------------------------------
-    def _extract(key: str) -> list[float]:
-        return [float(a[key]) for a in analyses if a.get(key) is not None]
+    with tracer.start_as_current_span("report.generate_session_report"):
+        # ------------------------------------------------------------------
+        # Aggregate numeric scores
+        # ------------------------------------------------------------------
+        def _extract(key: str) -> list[float]:
+            return [float(a[key]) for a in analyses if a.get(key) is not None]
 
-    final_score = _safe_mean(_extract("overall_score"))
-    communication_score = _safe_mean(_extract("communication_score"))
-    technical_score = _safe_mean(_extract("technical_score"))
-    problem_solving_score = _safe_mean(_extract("problem_solving_score"))
+        final_score = _safe_mean(_extract("overall_score"))
+        communication_score = _safe_mean(_extract("communication_score"))
+        technical_score = _safe_mean(_extract("technical_score"))
+        problem_solving_score = _safe_mean(_extract("problem_solving_score"))
 
-    voice_confidence_scores = [
-        v["confidence_score"]
-        for v in voice_analytics
-        if v.get("confidence_score") is not None
-    ]
-    avg_voice_confidence = (
-        int(sum(voice_confidence_scores) / len(voice_confidence_scores))
-        if voice_confidence_scores
-        else None
-    )
+        voice_confidence_scores = [
+            v["confidence_score"]
+            for v in voice_analytics
+            if v.get("confidence_score") is not None
+        ]
+        avg_voice_confidence = (
+            int(sum(voice_confidence_scores) / len(voice_confidence_scores))
+            if voice_confidence_scores
+            else None
+        )
 
-    # ------------------------------------------------------------------
-    # Build prompt
-    # ------------------------------------------------------------------
-    qa_summary = ""
-    for i, qt in enumerate(questions_and_transcripts[:10], 1):
-        q = qt.get("question", "")
-        t = qt.get("transcript", "")[:500]
-        qa_summary += f"\nQ{i}: {q}\nA{i} (excerpt): {t}\n"
+        # ------------------------------------------------------------------
+        # Build prompt
+        # ------------------------------------------------------------------
+        qa_summary = ""
+        for i, qt in enumerate(questions_and_transcripts[:10], 1):
+            q = qt.get("question", "")
+            t = qt.get("transcript", "")[:500]
+            qa_summary += f"\nQ{i}: {q}\nA{i} (excerpt): {t}\n"
 
-    score_summary = (
-        f"Overall: {final_score}/10, "
-        f"Communication: {communication_score}/10, "
-        f"Technical: {technical_score}/10, "
-        f"Problem Solving: {problem_solving_score}/10"
-    )
+        score_summary = (
+            f"Overall: {final_score}/10, "
+            f"Communication: {communication_score}/10, "
+            f"Technical: {technical_score}/10, "
+            f"Problem Solving: {problem_solving_score}/10"
+        )
 
-    prompt = (
-        "You are a senior hiring manager evaluating a job interview.\n\n"
-        f"Role: {job_role}\n"
-        f"Job Description: {job_description[:800]}\n\n"
-        f"Interview Q&A Summary:{qa_summary}\n"
-        f"AI Score Summary: {score_summary}\n\n"
-        "Generate a structured evaluation as valid JSON (no markdown fences) "
-        "with this exact shape:\n"
-        "{\n"
-        '  "overall_performance": "<2-3 sentence narrative summary>",\n'
-        '  "strengths": ["<bullet 1>", "<bullet 2>", "<bullet 3>"],\n'
-        '  "weaknesses": ["<bullet 1>", "<bullet 2>"],\n'
-        '  "improvement_plan": ["<step 1>", "<step 2>", "<step 3>"],\n'
-        f'  "readiness_level": "<one of: {", ".join(READINESS_LEVELS)}>"\n'
-        "}\n"
-        "Be specific, constructive, and grounded in the Q&A evidence."
-    )
+        prompt = (
+            "You are a senior hiring manager evaluating a job interview.\n\n"
+            f"Role: {job_role}\n"
+            f"Job Description: {job_description[:800]}\n\n"
+            f"Interview Q&A Summary:{qa_summary}\n"
+            f"AI Score Summary: {score_summary}\n\n"
+            "Generate a structured evaluation as valid JSON (no markdown fences) "
+            "with this exact shape:\n"
+            "{\n"
+            '  "overall_performance": "<2-3 sentence narrative summary>",\n'
+            '  "strengths": ["<bullet 1>", "<bullet 2>", "<bullet 3>"],\n'
+            '  "weaknesses": ["<bullet 1>", "<bullet 2>"],\n'
+            '  "improvement_plan": ["<step 1>", "<step 2>", "<step 3>"],\n'
+            f'  "readiness_level": "<one of: {", ".join(READINESS_LEVELS)}>"\n'
+            "}\n"
+            "Be specific, constructive, and grounded in the Q&A evidence."
+        )
 
-    client = _get_client()
-    settings = get_settings()
-    response = call_gemini_with_retry(
-        lambda: client.models.generate_content(
-            model=settings.GEMINI_MODEL, contents=prompt
-        ),
-        operation="Session report generation",
-    )
-    parsed = parse_json_response(
-        response.text, operation="Session report generation", expect=dict
-    )
+        client = _get_client()
+        settings = get_settings()
+        response = call_gemini_with_retry(
+            lambda: client.models.generate_content(
+                model=settings.GEMINI_MODEL, contents=prompt
+            ),
+            operation="Session report generation",
+        )
+        parsed = parse_json_response(
+            response.text, operation="Session report generation", expect=dict
+        )
 
-    strengths = parsed.get("strengths", [])
-    weaknesses = parsed.get("weaknesses", [])
-    improvement_plan = parsed.get("improvement_plan", [])
-    readiness_level = parsed.get("readiness_level", "Developing")
+        strengths = parsed.get("strengths", [])
+        weaknesses = parsed.get("weaknesses", [])
+        improvement_plan = parsed.get("improvement_plan", [])
+        readiness_level = parsed.get("readiness_level", "Developing")
 
-    if readiness_level not in READINESS_LEVELS:
-        readiness_level = "Developing"
+        if readiness_level not in READINESS_LEVELS:
+            readiness_level = "Developing"
 
-    logger.info(
-        "Session report generated: readiness=%r, final_score=%s",
-        readiness_level,
-        final_score,
-    )
+        logger.info(
+            "Session report generated: readiness=%r, final_score=%s",
+            readiness_level,
+            final_score,
+        )
 
-    return {
-        "overall_performance": parsed.get("overall_performance", ""),
-        "final_score": final_score,
-        "confidence_score": avg_voice_confidence,
-        "communication_score": communication_score,
-        "technical_score": technical_score,
-        "problem_solving_score": problem_solving_score,
-        "strengths": json.dumps(strengths),
-        "weaknesses": json.dumps(weaknesses),
-        "improvement_plan": json.dumps(improvement_plan),
-        "readiness_level": readiness_level,
-        "model_used": settings.GEMINI_MODEL,
-    }
+        return {
+            "overall_performance": parsed.get("overall_performance", ""),
+            "final_score": final_score,
+            "confidence_score": avg_voice_confidence,
+            "communication_score": communication_score,
+            "technical_score": technical_score,
+            "problem_solving_score": problem_solving_score,
+            "strengths": json.dumps(strengths),
+            "weaknesses": json.dumps(weaknesses),
+            "improvement_plan": json.dumps(improvement_plan),
+            "readiness_level": readiness_level,
+            "model_used": settings.GEMINI_MODEL,
+        }

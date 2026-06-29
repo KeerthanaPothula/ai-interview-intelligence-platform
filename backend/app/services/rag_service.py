@@ -12,10 +12,12 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.core.ai_reliability import call_gemini_with_retry, parse_json_response
+from app.core.tracing import get_tracer
 from app.models.documents import DocumentChunk
 from app.services import embedding_service
 
 logger = logging.getLogger(__name__)
+tracer = get_tracer(__name__)
 
 _client: genai.Client | None = None
 
@@ -96,31 +98,38 @@ def retrieve_relevant_chunks(
     k: int = 5,
 ) -> list[str]:
     """Return top-k relevant chunk texts for a query from the user's stored chunks."""
-    stmt = select(DocumentChunk).where(DocumentChunk.user_id == user_id)
-    chunks = db.execute(stmt).scalars().all()
+    with tracer.start_as_current_span("rag.retrieve_relevant_chunks") as span:
+        span.set_attribute("rag.k", k)
 
-    if not chunks:
-        return []
+        stmt = select(DocumentChunk).where(DocumentChunk.user_id == user_id)
+        chunks = db.execute(stmt).scalars().all()
 
-    chunk_embeddings = []
-    for c in chunks:
-        if c.embedding_json:
-            try:
-                emb = json.loads(c.embedding_json)
-                chunk_embeddings.append((c.chunk_text, emb))
-            except Exception:
-                pass
+        if not chunks:
+            return []
 
-    if not chunk_embeddings:
-        return [c.chunk_text for c in chunks[:k]]
+        chunk_embeddings = []
+        for c in chunks:
+            if c.embedding_json:
+                try:
+                    emb = json.loads(c.embedding_json)
+                    chunk_embeddings.append((c.chunk_text, emb))
+                except Exception:
+                    pass
 
-    try:
-        query_embedding = embedding_service.encode_text(query_text)
-        top_k = embedding_service.retrieve_top_k(query_embedding, chunk_embeddings, k=k)
-        return [text for text, _ in top_k]
-    except Exception:
-        logger.warning("RAG retrieval embedding failed — returning first %d chunks", k)
-        return [c.chunk_text for c in chunks[:k]]
+        if not chunk_embeddings:
+            return [c.chunk_text for c in chunks[:k]]
+
+        try:
+            query_embedding = embedding_service.encode_text(query_text)
+            top_k = embedding_service.retrieve_top_k(
+                query_embedding, chunk_embeddings, k=k
+            )
+            return [text for text, _ in top_k]
+        except Exception:
+            logger.warning(
+                "RAG retrieval embedding failed — returning first %d chunks", k
+            )
+            return [c.chunk_text for c in chunks[:k]]
 
 
 def generate_rag_questions(

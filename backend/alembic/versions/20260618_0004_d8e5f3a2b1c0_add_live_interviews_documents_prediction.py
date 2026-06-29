@@ -48,9 +48,7 @@ def upgrade() -> None:
             "current_turn >= 0 AND current_turn <= max_turns",
             name="ck_live_interview_sessions_turn",
         ),
-        sa.ForeignKeyConstraint(
-            ["user_id"], ["users.id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(
@@ -105,9 +103,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index(
-        "ix_resume_documents_user_id", "resume_documents", ["user_id"]
-    )
+    op.create_index("ix_resume_documents_user_id", "resume_documents", ["user_id"])
 
     # ── document_chunks ──────────────────────────────────────────────────────
     op.create_table(
@@ -135,9 +131,7 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index(
-        "ix_document_chunks_user_id", "document_chunks", ["user_id"]
-    )
+    op.create_index("ix_document_chunks_user_id", "document_chunks", ["user_id"])
 
     # ── interview_predictions ────────────────────────────────────────────────
     op.create_table(

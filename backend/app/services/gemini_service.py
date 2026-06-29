@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 
 import httpx
 from google import genai
@@ -10,12 +11,15 @@ from google.genai import errors as genai_errors
 from fastapi import HTTPException
 
 from app.config import get_settings
+from app.core.metrics import observe_ai_request
+from app.core.tracing import get_tracer
 from app.models.interview import (
     QUESTION_CATEGORY_BEHAVIORAL,
     VALID_QUESTION_CATEGORIES,
 )
 
 logger = logging.getLogger(__name__)
+tracer = get_tracer(__name__)
 
 # Compiled once at module load — matches both ```json ... ``` and ``` ... ```
 # Gemini wraps JSON in markdown fences even when instructed not to. The fence
@@ -181,19 +185,34 @@ def generate_questions(
     prompt = _build_prompt(job_role, job_description, count)
     model = get_settings().GEMINI_MODEL
 
+    start = time.perf_counter()
     try:
-        response = _client.models.generate_content(
-            model=model,
-            contents=prompt,
-        )
-        raw_text: str = response.text
+        with tracer.start_as_current_span("gemini.generate_questions") as span:
+            span.set_attribute("gemini.model", model)
+            response = _client.models.generate_content(
+                model=model,
+                contents=prompt,
+            )
+            raw_text: str = response.text
     except httpx.TimeoutException as exc:
+        observe_ai_request(
+            provider="gemini",
+            operation="generate_questions",
+            status="timeout",
+            duration_seconds=time.perf_counter() - start,
+        )
         logger.error("Gemini request timed out: %s", exc)
         raise HTTPException(
             status_code=502,
             detail="Question generation timed out. Please try again.",
         ) from exc
     except genai_errors.APIError as exc:
+        observe_ai_request(
+            provider="gemini",
+            operation="generate_questions",
+            status="rate_limited" if exc.code == 429 else "error",
+            duration_seconds=time.perf_counter() - start,
+        )
         if exc.code == 429:
             logger.warning("Gemini rate limit exceeded: %s", exc)
             raise HTTPException(
@@ -205,6 +224,13 @@ def generate_questions(
             status_code=502,
             detail="Question generation service is currently unavailable.",
         ) from exc
+
+    observe_ai_request(
+        provider="gemini",
+        operation="generate_questions",
+        status="success",
+        duration_seconds=time.perf_counter() - start,
+    )
 
     stripped = _strip_fences(raw_text)
 

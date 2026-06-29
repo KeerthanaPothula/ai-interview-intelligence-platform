@@ -136,9 +136,7 @@ def analyze_audio(
     frame_length = 2048
     hop_length = 512
     rms = librosa.feature.rms(y=y, frame_length=frame_length, hop_length=hop_length)[0]
-    times = librosa.frames_to_time(
-        np.arange(len(rms)), sr=sr, hop_length=hop_length
-    )
+    times = librosa.frames_to_time(np.arange(len(rms)), sr=sr, hop_length=hop_length)
 
     # Silence = below 10 % of mean RMS energy
     silence_threshold = float(np.mean(rms)) * 0.10

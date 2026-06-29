@@ -1,8 +1,11 @@
 """Tests for interview prediction, coaching plan, and benchmarking endpoints."""
 
-import json
+import importlib
 import uuid
 
+import pytest
+
+_sklearn_available = importlib.util.find_spec("sklearn") is not None
 
 _MOCK_PLAN = {
     "plan_7_day": ["Day 1-2: Practice STAR method", "Day 3-5: System design review"],
@@ -13,9 +16,16 @@ _MOCK_PLAN = {
 }
 
 
-def _mock_predict(*, overall_score, communication_score, technical_score,
-                   problem_solving_score, avg_confidence=60.0,
-                   avg_speaking_rate=130.0, avg_filler_words=3.0):
+def _mock_predict(
+    *,
+    overall_score,
+    communication_score,
+    technical_score,
+    problem_solving_score,
+    avg_confidence=60.0,
+    avg_speaking_rate=130.0,
+    avg_filler_words=3.0,
+):
     return 0.75, "Pass"
 
 
@@ -263,14 +273,6 @@ def test_get_benchmarks_requires_auth(client):
 # ---------------------------------------------------------------------------
 # prediction_service unit tests (skipped when scikit-learn is not installed)
 # ---------------------------------------------------------------------------
-
-import importlib
-import sys
-
-_sklearn_available = importlib.util.find_spec("sklearn") is not None
-
-
-import pytest
 
 
 @pytest.mark.skipif(not _sklearn_available, reason="scikit-learn not installed")

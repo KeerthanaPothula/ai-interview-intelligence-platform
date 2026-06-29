@@ -239,7 +239,7 @@ class InterviewAnalysisResponse(BaseModel):
         None,
         description=(
             "JSON-encoded array of identified strengths, "
-            "e.g. '[\"Clear structure\", \"Technical depth\"]'. "
+            'e.g. \'["Clear structure", "Technical depth"]\'. '
             "Null if the pipeline did not produce this field."
         ),
     )
@@ -309,7 +309,6 @@ class ProcessingStatusResponse(BaseModel):
     error_message: str | None = Field(
         None,
         description=(
-            "Human-readable failure reason. "
-            "Non-null only when status == 'failed'."
+            "Human-readable failure reason. " "Non-null only when status == 'failed'."
         ),
     )

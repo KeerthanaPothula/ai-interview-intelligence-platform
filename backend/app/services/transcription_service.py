@@ -2,14 +2,18 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
 import whisper
 
 from app.config import get_settings
+from app.core.metrics import observe_ai_request
+from app.core.tracing import get_tracer
 
 logger = logging.getLogger(__name__)
+tracer = get_tracer(__name__)
 
 # ---------------------------------------------------------------------------
 # Whisper singleton
@@ -86,19 +90,39 @@ def transcribe_audio(file_path: str) -> dict[str, Any]:
     stem = Path(file_path).name
     logger.info("Transcription started: %s", stem)
 
-    try:
-        result: dict[str, Any] = model.transcribe(file_path, verbose=False)
-    except FileNotFoundError:
-        # The audio file exists (confirmed above). A FileNotFoundError from
-        # model.transcribe() originates from Whisper's internal ffmpeg
-        # subprocess call — the ffmpeg executable was not found on PATH.
-        logger.error("Transcription failed: ffmpeg not found (file=%s)", stem)
-        raise RuntimeError("ffmpeg is not installed or not available in PATH")
-    except Exception as exc:
-        logger.error(
-            "Transcription failed: %s (file=%s)", type(exc).__name__, stem
-        )
-        raise
+    start = time.perf_counter()
+    with tracer.start_as_current_span("whisper.transcribe") as span:
+        span.set_attribute("whisper.model", get_settings().WHISPER_MODEL)
+        try:
+            result: dict[str, Any] = model.transcribe(file_path, verbose=False)
+        except FileNotFoundError:
+            # The audio file exists (confirmed above). A FileNotFoundError from
+            # model.transcribe() originates from Whisper's internal ffmpeg
+            # subprocess call — the ffmpeg executable was not found on PATH.
+            logger.error("Transcription failed: ffmpeg not found (file=%s)", stem)
+            observe_ai_request(
+                provider="whisper",
+                operation="transcribe",
+                status="error",
+                duration_seconds=time.perf_counter() - start,
+            )
+            raise RuntimeError("ffmpeg is not installed or not available in PATH")
+        except Exception as exc:
+            logger.error("Transcription failed: %s (file=%s)", type(exc).__name__, stem)
+            observe_ai_request(
+                provider="whisper",
+                operation="transcribe",
+                status="error",
+                duration_seconds=time.perf_counter() - start,
+            )
+            raise
+
+    observe_ai_request(
+        provider="whisper",
+        operation="transcribe",
+        status="success",
+        duration_seconds=time.perf_counter() - start,
+    )
 
     # ------------------------------------------------------------------
     # Result extraction

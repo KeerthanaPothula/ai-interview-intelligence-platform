@@ -1,8 +1,5 @@
 """Tests for the analytics dashboard endpoints."""
 
-import uuid
-
-
 # ---------------------------------------------------------------------------
 # GET /api/v1/analytics/overview
 # ---------------------------------------------------------------------------
@@ -49,7 +46,11 @@ def test_analytics_overview_scoped_to_user(
     # Register a second user and get their token.
     client.post(
         "/api/v1/auth/register",
-        json={"email": "bob@example.com", "password": "securepassword1", "full_name": "Bob"},
+        json={
+            "email": "bob@example.com",
+            "password": "securepassword1",
+            "full_name": "Bob",
+        },
     )
     login_resp = client.post(
         "/api/v1/auth/login",

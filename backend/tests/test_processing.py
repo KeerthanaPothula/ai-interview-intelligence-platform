@@ -102,20 +102,32 @@ class TestRecoverStuckJobs:
         self, db, interview_session, interview_question, registered_user
     ):
         uploaded = _make_response(
-            db, interview_session, interview_question, registered_user,
+            db,
+            interview_session,
+            interview_question,
+            registered_user,
             RESPONSE_STATUS_UPLOADED,
         )
         processing = _make_response(
-            db, interview_session, interview_question, registered_user,
+            db,
+            interview_session,
+            interview_question,
+            registered_user,
             RESPONSE_STATUS_PROCESSING,
         )
         failed = _make_response(
-            db, interview_session, interview_question, registered_user,
+            db,
+            interview_session,
+            interview_question,
+            registered_user,
             RESPONSE_STATUS_FAILED,
             error_message="Previous attempt: timed out",
         )
         completed = _make_response(
-            db, interview_session, interview_question, registered_user,
+            db,
+            interview_session,
+            interview_question,
+            registered_user,
             RESPONSE_STATUS_COMPLETED,
         )
 
@@ -279,7 +291,8 @@ class TestProcessResponseFailures:
     ):
         def _raise_evaluation_error(**kwargs):
             raise HTTPException(
-                status_code=502, detail="Interview evaluation service is currently unavailable."
+                status_code=502,
+                detail="Interview evaluation service is currently unavailable.",
             )
 
         monkeypatch.setattr(
@@ -763,7 +776,11 @@ class TestSessionCompletionCriteria:
         db.commit()
 
         response = _make_response(
-            db, interview_session, questions[0], registered_user, RESPONSE_STATUS_UPLOADED
+            db,
+            interview_session,
+            questions[0],
+            registered_user,
+            RESPONSE_STATUS_UPLOADED,
         )
         processing_service.process_response(response.id)
 
@@ -784,7 +801,11 @@ class TestSessionCompletionCriteria:
 
         for question in questions[:4]:
             response = _make_response(
-                db, interview_session, question, registered_user, RESPONSE_STATUS_UPLOADED
+                db,
+                interview_session,
+                question,
+                registered_user,
+                RESPONSE_STATUS_UPLOADED,
             )
             processing_service.process_response(response.id)
 
@@ -805,7 +826,11 @@ class TestSessionCompletionCriteria:
 
         for question in questions:
             response = _make_response(
-                db, interview_session, question, registered_user, RESPONSE_STATUS_UPLOADED
+                db,
+                interview_session,
+                question,
+                registered_user,
+                RESPONSE_STATUS_UPLOADED,
             )
             processing_service.process_response(response.id)
 
@@ -827,7 +852,11 @@ class TestSessionCompletionCriteria:
 
         for question in questions[:4]:
             response = _make_response(
-                db, interview_session, question, registered_user, RESPONSE_STATUS_UPLOADED
+                db,
+                interview_session,
+                question,
+                registered_user,
+                RESPONSE_STATUS_UPLOADED,
             )
             processing_service.process_response(response.id)
 
@@ -840,7 +869,11 @@ class TestSessionCompletionCriteria:
         )
 
         failed_response = _make_response(
-            db, interview_session, questions[4], registered_user, RESPONSE_STATUS_UPLOADED
+            db,
+            interview_session,
+            questions[4],
+            registered_user,
+            RESPONSE_STATUS_UPLOADED,
         )
         processing_service.process_response(failed_response.id)
 
@@ -859,7 +892,11 @@ class TestSessionCompletionCriteria:
 
         for question in questions:
             _make_response(
-                db, interview_session, question, registered_user, RESPONSE_STATUS_UPLOADED
+                db,
+                interview_session,
+                question,
+                registered_user,
+                RESPONSE_STATUS_UPLOADED,
             )
 
         db.refresh(interview_session)

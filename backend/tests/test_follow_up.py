@@ -1,6 +1,5 @@
 """Tests for the AI follow-up interviewer endpoints."""
 
-import json
 import uuid
 
 import pytest
@@ -47,12 +46,17 @@ def test_generate_follow_up_success(client, auth_headers, follow_up_setup, monke
 
     assert resp.status_code == 201, resp.text
     data = resp.json()
-    assert data["body"] == "Can you elaborate on the specific technical challenges you faced?"
+    assert (
+        data["body"]
+        == "Can you elaborate on the specific technical challenges you faced?"
+    )
     assert data["session_id"] == follow_up_setup["session_id"]
     assert data["depth"] == 1
 
 
-def test_generate_follow_up_wrong_session(client, auth_headers, follow_up_setup, monkeypatch):
+def test_generate_follow_up_wrong_session(
+    client, auth_headers, follow_up_setup, monkeypatch
+):
     """POST with a session_id the user doesn't own returns 404."""
     monkeypatch.setattr(
         "app.services.follow_up_service.generate_follow_up_question",

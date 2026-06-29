@@ -310,6 +310,85 @@ class Settings(BaseSettings):
     # never needs.
     PERMISSIONS_POLICY: str = "geolocation=(), microphone=(), camera=(), payment=()"
 
+    # ------------------------------------------------------------------
+    # Phase 4 — Logging
+    # ------------------------------------------------------------------
+
+    # Root logger level. Validated below against Python's standard level
+    # names so a typo (e.g. "INF0") fails fast at startup.
+    LOG_LEVEL: str = "INFO"
+
+    # "json" emits one JSON object per line (machine-parseable, suitable for
+    # log aggregation in production). "text" emits the original
+    # human-readable line format, more convenient for local terminals.
+    LOG_FORMAT: Literal["json", "text"] = "json"
+
+    # Header name used to read an inbound correlation ID and to echo it
+    # back on the response. A client-supplied value is honoured so a
+    # request can be correlated end-to-end across services; if absent, a
+    # new ID is generated.
+    REQUEST_ID_HEADER: str = "X-Request-ID"
+
+    # Requests slower than this are logged at WARNING with their timing,
+    # independently of whether they succeeded, to surface latency issues
+    # that wouldn't otherwise show up as errors.
+    SLOW_REQUEST_THRESHOLD_MS: int = Field(default=1000, gt=0)
+
+    @field_validator("LOG_LEVEL")
+    @classmethod
+    def validate_log_level(cls, v: str) -> str:
+        valid = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+        upper = v.upper()
+        if upper not in valid:
+            raise ValueError(
+                f"LOG_LEVEL '{v}' is not a recognised logging level. "
+                f"Choose one of: {sorted(valid)}"
+            )
+        return upper
+
+    # ------------------------------------------------------------------
+    # Phase 4 — Metrics
+    # ------------------------------------------------------------------
+
+    # Master switch for Prometheus instrumentation and the /metrics
+    # endpoint. Disabling this removes the metrics middleware overhead
+    # entirely rather than just hiding the endpoint.
+    ENABLE_METRICS: bool = True
+
+    # ------------------------------------------------------------------
+    # Phase 4 — OpenTelemetry tracing
+    # Disabled by default: tracing pulls in the opentelemetry SDK and, if
+    # misconfigured, can add latency. Deployments opt in explicitly.
+    # ------------------------------------------------------------------
+
+    ENABLE_TRACING: bool = False
+
+    # Logical service name attached to every span (the "service.name"
+    # resource attribute), used to distinguish this service from others
+    # in a shared tracing backend.
+    OTEL_SERVICE_NAME: str = "ai-interview-intelligence-platform"
+
+    # OTLP/HTTP collector endpoint (e.g. "http://localhost:4318/v1/traces").
+    # When ENABLE_TRACING is True but this is unset, spans are exported to
+    # the console instead — useful for local debugging without standing up
+    # a collector.
+    OTEL_EXPORTER_OTLP_ENDPOINT: str | None = None
+
+    # Fraction of traces to sample, from 0.0 (none) to 1.0 (all). Lower
+    # this in high-traffic production deployments to control exporter
+    # volume and cost.
+    OTEL_TRACES_SAMPLE_RATE: float = Field(default=1.0, ge=0.0, le=1.0)
+
+    # ------------------------------------------------------------------
+    # Phase 4 — Health & readiness
+    # ------------------------------------------------------------------
+
+    # Maximum seconds the /ready endpoint waits for its database
+    # connectivity check before reporting that dependency as down. Kept
+    # short and strict because a slow readiness probe delays orchestrators
+    # detecting a genuinely unready instance.
+    READINESS_DB_TIMEOUT_SECONDS: float = Field(default=2.0, gt=0)
+
 
 @lru_cache
 def get_settings() -> Settings:

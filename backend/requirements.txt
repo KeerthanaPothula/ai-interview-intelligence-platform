@@ -130,6 +130,11 @@ ruff==0.8.1
 # See SECURITY.md for the full dependency-audit workflow.
 pip-audit==2.7.3
 
+# YAML parser — used by tests/test_ci_config.py to structurally validate
+# the GitHub Actions workflow files. Already present transitively (via
+# huggingface-hub), pinned directly here since test code imports it.
+pyyaml==6.0.3
+
 
 # -------------------------------------------------------------
 # Phase 16 — Voice Analytics Engine
@@ -163,3 +168,39 @@ sentence-transformers==3.0.1
 # to estimate interview success probability from session score features.
 # Trained on synthetic data at module load time (no external data required).
 scikit-learn==1.5.2
+
+
+# -------------------------------------------------------------
+# Phase 4 — Observability: metrics, tracing, structured logging
+# -------------------------------------------------------------
+
+# Prometheus client — exposes HTTP/AI/DB/background-task metrics on
+# the /metrics endpoint. See app/core/metrics.py.
+prometheus-client==0.21.0
+
+# OpenTelemetry core API + SDK — provides the tracer used for manual
+# spans throughout app/services and app/core. The API alone (a no-op
+# implementation) is always imported; the SDK is only initialised when
+# Settings.ENABLE_TRACING is True (see app/core/tracing.py).
+opentelemetry-api==1.27.0
+opentelemetry-sdk==1.27.0
+
+# Auto-instrumentation — wraps every inbound FastAPI request and every
+# SQLAlchemy statement in a span automatically, complementing the
+# manual spans added at AI-call sites.
+opentelemetry-instrumentation-fastapi==0.48b0
+opentelemetry-instrumentation-sqlalchemy==0.48b0
+
+# OTLP/HTTP exporter — ships spans to a collector (Jaeger, Tempo,
+# Honeycomb, etc.) when OTEL_EXPORTER_OTLP_ENDPOINT is configured.
+# Falls back to a console exporter when unset (see app/core/tracing.py).
+opentelemetry-exporter-otlp-proto-http==1.27.0
+
+
+# -------------------------------------------------------------
+# Phase 4 — Testing: coverage reporting
+# -------------------------------------------------------------
+
+# pytest plugin that produces coverage reports (text + XML for CI
+# upload) from the existing pytest test suite — no new test runner.
+pytest-cov==5.0.0

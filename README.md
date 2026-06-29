@@ -157,8 +157,9 @@ pipeline (with status transitions) are diagrammed in
 | **AI / ML** | Google Gemini (`google-genai`) for question generation, evaluation, follow-ups, session reports, live interviews, RAG questions & career coaching; OpenAI Whisper + PyTorch (CPU) for transcription; librosa for voice analytics; sentence-transformers (all-MiniLM-L6-v2) for RAG embeddings; scikit-learn logistic regression for success prediction |
 | **Database** | PostgreSQL 16 (SQLite for the test suite) |
 | **Frontend** | React 19, TypeScript, Vite, React Router v6, Recharts (LineChart + RadarChart) |
-| **Testing** | pytest + httpx (backend, 170 tests), Vitest + React Testing Library (frontend, 31 tests) |
-| **Infrastructure** | Docker, Docker Compose (local), Render (Web Service + Static Site + managed PostgreSQL) |
+| **Testing** | pytest + httpx (backend, 250 tests), Vitest + React Testing Library (frontend, 31 tests) |
+| **Infrastructure** | Docker (multi-stage, non-root), Docker Compose (local), GitHub Actions CI/CD, Render (Web Service + Static Site + managed PostgreSQL) |
+| **Observability** | Structured JSON logging with request-ID correlation, Prometheus metrics (`/metrics`), OpenTelemetry tracing (optional), `/health` + `/ready` endpoints — see [docs/INFRASTRUCTURE.md](docs/INFRASTRUCTURE.md) |
 
 ---
 
@@ -214,6 +215,8 @@ All routes except `/health`, `/api/v1/auth/register`, and
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/health` | Liveness check (no DB access) |
+| `GET` | `/ready` | Readiness check (DB connectivity + AI config) |
+| `GET` | `/metrics` | Prometheus metrics (when `ENABLE_METRICS=true`) |
 | `POST` | `/api/v1/auth/register` | Create a new user |
 | `POST` | `/api/v1/auth/login` | Exchange email + password for a JWT |
 | `GET` | `/api/v1/auth/me` | Get the current authenticated user |
@@ -268,10 +271,10 @@ App available at `http://localhost:5173`.
 ### Tests
 
 ```bash
-# Backend (94 tests)
+# Backend (250 tests)
 cd backend && pytest
 
-# Frontend (14 tests)
+# Frontend (31 tests)
 cd frontend && npm run test
 ```
 
@@ -288,7 +291,9 @@ docker-compose exec backend alembic upgrade head   # first run only
 This starts PostgreSQL and the FastAPI backend (`http://localhost:8000`)
 with live-reload and a bind-mounted source tree. See
 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for the migration and persistent
-storage strategy used in production.
+storage strategy used in production, and
+[docs/INFRASTRUCTURE.md](docs/INFRASTRUCTURE.md) for CI/CD, health/readiness
+checks, metrics, and tracing.
 
 ---
 

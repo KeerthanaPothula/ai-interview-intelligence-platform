@@ -31,8 +31,11 @@ from google.genai import errors as genai_errors
 
 from app.config import get_settings
 from app.core.exceptions import AIServiceError
+from app.core.metrics import observe_ai_request
+from app.core.tracing import get_tracer
 
 logger = logging.getLogger(__name__)
+tracer = get_tracer(__name__)
 
 # Matches both ```json ... ``` and ``` ... ``` — Gemini wraps JSON in markdown
 # fences even when explicitly instructed not to. re.DOTALL lets the inner
@@ -64,50 +67,70 @@ def call_gemini_with_retry(
     max_retries = settings.GEMINI_MAX_RETRIES
     backoff_base = settings.GEMINI_RETRY_BACKOFF_SECONDS
 
-    last_exc: Exception | None = None
-    for attempt in range(1, max_retries + 1):
-        try:
-            return fn()
-        except httpx.TimeoutException as exc:
-            last_exc = exc
-            logger.warning(
-                "%s timed out (attempt %d/%d)", operation, attempt, max_retries
-            )
-        except genai_errors.APIError as exc:
-            last_exc = exc
-            retryable = exc.code == 429 or (exc.code is not None and exc.code >= 500)
-            if not retryable:
-                logger.error(
-                    "%s failed with non-retryable API error %s: %s",
+    start = time.perf_counter()
+
+    def _record(status: str) -> None:
+        observe_ai_request(
+            provider="gemini",
+            operation=operation,
+            status=status,
+            duration_seconds=time.perf_counter() - start,
+        )
+
+    with tracer.start_as_current_span(f"gemini.{operation}") as span:
+        span.set_attribute("gemini.operation", operation)
+        span.set_attribute("gemini.max_retries", max_retries)
+
+        last_exc: Exception | None = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                result = fn()
+                _record("success")
+                return result
+            except httpx.TimeoutException as exc:
+                last_exc = exc
+                logger.warning(
+                    "%s timed out (attempt %d/%d)", operation, attempt, max_retries
+                )
+            except genai_errors.APIError as exc:
+                last_exc = exc
+                retryable = exc.code == 429 or (
+                    exc.code is not None and exc.code >= 500
+                )
+                if not retryable:
+                    logger.error(
+                        "%s failed with non-retryable API error %s: %s",
+                        operation,
+                        exc.code,
+                        exc,
+                    )
+                    _record("error")
+                    raise AIServiceError(
+                        f"{operation} could not be completed because the AI service "
+                        "rejected the request."
+                    ) from exc
+                logger.warning(
+                    "%s failed with retryable API error %s (attempt %d/%d)",
                     operation,
                     exc.code,
-                    exc,
+                    attempt,
+                    max_retries,
                 )
-                raise AIServiceError(
-                    f"{operation} could not be completed because the AI service "
-                    "rejected the request."
-                ) from exc
-            logger.warning(
-                "%s failed with retryable API error %s (attempt %d/%d)",
-                operation,
-                exc.code,
-                attempt,
-                max_retries,
-            )
 
-        if attempt < max_retries:
-            time.sleep(backoff_base * (2 ** (attempt - 1)))
+            if attempt < max_retries:
+                time.sleep(backoff_base * (2 ** (attempt - 1)))
 
-    logger.error(
-        "%s failed after %d attempt(s): %s",
-        operation,
-        max_retries,
-        last_exc,
-        exc_info=last_exc,
-    )
-    raise AIServiceError(
-        f"{operation} is currently unavailable. Please try again shortly."
-    ) from last_exc
+        logger.error(
+            "%s failed after %d attempt(s): %s",
+            operation,
+            max_retries,
+            last_exc,
+            exc_info=last_exc,
+        )
+        _record("error")
+        raise AIServiceError(
+            f"{operation} is currently unavailable. Please try again shortly."
+        ) from last_exc
 
 
 def strip_fences(text: str) -> str:

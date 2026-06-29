@@ -13,7 +13,9 @@ _MOCK_REPORT = {
     "problem_solving_score": 6.5,
     "strengths": json.dumps(["Clear articulation", "Good examples"]),
     "weaknesses": json.dumps(["Could go deeper on trade-offs"]),
-    "improvement_plan": json.dumps(["Practice system design", "Read more case studies"]),
+    "improvement_plan": json.dumps(
+        ["Practice system design", "Read more case studies"]
+    ),
     "readiness_level": "Interview Ready",
     "model_used": "gemini-2.0-flash",
 }
@@ -28,9 +30,7 @@ def _mock_generate(**_kwargs):
 # ---------------------------------------------------------------------------
 
 
-def test_generate_report_success(
-    client, auth_headers, interview_session, monkeypatch
-):
+def test_generate_report_success(client, auth_headers, interview_session, monkeypatch):
     """Generates and persists a session report."""
     monkeypatch.setattr(
         "app.services.report_service.generate_session_report",
@@ -92,9 +92,7 @@ def test_generate_report_wrong_session(client, auth_headers, monkeypatch):
 
 
 def test_generate_report_requires_auth(client, interview_session):
-    resp = client.post(
-        f"/api/v1/interviews/{interview_session.id}/report/generate"
-    )
+    resp = client.post(f"/api/v1/interviews/{interview_session.id}/report/generate")
     assert resp.status_code == 401
 
 

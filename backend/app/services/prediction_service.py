@@ -6,7 +6,6 @@ No external data or file download is required.
 
 from __future__ import annotations
 
-import json
 import logging
 import random
 

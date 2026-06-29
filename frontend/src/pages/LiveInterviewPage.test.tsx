@@ -4,7 +4,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import { LiveInterviewPage } from './LiveInterviewPage';
 import * as client from '../api/client';
-import * as authCtx from '../context/AuthContext';
 
 vi.mock('../context/AuthContext', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../context/AuthContext')>();

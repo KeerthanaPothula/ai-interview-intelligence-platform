@@ -412,7 +412,9 @@ class InterviewAnalysis(Base):
     overall_score: Mapped[Decimal] = mapped_column(Numeric(4, 1), nullable=False)
     communication_score: Mapped[Decimal] = mapped_column(Numeric(4, 1), nullable=False)
     technical_score: Mapped[Decimal] = mapped_column(Numeric(4, 1), nullable=False)
-    problem_solving_score: Mapped[Decimal] = mapped_column(Numeric(4, 1), nullable=False)
+    problem_solving_score: Mapped[Decimal] = mapped_column(
+        Numeric(4, 1), nullable=False
+    )
     confidence_score: Mapped[Decimal] = mapped_column(Numeric(4, 1), nullable=False)
 
     # ── Evaluation narrative ──────────────────────────────────────────────

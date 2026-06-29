@@ -27,6 +27,7 @@ export function ResponseCard({ response }: { response: AudioResponseResponse }) 
     if (status !== 'completed' || !token) return;
 
     let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- guarded by `cancelled`, standard data-fetching pattern
     setLoadingResults(true);
     setResultsError(false);
 

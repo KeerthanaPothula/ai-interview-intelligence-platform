@@ -1,6 +1,7 @@
+import time
 from collections.abc import Generator
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import get_settings
@@ -41,6 +42,29 @@ engine = create_engine(
     echo=settings.DEBUG,
     **_pool_kwargs,
 )
+
+# ------------------------------------------------------------------
+# Query timing metric
+#
+# Records every statement's duration as a Prometheus histogram
+# observation. Gated by ENABLE_METRICS so the event listeners (and the
+# metrics import) are skipped entirely when metrics are disabled.
+# ------------------------------------------------------------------
+if settings.ENABLE_METRICS:
+    from app.core.metrics import observe_db_query
+
+    @event.listens_for(engine, "before_cursor_execute")
+    def _before_cursor_execute(
+        conn, cursor, statement, parameters, context, executemany
+    ):
+        context._query_start_time = time.perf_counter()
+
+    @event.listens_for(engine, "after_cursor_execute")
+    def _after_cursor_execute(
+        conn, cursor, statement, parameters, context, executemany
+    ):
+        observe_db_query(time.perf_counter() - context._query_start_time)
+
 
 # ------------------------------------------------------------------
 # Session factory

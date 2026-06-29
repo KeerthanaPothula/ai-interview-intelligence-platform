@@ -32,7 +32,11 @@ def test_start_live_interview_success(client, auth_headers, monkeypatch):
     )
     resp = client.post(
         "/api/v1/live-interviews/",
-        json={"job_role": "Software Engineer", "job_description": "Python backend role with FastAPI", "max_turns": 3},
+        json={
+            "job_role": "Software Engineer",
+            "job_description": "Python backend role with FastAPI",
+            "max_turns": 3,
+        },
         headers=auth_headers,
     )
     assert resp.status_code == 201, resp.text
@@ -47,7 +51,11 @@ def test_start_live_interview_success(client, auth_headers, monkeypatch):
 def test_start_live_interview_requires_auth(client):
     resp = client.post(
         "/api/v1/live-interviews/",
-        json={"job_role": "Engineer", "job_description": "A backend engineering role.", "max_turns": 3},
+        json={
+            "job_role": "Engineer",
+            "job_description": "A backend engineering role.",
+            "max_turns": 3,
+        },
     )
     assert resp.status_code == 401
 
@@ -83,7 +91,11 @@ def test_next_question_success(client, auth_headers, monkeypatch):
 
     start_resp = client.post(
         "/api/v1/live-interviews/",
-        json={"job_role": "Engineer", "job_description": "Python backend engineering role.", "max_turns": 3},
+        json={
+            "job_role": "Engineer",
+            "job_description": "Python backend engineering role.",
+            "max_turns": 3,
+        },
         headers=auth_headers,
     )
     session_id = start_resp.json()["id"]
@@ -133,7 +145,11 @@ def test_get_conversation_success(client, auth_headers, monkeypatch):
     )
     start_resp = client.post(
         "/api/v1/live-interviews/",
-        json={"job_role": "Engineer", "job_description": "Python backend engineering role.", "max_turns": 3},
+        json={
+            "job_role": "Engineer",
+            "job_description": "Python backend engineering role.",
+            "max_turns": 3,
+        },
         headers=auth_headers,
     )
     session_id = start_resp.json()["id"]
@@ -172,7 +188,11 @@ def test_end_interview_success(client, auth_headers, monkeypatch):
     )
     start_resp = client.post(
         "/api/v1/live-interviews/",
-        json={"job_role": "Engineer", "job_description": "Python backend engineering role.", "max_turns": 3},
+        json={
+            "job_role": "Engineer",
+            "job_description": "Python backend engineering role.",
+            "max_turns": 3,
+        },
         headers=auth_headers,
     )
     session_id = start_resp.json()["id"]
@@ -199,13 +219,19 @@ def test_end_interview_double_end(client, auth_headers, monkeypatch):
     )
     start_resp = client.post(
         "/api/v1/live-interviews/",
-        json={"job_role": "Engineer", "job_description": "Python backend engineering role.", "max_turns": 3},
+        json={
+            "job_role": "Engineer",
+            "job_description": "Python backend engineering role.",
+            "max_turns": 3,
+        },
         headers=auth_headers,
     )
     session_id = start_resp.json()["id"]
 
     client.post(f"/api/v1/live-interviews/{session_id}/end", headers=auth_headers)
-    resp2 = client.post(f"/api/v1/live-interviews/{session_id}/end", headers=auth_headers)
+    resp2 = client.post(
+        f"/api/v1/live-interviews/{session_id}/end", headers=auth_headers
+    )
     assert resp2.status_code == 409
 
 
