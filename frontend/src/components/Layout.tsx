@@ -18,11 +18,11 @@ export function Layout() {
         Skip to main content
       </a>
       <header className="app-header">
-        <Link to="/" className="app-title">
+        <Link to="/sessions" className="app-title">
           AI Interview Intelligence Platform
         </Link>
         <nav className="app-nav" aria-label="Primary">
-          <NavLink to="/" end className={navLinkClassName}>
+          <NavLink to="/sessions" end className={navLinkClassName}>
             Sessions
           </NavLink>
           <NavLink to="/dashboard" className={navLinkClassName}>

@@ -87,7 +87,11 @@ async function request<T>(
   try {
     response = await fetch(`${BASE_URL}${path}`, { ...options, headers });
   } catch {
-    throw new ApiError(0, 'Unable to reach the server. Please check your connection and try again.');
+    throw new ApiError(
+      0,
+      `Cannot connect to the backend at ${BASE_URL}. ` +
+        'Make sure the backend server is running (see README → Quick Start) and try again.',
+    );
   }
 
   if (!response.ok) {

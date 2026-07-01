@@ -3,6 +3,7 @@ import { Layout } from './components/Layout';
 import { AuthProvider } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import { DashboardPage } from './pages/DashboardPage';
+import { LandingPage } from './pages/LandingPage';
 import { LiveInterviewPage } from './pages/LiveInterviewPage';
 import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
@@ -15,10 +16,11 @@ export default function App() {
       <AuthProvider>
         <BrowserRouter>
           <Routes>
+            <Route path="/" element={<LandingPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
             <Route element={<Layout />}>
-              <Route path="/" element={<SessionsListPage />} />
+              <Route path="/sessions" element={<SessionsListPage />} />
               <Route path="/sessions/:sessionId" element={<SessionDetailPage />} />
               <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/live-interview" element={<LiveInterviewPage />} />

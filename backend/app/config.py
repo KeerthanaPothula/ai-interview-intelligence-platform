@@ -19,11 +19,13 @@ class Settings(BaseSettings):
     """
 
     model_config = SettingsConfigDict(
-        # Read .env from the process working directory as a fallback.
-        # Inside Docker, docker-compose already injects all variables as
-        # real env vars via `env_file: .env`, so this file is not read.
-        # It is only used when running the app locally without Docker.
-        env_file=".env",
+        # Search for .env in the process CWD (backend/) first, then the
+        # repo root (../). This lets developers run `cp .env.example .env`
+        # once at the repo root and have both Alembic (from backend/) and
+        # uvicorn pick it up without needing a separate backend/.env copy.
+        # Inside Docker, docker-compose injects vars as real env vars via
+        # `env_file: .env`, so neither file is read there.
+        env_file=[".env", "../.env"],
         env_file_encoding="utf-8",
         # Map env vars to fields case-insensitively:
         # DATABASE_URL → database_url, ENVIRONMENT → environment, etc.
@@ -203,6 +205,16 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             return [origin.strip() for origin in v.split(",") if origin.strip()]
         return v
+
+    @model_validator(mode="after")
+    def apply_dev_cors_default(self) -> "Settings":
+        # In development, if CORS_ORIGINS was never set (empty list), default
+        # to both common Vite/CRA dev-server ports so the app works out-of-the-
+        # box after a plain `cp .env.example .env` without editing CORS_ORIGINS.
+        # Production deployments must set CORS_ORIGINS explicitly.
+        if self.ENVIRONMENT == "development" and not self.CORS_ORIGINS:
+            self.CORS_ORIGINS = ["http://localhost:5173", "http://localhost:3000"]
+        return self
 
     # ------------------------------------------------------------------
     # Validators

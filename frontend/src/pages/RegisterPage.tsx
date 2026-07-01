@@ -1,16 +1,20 @@
 import { useState, type FormEvent } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import { ApiError } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 
 export function RegisterPage() {
-  const { register } = useAuth();
+  const { register, isAuthenticated } = useAuth();
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  if (isAuthenticated) {
+    return <Navigate to="/sessions" replace />;
+  }
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();

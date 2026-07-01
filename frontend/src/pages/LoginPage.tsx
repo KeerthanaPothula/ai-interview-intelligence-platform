@@ -12,7 +12,7 @@ export function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
 
   if (isAuthenticated) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/sessions" replace />;
   }
 
   async function handleSubmit(event: FormEvent) {
@@ -21,7 +21,7 @@ export function LoginPage() {
     setSubmitting(true);
     try {
       await login(email, password);
-      navigate('/');
+      navigate('/sessions');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Unable to log in. Please try again.');
     } finally {
