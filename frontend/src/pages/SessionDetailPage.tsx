@@ -1,13 +1,18 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { ApiError, generateQuestions, getSession, listResponses } from '../api/client';
 import { QuestionCard } from '../components/QuestionCard';
+import { SessionReportCard } from '../components/SessionReportCard';
+import { Skeleton } from '../components/Skeleton';
+import { ErrorState } from '../components/StateMessage';
 import { useAuth } from '../context/AuthContext';
-import type { AudioResponseResponse, SessionDetailResponse } from '../api/types';
+import { useToast } from '../context/ToastContext';
+import type { AudioResponseResponse, SessionDetailResponse, SessionReportResponse } from '../api/types';
 
 export function SessionDetailPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const { token } = useAuth();
+  const { showToast } = useToast();
 
   const [session, setSession] = useState<SessionDetailResponse | null>(null);
   const [responses, setResponses] = useState<AudioResponseResponse[]>([]);
@@ -17,11 +22,13 @@ export function SessionDetailPage() {
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const [report, setReport] = useState<SessionReportResponse | null>(null);
+
+  const loadSession = useCallback(() => {
     if (!token || !sessionId) return;
 
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- resets loading state when sessionId/token changes
     setLoading(true);
+    setLoadError(null);
     Promise.all([getSession(sessionId, token), listResponses(sessionId, token)])
       .then(([sessionData, responseData]) => {
         setSession(sessionData);
@@ -31,6 +38,11 @@ export function SessionDetailPage() {
       .finally(() => setLoading(false));
   }, [token, sessionId]);
 
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- standard data-fetching pattern
+    loadSession();
+  }, [loadSession]);
+
   async function handleGenerateQuestions() {
     if (!token || !sessionId) return;
 
@@ -39,6 +51,7 @@ export function SessionDetailPage() {
     try {
       const questions = await generateQuestions(sessionId, token);
       setSession((prev) => (prev ? { ...prev, questions } : prev));
+      showToast('Questions generated.', 'success');
     } catch (err) {
       setGenerateError(
         err instanceof ApiError
@@ -52,10 +65,22 @@ export function SessionDetailPage() {
 
   function handleUploaded(response: AudioResponseResponse) {
     setResponses((prev) => [response, ...prev]);
+    showToast('Recording uploaded.', 'success');
   }
 
-  if (loading) return <p>Loading session…</p>;
-  if (loadError) return <p className="status-error-text">{loadError}</p>;
+  if (loading) {
+    return (
+      <div className="session-detail-page" aria-busy="true" aria-label="Loading session">
+        <header className="session-detail-header">
+          <Skeleton width="40%" height="1.6rem" />
+          <Skeleton width="25%" height="1rem" className="skeleton-spaced" />
+          <Skeleton width="60%" height="0.9rem" className="skeleton-spaced" />
+        </header>
+        <Skeleton width="100%" height="6rem" />
+      </div>
+    );
+  }
+  if (loadError) return <ErrorState message={loadError} onRetry={loadSession} />;
   if (!session) return null;
 
   return (
@@ -73,20 +98,28 @@ export function SessionDetailPage() {
           <button type="button" onClick={handleGenerateQuestions} disabled={generating}>
             {generating ? 'Generating…' : 'Generate Questions'}
           </button>
-          {generateError && <p className="status-error-text">{generateError}</p>}
+          {generateError && (
+            <p className="status-error-text" role="alert">
+              {generateError}
+            </p>
+          )}
         </section>
       ) : (
-        <section className="questions-list">
-          {session.questions.map((question) => (
-            <QuestionCard
-              key={question.id}
-              question={question}
-              sessionId={session.id}
-              responses={responses.filter((response) => response.question_id === question.id)}
-              onUploaded={handleUploaded}
-            />
-          ))}
-        </section>
+        <>
+          <section className="questions-list">
+            {session.questions.map((question) => (
+              <QuestionCard
+                key={question.id}
+                question={question}
+                sessionId={session.id}
+                responses={responses.filter((response) => response.question_id === question.id)}
+                onUploaded={handleUploaded}
+              />
+            ))}
+          </section>
+
+          <SessionReportCard sessionId={session.id} report={report} onGenerated={setReport} />
+        </>
       )}
     </div>
   );

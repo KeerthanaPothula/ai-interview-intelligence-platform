@@ -4,7 +4,8 @@
 
 **AI-powered mock interview practice: question generation, audio transcription,
 multi-dimensional evaluation, voice analytics, live conversational interviews,
-resume-aware RAG questions, success prediction, and AI career coaching.**
+resume-aware RAG questions, a transparent interview readiness score, and AI
+career coaching.**
 
 [![CI](https://github.com/KeerthanaPothula/ai-interview-intelligence-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/KeerthanaPothula/ai-interview-intelligence-platform/actions/workflows/ci.yml)
 [![Security](https://github.com/KeerthanaPothula/ai-interview-intelligence-platform/actions/workflows/security.yml/badge.svg)](https://github.com/KeerthanaPothula/ai-interview-intelligence-platform/actions/workflows/security.yml)
@@ -46,8 +47,10 @@ AI-generated interview questions, record audio answers, and receive an
 automatic transcript plus a five-dimension AI evaluation with concrete
 strengths, weaknesses, and feedback. Beyond the core loop, the platform adds
 a live conversational AI interviewer, resume-aware RAG question generation,
-ML-based success prediction with percentile benchmarking, and an AI career
-coach that produces 7/14/30-day improvement plans.
+a transparent, weighted-average **Interview Readiness Score** with percentile
+benchmarking (a documented formula, not a machine-learned prediction of
+hiring outcomes — see [docs/AI_PIPELINE.md §9](docs/AI_PIPELINE.md#9-interview-readiness-scoring--benchmarking-prediction_servicepy-benchmark_servicepy)),
+and an AI career coach that produces 7/14/30-day improvement plans.
 
 Built as a portfolio-quality, production-shaped project: JWT auth with
 refresh-token rotation and per-user data isolation, an Alembic-migrated
@@ -91,9 +94,12 @@ pipeline.
 ### Career Coaching
 - Gemini-generated 7/14/30-day personalized improvement plans, grounded in
   a session's scores, readiness level, and identified weaknesses
-- Logistic-regression success prediction (`Strong Pass` / `Pass` /
-  `Borderline` / `Fail`) and percentile benchmarking against all platform
-  users
+- **Interview Readiness Score** — a transparent, documented weighted average
+  of a session's own scores (`Excellent` / `Strong` / `Developing` /
+  `Needs Improvement`), plus percentile benchmarking against all platform
+  users. This is a deterministic formula, not a trained ML model — it does
+  not predict real-world interview or hiring outcomes. Exact weights:
+  [docs/AI_PIPELINE.md §9](docs/AI_PIPELINE.md#9-interview-readiness-scoring--benchmarking-prediction_servicepy-benchmark_servicepy)
 
 ### Dashboard & Analytics
 - Score-trend line chart and skill-breakdown radar chart across sessions
@@ -131,14 +137,14 @@ flowchart TB
     Services --> DB[("PostgreSQL")]
     Services --> FS[("Uploaded audio / resumes")]
     Services --> Gemini["Gemini API"]
-    Services --> Local["Whisper · librosa ·\nscikit-learn · sentence-transformers"]
+    Services --> Local["Whisper · librosa ·\nsentence-transformers"]
 ```
 
 This is the condensed view. Full system architecture, request-flow,
 authentication-flow, interview-workflow, and deployment diagrams (all
 Mermaid) are in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**; the
 step-by-step AI pipelines (Whisper, Gemini evaluation, voice analytics,
-RAG, live interviews, prediction, coaching) are in
+RAG, live interviews, readiness scoring, coaching) are in
 **[docs/AI_PIPELINE.md](docs/AI_PIPELINE.md)**.
 
 ## Tech stack
@@ -173,7 +179,6 @@ RAG, live interviews, prediction, coaching) are in
 | OpenAI Whisper + PyTorch (CPU) | Audio transcription |
 | librosa | Voice/acoustic analytics |
 | sentence-transformers (`all-MiniLM-L6-v2`) | Resume/RAG embeddings |
-| scikit-learn | Logistic-regression success prediction |
 
 ### Database
 
@@ -203,8 +208,9 @@ RAG, live interviews, prediction, coaching) are in
 
 | Technology | Purpose |
 |---|---|
-| pytest + httpx | Backend (250 tests) |
+| pytest + httpx | Backend (251 tests) |
 | Vitest + React Testing Library | Frontend (31 tests) |
+| Playwright | End-to-end (1 full-flow spec, local only — requires real Gemini key) |
 
 ## Database
 
@@ -232,7 +238,7 @@ lists, cascade behavior, and the 7-revision migration history) is in
 
 27 endpoints across health/observability, auth, interview sessions,
 audio responses, processing, follow-ups, session reports, live
-conversational interviews, resume/RAG, and predictive analytics/coaching.
+conversational interviews, resume/RAG, and readiness scoring/coaching.
 All routes except `/health`, `/ready`, `/metrics`, and the auth
 register/login/refresh endpoints require `Authorization: Bearer <token>`.
 Interactive docs (`/docs`, `/redoc`) are available whenever `DEBUG=true`.
@@ -254,7 +260,7 @@ Interactive docs (`/docs`, `/redoc`) are available whenever `DEBUG=true`.
 | `GET` | `/api/v1/responses/{id}/analysis` | Get the Gemini evaluation |
 | `POST` | `/api/v1/live-interviews/` | Start a live conversational interview |
 | `POST` | `/api/v1/documents/resume/upload` | Upload a resume for RAG |
-| `POST` | `/api/v1/interviews/{id}/predict` | Run success prediction |
+| `POST` | `/api/v1/interviews/{id}/readiness` | Compute the interview readiness score |
 | `POST` | `/api/v1/interviews/{id}/coaching-plan` | Generate a career coaching plan |
 
 Every endpoint — including full request/response JSON examples and error
@@ -308,8 +314,9 @@ platform-by-platform steps.
 ## Testing
 
 ```bash
-cd backend && pytest --cov=app --cov-report=term-missing   # 250 tests, 81% coverage
+cd backend && pytest --cov=app --cov-report=term-missing   # 251 tests, 81% coverage
 cd frontend && npm run coverage                             # 31 tests, ~25% coverage
+cd frontend && npx playwright test                          # E2E — requires real GEMINI_API_KEY + running stack
 ```
 
 Backend coverage is healthy (81%) across auth, session CRUD, the
@@ -369,20 +376,20 @@ root **[SECURITY.md](SECURITY.md)** (with a short pointer at
 
 ## Screenshots
 
-> Screenshots are not yet committed — see
-> [docs/screenshots.md](docs/screenshots.md) for the full capture list and
-> filenames. The table below marks every placeholder explicitly so it's
-> clear none of these images exist in the repo yet.
+Four screenshots were captured automatically from a real running stack.
+Seven more require a completed interview session with Gemini-generated
+questions and Whisper transcription — see
+[docs/screenshots.md](docs/screenshots.md) for the full capture checklist.
 
-| View | Status |
+| View | File |
 |---|---|
-| Landing page | 🔲 placeholder — not yet captured |
-| Dashboard | 🔲 placeholder — not yet captured |
-| Resume upload | 🔲 placeholder — not yet captured |
-| Interview session | 🔲 placeholder — not yet captured |
-| Voice analytics | 🔲 placeholder — not yet captured |
-| Career coach | 🔲 placeholder — not yet captured |
-| Reports | 🔲 placeholder — not yet captured |
+| Login | [docs/screenshots/01-login.png](docs/screenshots/01-login.png) |
+| Register | [docs/screenshots/02-register.png](docs/screenshots/02-register.png) |
+| Sessions list (with resume upload) | [docs/screenshots/03-session-list.png](docs/screenshots/03-session-list.png) |
+| Session detail | [docs/screenshots/04-session-detail.png](docs/screenshots/04-session-detail.png) |
+| Question list (after generation) | requires Gemini key — see [docs/screenshots.md](docs/screenshots.md) |
+| Processing status / Transcript / Analysis | requires Gemini key — see [docs/screenshots.md](docs/screenshots.md) |
+| Session report / Dashboard | requires Gemini key — see [docs/screenshots.md](docs/screenshots.md) |
 
 ## Documentation
 
@@ -414,10 +421,13 @@ root **[SECURITY.md](SECURITY.md)** (with a short pointer at
   dashboard, session reports
 - ✅ Live conversational AI interviews
 - ✅ Resume/JD RAG question generation
-- ✅ Predictive analytics (success prediction + percentile benchmarking)
+- ✅ Interview readiness scoring (transparent weighted formula + percentile benchmarking)
 - ✅ AI career coaching (7/14/30-day plans)
 - ✅ Production infrastructure: observability, CI/CD, hardened Docker
 - ✅ Open-source documentation overhaul (this pass)
+- ✅ Frontend polish: toasts, skeleton loaders, empty/error states, a11y, resume upload UI, session report UI
+- ✅ End-to-end Playwright test suite (full Register→Dashboard flow)
+- ✅ First production release: v1.0.0 (see [RELEASE.md](RELEASE.md))
 
 ### Future enhancements
 
@@ -429,8 +439,12 @@ root **[SECURITY.md](SECURITY.md)** (with a short pointer at
   in-process background tasks
 - 🔲 Redis-backed rate limiting for multi-worker/multi-instance deployments
 - 🔲 A real malware-scanning backend behind the current stub hook
-- 🔲 Tagged releases with semantic versioning (see
-  [docs/CONTRIBUTING.md § Versioning](docs/CONTRIBUTING.md#versioning--releases))
+- ✅ Tagged releases with semantic versioning — first tag: `v1.0.0`
+- 🔲 A genuinely ML-based readiness/outcome model trained on real, labeled
+  interview outcomes (the current readiness score is an intentionally
+  transparent weighted formula, not a trained model — see
+  [docs/AI_PIPELINE.md §9](docs/AI_PIPELINE.md#9-interview-readiness-scoring--benchmarking-prediction_servicepy-benchmark_servicepy));
+  this would require a real labeled dataset, which doesn't exist yet
 
 ## License
 

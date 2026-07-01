@@ -176,11 +176,11 @@ erDiagram
     INTERVIEW_PREDICTIONS {
         uuid id PK
         uuid session_id "FK, UK"
-        float success_probability
+        float success_probability "API: readiness_score"
         float percentile_rank
-        string predicted_outcome
+        string predicted_outcome "API: readiness_level"
         text feature_vector
-        string model_version
+        string model_version "API: scoring_method"
         datetime created_at
     }
 
@@ -264,7 +264,7 @@ erDiagram
 | `voice_analyses` | Librosa acoustic metrics for one response | `UNIQUE(audio_response_id)`; `CHECK` bounds on `confidence_score` (0–100) and `energy_consistency` (0.0–1.0) |
 | `follow_up_questions` | AI-generated probing questions chained off a response | indexed on `session_id`, `original_question_id`, `parent_audio_response_id` |
 | `session_reports` | Holistic end-of-session report | `UNIQUE(session_id)` — 1:1 |
-| `interview_predictions` | Success-probability + percentile from the prediction model | `UNIQUE(session_id)` — 1:1 |
+| `interview_predictions` | Interview Readiness Score (transparent weighted average, not an ML model — see [AI_PIPELINE.md §9](./AI_PIPELINE.md#9-interview-readiness-scoring--benchmarking-prediction_servicepy-benchmark_servicepy)) + percentile. Table/column names predate the rename; the API exposes them as `readiness_score`/`readiness_level`/`scoring_method` (see [API.md](./API.md)) | `UNIQUE(session_id)` — 1:1 |
 | `coaching_plans` | 7/14/30-day improvement plan | `UNIQUE(session_id)` — 1:1 |
 | `refresh_tokens` | Hashed, rotating JWT refresh tokens | `token_hash` unique; self-referential `replaces_token_id` for rotation audit trail |
 | `live_interview_sessions` | Multi-turn conversational interview state | `CHECK status IN (active, completed)`; `CHECK 0 <= current_turn <= max_turns` |

@@ -1,11 +1,16 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { ApiError, createSession, listSessions } from '../api/client';
+import { ResumeUploadCard } from '../components/ResumeUploadCard';
 import { SessionCard } from '../components/SessionCard';
+import { SessionListSkeleton } from '../components/Skeleton';
+import { EmptyState, ErrorState } from '../components/StateMessage';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 import type { SessionListResponse } from '../api/types';
 
 export function SessionsListPage() {
   const { token } = useAuth();
+  const { showToast } = useToast();
   const [sessions, setSessions] = useState<SessionListResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -16,13 +21,20 @@ export function SessionsListPage() {
   const [createError, setCreateError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
 
-  useEffect(() => {
+  const loadSessions = useCallback(() => {
     if (!token) return;
+    setLoading(true);
+    setLoadError(null);
     listSessions(token)
       .then(setSessions)
       .catch(() => setLoadError('Unable to load your interview sessions right now.'))
       .finally(() => setLoading(false));
   }, [token]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- standard data-fetching pattern
+    loadSessions();
+  }, [loadSessions]);
 
   async function handleCreate(event: FormEvent) {
     event.preventDefault();
@@ -49,6 +61,7 @@ export function SessionsListPage() {
       setTitle('');
       setJobRole('');
       setJobDescription('');
+      showToast('Session created.', 'success');
     } catch (err) {
       setCreateError(
         err instanceof ApiError ? err.message : 'Unable to create the session. Please try again.',
@@ -60,6 +73,8 @@ export function SessionsListPage() {
 
   return (
     <div className="sessions-page">
+      <ResumeUploadCard />
+
       <section className="create-session">
         <h2>New Interview Session</h2>
         <form onSubmit={handleCreate}>
@@ -82,7 +97,11 @@ export function SessionsListPage() {
             />
             <span className="field-hint">At least 20 characters — used to generate interview questions.</span>
           </label>
-          {createError && <p className="status-error-text">{createError}</p>}
+          {createError && (
+            <p className="status-error-text" role="alert">
+              {createError}
+            </p>
+          )}
           <button type="submit" disabled={creating}>
             {creating ? 'Creating…' : 'Create Session'}
           </button>
@@ -91,16 +110,21 @@ export function SessionsListPage() {
 
       <section className="sessions-list">
         <h2>Your Sessions</h2>
-        {loading && <p>Loading sessions…</p>}
-        {loadError && <p className="status-error-text">{loadError}</p>}
+        {loading && <SessionListSkeleton />}
+        {!loading && loadError && <ErrorState message={loadError} onRetry={loadSessions} />}
         {!loading && !loadError && sessions.length === 0 && (
-          <p>No interview sessions yet. Create one above to get started.</p>
+          <EmptyState
+            title="No interview sessions yet"
+            description="Create one above to get started."
+          />
         )}
-        <div className="session-grid">
-          {sessions.map((session) => (
-            <SessionCard key={session.id} session={session} />
-          ))}
-        </div>
+        {!loading && !loadError && sessions.length > 0 && (
+          <div className="session-grid">
+            {sessions.map((session) => (
+              <SessionCard key={session.id} session={session} />
+            ))}
+          </div>
+        )}
       </section>
     </div>
   );

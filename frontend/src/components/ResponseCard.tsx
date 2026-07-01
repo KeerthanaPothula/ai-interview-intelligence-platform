@@ -10,6 +10,7 @@ import type {
 } from '../api/types';
 import { AnalysisCard } from './AnalysisCard';
 import { ProcessingStatusCard } from './ProcessingStatusCard';
+import { ResponseResultsSkeleton } from './Skeleton';
 import { TranscriptCard } from './TranscriptCard';
 import { VoiceAnalyticsCard } from './VoiceAnalyticsCard';
 
@@ -60,9 +61,9 @@ export function ResponseCard({ response }: { response: AudioResponseResponse }) 
     <div className="response-card">
       <ProcessingStatusCard status={status} pollError={pollError} />
 
-      {status === 'completed' && loadingResults && <p>Loading transcript and analysis…</p>}
+      {status === 'completed' && loadingResults && <ResponseResultsSkeleton />}
       {status === 'completed' && resultsError && (
-        <p className="status-warning">
+        <p className="status-warning" role="alert">
           Unable to load the transcript and analysis right now. Please refresh the page.
         </p>
       )}

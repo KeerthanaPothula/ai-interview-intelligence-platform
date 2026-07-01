@@ -1,11 +1,6 @@
-"""Tests for interview prediction, coaching plan, and benchmarking endpoints."""
+"""Tests for interview readiness scoring, coaching plan, and benchmarking endpoints."""
 
-import importlib
 import uuid
-
-import pytest
-
-_sklearn_available = importlib.util.find_spec("sklearn") is not None
 
 _MOCK_PLAN = {
     "plan_7_day": ["Day 1-2: Practice STAR method", "Day 3-5: System design review"],
@@ -16,7 +11,7 @@ _MOCK_PLAN = {
 }
 
 
-def _mock_predict(
+def _mock_readiness(
     *,
     overall_score,
     communication_score,
@@ -26,7 +21,7 @@ def _mock_predict(
     avg_speaking_rate=130.0,
     avg_filler_words=3.0,
 ):
-    return 0.75, "Pass"
+    return 0.75, "Strong"
 
 
 def _mock_coaching(**kwargs):
@@ -34,104 +29,104 @@ def _mock_coaching(**kwargs):
 
 
 # ---------------------------------------------------------------------------
-# POST /api/v1/interviews/{id}/predict
+# POST /api/v1/interviews/{id}/readiness
 # ---------------------------------------------------------------------------
 
 
-def test_generate_prediction_success(
+def test_generate_readiness_success(
     client, auth_headers, interview_session, interview_analysis, monkeypatch
 ):
     monkeypatch.setattr(
-        "app.routers.prediction.prediction_service.predict_success",
-        _mock_predict,
+        "app.routers.prediction.prediction_service.compute_readiness",
+        _mock_readiness,
     )
 
     resp = client.post(
-        f"/api/v1/interviews/{interview_session.id}/predict",
+        f"/api/v1/interviews/{interview_session.id}/readiness",
         headers=auth_headers,
     )
     assert resp.status_code == 201, resp.text
     data = resp.json()
     assert data["session_id"] == str(interview_session.id)
-    assert data["success_probability"] == 0.75
-    assert data["predicted_outcome"] == "Pass"
+    assert data["readiness_score"] == 0.75
+    assert data["readiness_level"] == "Strong"
     assert "percentile_rank" in data
 
 
-def test_generate_prediction_no_analyses(client, auth_headers, interview_session):
+def test_generate_readiness_no_analyses(client, auth_headers, interview_session):
     resp = client.post(
-        f"/api/v1/interviews/{interview_session.id}/predict",
+        f"/api/v1/interviews/{interview_session.id}/readiness",
         headers=auth_headers,
     )
     assert resp.status_code == 422
 
 
-def test_generate_prediction_wrong_session(client, auth_headers, monkeypatch):
+def test_generate_readiness_wrong_session(client, auth_headers, monkeypatch):
     monkeypatch.setattr(
-        "app.routers.prediction.prediction_service.predict_success",
-        _mock_predict,
+        "app.routers.prediction.prediction_service.compute_readiness",
+        _mock_readiness,
     )
     resp = client.post(
-        f"/api/v1/interviews/{uuid.uuid4()}/predict",
+        f"/api/v1/interviews/{uuid.uuid4()}/readiness",
         headers=auth_headers,
     )
     assert resp.status_code == 404
 
 
-def test_generate_prediction_requires_auth(client, interview_session):
-    resp = client.post(f"/api/v1/interviews/{interview_session.id}/predict")
+def test_generate_readiness_requires_auth(client, interview_session):
+    resp = client.post(f"/api/v1/interviews/{interview_session.id}/readiness")
     assert resp.status_code == 401
 
 
-def test_generate_prediction_idempotent(
+def test_generate_readiness_idempotent(
     client, auth_headers, interview_session, interview_analysis, monkeypatch
 ):
     monkeypatch.setattr(
-        "app.routers.prediction.prediction_service.predict_success",
-        _mock_predict,
+        "app.routers.prediction.prediction_service.compute_readiness",
+        _mock_readiness,
     )
     resp1 = client.post(
-        f"/api/v1/interviews/{interview_session.id}/predict",
+        f"/api/v1/interviews/{interview_session.id}/readiness",
         headers=auth_headers,
     )
     assert resp1.status_code == 201
     resp2 = client.post(
-        f"/api/v1/interviews/{interview_session.id}/predict",
+        f"/api/v1/interviews/{interview_session.id}/readiness",
         headers=auth_headers,
     )
     assert resp2.status_code == 201
 
 
 # ---------------------------------------------------------------------------
-# GET /api/v1/interviews/{id}/prediction
+# GET /api/v1/interviews/{id}/readiness
 # ---------------------------------------------------------------------------
 
 
-def test_get_prediction_not_generated(client, auth_headers, interview_session):
+def test_get_readiness_not_generated(client, auth_headers, interview_session):
     resp = client.get(
-        f"/api/v1/interviews/{interview_session.id}/prediction",
+        f"/api/v1/interviews/{interview_session.id}/readiness",
         headers=auth_headers,
     )
     assert resp.status_code == 404
 
 
-def test_get_prediction_after_generate(
+def test_get_readiness_after_generate(
     client, auth_headers, interview_session, interview_analysis, monkeypatch
 ):
     monkeypatch.setattr(
-        "app.routers.prediction.prediction_service.predict_success",
-        _mock_predict,
+        "app.routers.prediction.prediction_service.compute_readiness",
+        _mock_readiness,
     )
     client.post(
-        f"/api/v1/interviews/{interview_session.id}/predict",
+        f"/api/v1/interviews/{interview_session.id}/readiness",
         headers=auth_headers,
     )
     resp = client.get(
-        f"/api/v1/interviews/{interview_session.id}/prediction",
+        f"/api/v1/interviews/{interview_session.id}/readiness",
         headers=auth_headers,
     )
     assert resp.status_code == 200
-    assert resp.json()["predicted_outcome"] == "Pass"
+    assert resp.json()["readiness_level"] == "Strong"
 
 
 # ---------------------------------------------------------------------------
@@ -271,15 +266,16 @@ def test_get_benchmarks_requires_auth(client):
 
 
 # ---------------------------------------------------------------------------
-# prediction_service unit tests (skipped when scikit-learn is not installed)
+# prediction_service unit tests — transparent weighted formula, no ML model
 # ---------------------------------------------------------------------------
 
+_READINESS_LEVELS = {"Excellent", "Strong", "Developing", "Needs Improvement"}
 
-@pytest.mark.skipif(not _sklearn_available, reason="scikit-learn not installed")
-def test_predict_success_strong_candidate():
-    from app.services.prediction_service import predict_success
 
-    prob, outcome = predict_success(
+def test_compute_readiness_strong_candidate():
+    from app.services.prediction_service import compute_readiness
+
+    score, level = compute_readiness(
         overall_score=9.0,
         communication_score=9.0,
         technical_score=9.0,
@@ -288,15 +284,15 @@ def test_predict_success_strong_candidate():
         avg_speaking_rate=130.0,
         avg_filler_words=1.0,
     )
-    assert 0.0 <= prob <= 1.0
-    assert outcome in {"Strong Pass", "Pass", "Borderline", "Fail"}
+    assert 0.0 <= score <= 1.0
+    assert level in _READINESS_LEVELS
+    assert level == "Excellent"
 
 
-@pytest.mark.skipif(not _sklearn_available, reason="scikit-learn not installed")
-def test_predict_success_weak_candidate():
-    from app.services.prediction_service import predict_success
+def test_compute_readiness_weak_candidate():
+    from app.services.prediction_service import compute_readiness
 
-    prob, outcome = predict_success(
+    score, level = compute_readiness(
         overall_score=3.0,
         communication_score=3.0,
         technical_score=3.0,
@@ -305,8 +301,27 @@ def test_predict_success_weak_candidate():
         avg_speaking_rate=80.0,
         avg_filler_words=15.0,
     )
-    assert 0.0 <= prob <= 1.0
-    assert outcome in {"Strong Pass", "Pass", "Borderline", "Fail"}
+    assert 0.0 <= score <= 1.0
+    assert level in _READINESS_LEVELS
+    assert level == "Needs Improvement"
+
+
+def test_compute_readiness_is_deterministic():
+    """Same inputs always produce the same output — there is no trained model
+    or randomness involved, unlike the old logistic-regression implementation."""
+    from app.services.prediction_service import compute_readiness
+
+    kwargs = dict(
+        overall_score=7.0,
+        communication_score=6.5,
+        technical_score=7.5,
+        problem_solving_score=6.0,
+        avg_confidence=70.0,
+        avg_filler_words=4.0,
+    )
+    first = compute_readiness(**kwargs)
+    second = compute_readiness(**kwargs)
+    assert first == second
 
 
 def test_compute_percentile():

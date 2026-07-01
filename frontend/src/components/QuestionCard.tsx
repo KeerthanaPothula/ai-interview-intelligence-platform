@@ -45,12 +45,22 @@ export function QuestionCard({ question, sessionId, responses, onUploaded }: Que
       <p className="question-body">{question.body}</p>
 
       <div className="upload-controls">
-        <input ref={fileInputRef} type="file" accept="audio/*" disabled={uploading} />
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="audio/*"
+          disabled={uploading}
+          aria-label={`Audio recording for question ${question.sequence_order}`}
+        />
         <button type="button" onClick={handleUpload} disabled={uploading}>
           {uploading ? 'Uploading…' : 'Upload Recording'}
         </button>
       </div>
-      {error && <p className="status-error-text">{error}</p>}
+      {error && (
+        <p className="status-error-text" role="alert">
+          {error}
+        </p>
+      )}
 
       {responses.length > 0 && (
         <div className="responses-list">

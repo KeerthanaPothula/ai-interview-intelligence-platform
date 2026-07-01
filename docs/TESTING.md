@@ -93,6 +93,65 @@ coverage percentage — a regression in coverage doesn't fail the build today
 (see [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) if you're investigating a
 CI failure on either job).
 
+## End-to-end (Playwright)
+
+**Stack**: Playwright 1.x with Chromium, 1 test in `frontend/e2e/full-flow.spec.ts`.
+
+The E2E suite drives a real browser against the real frontend dev server, real
+FastAPI backend, real PostgreSQL database, real Whisper transcription, and real
+Gemini API calls. There is **no network mocking** — this is an integration check
+of the entire deployed stack, not a unit test.
+
+### What the suite covers
+
+Register → Login → Upload Resume → Create Session → Generate Questions →
+Upload Audio Response → Wait for Whisper Transcription + Gemini Analysis →
+Generate Report → Navigate to Dashboard.
+
+### Prerequisites (local only — not in CI)
+
+| Requirement | Value |
+|---|---|
+| Frontend dev server | `http://localhost:5173` (`npm run dev` in `frontend/`) |
+| Backend (uvicorn) | `http://localhost:8000` (host venv or Docker) |
+| PostgreSQL | Reachable at `DATABASE_URL` in `backend/.env` |
+| `CORS_ORIGINS` | Must include `http://localhost:5173` in `backend/.env` |
+| `GEMINI_API_KEY` | A real key — placeholder value causes question/report steps to fail |
+| `WHISPER_MODEL` | `base` is sufficient for the 2-second fixture WAV |
+
+The test fixture files are committed to the repository:
+
+- `frontend/e2e/fixtures/sample-resume.pdf` — minimal valid PDF (3-page placeholder)
+- `frontend/e2e/fixtures/sample-response.wav` — 2-second 16 kHz mono sine tone, passes backend MIME/magic-byte validation
+
+### Running locally
+
+```bash
+# 1. Start the full stack (see docs/DEVELOPMENT.md for details)
+cd backend && uvicorn app.main:app --port 8000 --reload   # in one terminal
+cd frontend && npm run dev                                 # in another
+
+# 2. Run the suite
+cd frontend
+npx playwright test                   # or: npm run test:e2e
+npx playwright test --headed          # watch mode
+npx playwright show-report            # HTML report after a run
+```
+
+### Why E2E is not in the CI gate
+
+CI (`ci.yml`) intentionally excludes the Playwright suite:
+
+1. `GEMINI_API_KEY` is not available as a CI secret — any step that calls Gemini
+   (generate questions, analyze response, generate report) would fail.
+2. Whisper model download at CI startup would exceed the job time budget.
+3. The backend pytest suite and frontend Vitest suite already run in CI and gate
+   every merge; E2E is an additional **local confidence check**, not a
+   replacement.
+
+If you add a `GEMINI_API_KEY` secret to the repository and provision a Postgres
+service in the CI workflow, the suite is ready to run — no test changes needed.
+
 ## Related documentation
 
 - [INFRASTRUCTURE.md](./INFRASTRUCTURE.md) — full CI/CD job breakdown.

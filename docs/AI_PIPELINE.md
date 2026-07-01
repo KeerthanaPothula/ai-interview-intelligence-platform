@@ -6,7 +6,7 @@ Every AI capability in this platform is driven by one of three engines:
 |---|---|---|
 | **Google Gemini** (`google-genai`) | Remote API call | Question generation, response evaluation, follow-ups, live interviews, RAG questions, session reports, career coaching |
 | **OpenAI Whisper** (CPU, in-process) | Local inference, no network call | Audio transcription |
-| **librosa / scikit-learn / sentence-transformers** | Local inference, no network call | Voice analytics, success prediction, resume embeddings |
+| **librosa / sentence-transformers** | Local inference, no network call | Voice analytics, resume embeddings |
 
 This document covers what each pipeline does, in what order, and the
 reliability patterns shared across all of them. For the database rows each
@@ -181,15 +181,19 @@ overall performance summary, strengths/weaknesses, a written improvement
 plan, and a `readiness_level` classification (`Beginner` →
 `Highly Competitive`).
 
-## 9. Predictive analytics & benchmarking (`prediction_service.py`, `benchmark_service.py`)
+## 9. Interview readiness scoring & benchmarking (`prediction_service.py`, `benchmark_service.py`)
 
-- **Prediction**: a `scikit-learn` `LogisticRegression` model is trained
-  **once, in-process, at import time** on 2,000 synthetic samples
-  (hand-modeled score → outcome relationships, not real user data — there is
-  no cold-start problem and no PII in the training set). `POST
-  /interviews/{id}/predict` extracts the session's average scores as a
-  feature vector and returns a success probability and categorical outcome
-  (`Strong Pass` / `Pass` / `Borderline` / `Fail`).
+- **Readiness score**: `POST /interviews/{id}/readiness` computes a
+  **transparent, deterministic weighted average** of the session's own
+  component scores (30% overall, 20% communication, 25% technical, 15%
+  problem-solving, 10% confidence, with a small filler-word penalty — the
+  exact weights live in `prediction_service.py`). This is **not** a
+  machine-learned model and makes no claim to predict a real-world
+  interview or hiring outcome — it has no training step, no synthetic
+  data, and no dependency on scikit-learn or any ML library. It exists to
+  summarise signals already shown elsewhere in the product into one
+  number and a readiness label (`Excellent` / `Strong` / `Developing` /
+  `Needs Improvement`).
 - **Benchmarking**: `GET /analytics/benchmarks` computes the caller's
   percentile rank against every other platform user's average score, using
   SQL `COUNT`/`AVG` aggregates rather than loading all users' rows into

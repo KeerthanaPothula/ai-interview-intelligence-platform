@@ -3,7 +3,7 @@
 System-level views of the platform: how requests flow through it, how
 authentication works, how a candidate's session progresses end-to-end, and
 how the pieces are deployed. For the detailed, step-by-step AI processing
-logic (Whisper, Gemini, librosa, RAG, prediction), see
+logic (Whisper, Gemini, librosa, RAG, readiness scoring), see
 [AI_PIPELINE.md](./AI_PIPELINE.md) — this document stays at the structural
 level and links into it.
 
@@ -20,7 +20,7 @@ flowchart TB
     subgraph Backend["FastAPI Backend (Docker)"]
         MW["ObservabilityMiddleware\n+ SecurityHeadersMiddleware\n+ CORS"]
         Auth["JWT Auth Dependency\n(get_current_user)"]
-        Routers["Routers\nauth · interviews · questions · responses\nprocessing · live-interviews · documents\nanalytics · prediction · reports"]
+        Routers["Routers\nauth · interviews · questions · responses\nprocessing · live-interviews · documents\nanalytics · readiness · reports"]
         Services["Services\n(one per domain — see AI_PIPELINE.md)"]
         ORM["SQLAlchemy ORM"]
     end
@@ -29,7 +29,7 @@ flowchart TB
     FS[("Uploads Volume\n/app/uploads")]
     Gemini["Google Gemini API"]
     Whisper["Whisper\n(in-process, CPU)"]
-    Local["librosa · scikit-learn ·\nsentence-transformers\n(in-process, CPU)"]
+    Local["librosa ·\nsentence-transformers\n(in-process, CPU)"]
 
     SPA -- "HTTPS + JWT Bearer" --> MW
     MW --> Auth
@@ -40,16 +40,17 @@ flowchart TB
     Services -- "store/read audio + resumes" --> FS
     Services -- "questions · evaluation · follow-ups\nlive turns · RAG questions · reports · coaching" --> Gemini
     Services -- "transcribe audio" --> Whisper
-    Services -- "voice analytics · predictions ·\nresume embeddings" --> Local
+    Services -- "voice analytics · readiness scoring ·\nresume embeddings" --> Local
 ```
 
 **Key points**
 
 - The SPA never talks to PostgreSQL, Gemini, Whisper, or any local ML model
   directly — every external interaction is mediated by the FastAPI backend.
-- Whisper, librosa, scikit-learn, and sentence-transformers all run
-  **in-process** as the backend's own Python dependencies — there is no
-  separate ML microservice to deploy or keep in sync.
+- Whisper, librosa, and sentence-transformers all run **in-process** as the
+  backend's own Python dependencies — there is no separate ML microservice
+  to deploy or keep in sync. The readiness score (§9 of AI_PIPELINE.md) is a
+  deterministic weighted formula, not a model, so it has no such dependency.
 - `CORS_ORIGINS` and the JWT dependency gate every route except `/health`,
   `/ready`, `/metrics`, and the three unauthenticated auth endpoints
   (register/login/refresh).
@@ -142,7 +143,7 @@ stateDiagram-v2
     in_progress --> processing : all questions answered,\nlast response triggers processing
     processing --> completed : every response reaches\ncompleted or failed
 
-    completed --> [*] : POST .../report/generate\nPOST .../predict\nPOST .../coaching-plan\n(any number of times)
+    completed --> [*] : POST .../report/generate\nPOST .../readiness\nPOST .../coaching-plan\n(any number of times)
 
     note right of processing
         Per-response state (see AI_PIPELINE.md §1):
@@ -201,7 +202,7 @@ flowchart LR
     T --> V["Voice analytics (librosa)"]
     T --> E["Gemini evaluation"]
     E --> Rep["Session report"]
-    E --> Pred["Success prediction"]
+    E --> Pred["Interview readiness score"]
     E --> Coach["Career coaching plan"]
     R["Resume upload"] --> Chunk["RAG chunking + embedding"]
     Chunk --> RQ["Personalized RAG questions"]
@@ -214,8 +215,8 @@ in [AI_PIPELINE.md](./AI_PIPELINE.md).
 ## Related documentation
 
 - [AI_PIPELINE.md](./AI_PIPELINE.md) — detailed diagrams for Whisper/Gemini
-  evaluation, voice analytics, the RAG pipeline, live interviews, prediction,
-  and coaching.
+  evaluation, voice analytics, the RAG pipeline, live interviews, readiness
+  scoring, and coaching.
 - [DATABASE.md](./DATABASE.md) — the schema underlying every flow above.
 - [API.md](./API.md) — the HTTP surface for every step.
 - [DEPLOYMENT.md](./DEPLOYMENT.md) / [RENDER_DEPLOYMENT.md](./RENDER_DEPLOYMENT.md) — production setup.

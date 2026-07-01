@@ -265,16 +265,20 @@ export interface RAGQuestionsResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Prediction & Coaching (backend/app/schemas/prediction.py)
+// Readiness & Coaching (backend/app/schemas/prediction.py)
 // ---------------------------------------------------------------------------
 
-export interface InterviewPredictionResponse {
+/**
+ * Transparent weighted-average score, not a trained ML model's prediction —
+ * see docs/AI_PIPELINE.md §9 for the exact formula.
+ */
+export interface InterviewReadinessResponse {
   id: string;
   session_id: string;
-  success_probability: number | null;
+  readiness_score: number | null;
   percentile_rank: number | null;
-  predicted_outcome: string | null;
-  model_version: string | null;
+  readiness_level: string | null;
+  scoring_method: string | null;
   created_at: string;
 }
 

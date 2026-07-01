@@ -162,7 +162,11 @@ export function LiveInterviewPage() {
             />
           </div>
 
-          {error && <p className="error-message">{error}</p>}
+          {error && (
+            <p className="error-message" role="alert">
+              {error}
+            </p>
+          )}
 
           <button
             type="button"

@@ -102,7 +102,7 @@ the right GitHub searches: `fastapi`, `react`, `typescript`, `postgresql`,
 
 Group issues/PRs by theme rather than calendar date, mirroring how this
 project actually evolved (see [CHANGELOG.md](./CHANGELOG.md)) — e.g.
-`Voice Analytics`, `Live Interviews`, `Predictive Analytics`,
+`Voice Analytics`, `Live Interviews`, `Readiness Scoring`,
 `Observability`, `Open Source Polish` — each closed when its issues are
 resolved, rather than tied to a fixed deadline.
 

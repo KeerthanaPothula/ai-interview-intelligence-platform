@@ -8,7 +8,7 @@ import type {
   FollowUpQuestionResponse,
   FollowUpRequest,
   InterviewAnalysisResponse,
-  InterviewPredictionResponse,
+  InterviewReadinessResponse,
   LiveInterviewSessionResponse,
   ProcessingStatusResponse,
   QuestionResponse,
@@ -358,26 +358,26 @@ export function generateRagQuestions(
 }
 
 // ---------------------------------------------------------------------------
-// Prediction & Coaching
+// Readiness & Coaching
 // ---------------------------------------------------------------------------
 
-export function generatePrediction(
+export function generateReadiness(
   sessionId: string,
   token: string,
-): Promise<InterviewPredictionResponse> {
-  return request<InterviewPredictionResponse>(
-    `/api/v1/interviews/${sessionId}/predict`,
+): Promise<InterviewReadinessResponse> {
+  return request<InterviewReadinessResponse>(
+    `/api/v1/interviews/${sessionId}/readiness`,
     { method: 'POST' },
     token,
   );
 }
 
-export function getPrediction(
+export function getReadiness(
   sessionId: string,
   token: string,
-): Promise<InterviewPredictionResponse> {
-  return request<InterviewPredictionResponse>(
-    `/api/v1/interviews/${sessionId}/prediction`,
+): Promise<InterviewReadinessResponse> {
+  return request<InterviewReadinessResponse>(
+    `/api/v1/interviews/${sessionId}/readiness`,
     {},
     token,
   );

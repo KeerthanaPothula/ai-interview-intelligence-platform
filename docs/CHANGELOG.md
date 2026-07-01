@@ -7,6 +7,48 @@ than version number — see [CONTRIBUTING.md § Versioning](./CONTRIBUTING.md#ve
 for the semantic-versioning scheme recommended starting with the first
 tagged release.
 
+## 2026-07-01 — v1.0.0
+
+First production release.
+
+- **feat**: frontend polish — `ToastProvider`/`useToast` for user-action
+  feedback, `Skeleton` loader components, `EmptyState`/`ErrorState`
+  components with retry affordances, `aria-label` / `role="alert"` /
+  `aria-live` accessibility improvements across all pages.
+- **feat**: `ResumeUploadCard` — exposes the existing resume upload backend
+  endpoints (`POST/GET /api/v1/documents/resume/*`) which previously had no
+  frontend UI; wired into the Sessions list page.
+- **feat**: `SessionReportCard` — exposes the existing session report backend
+  endpoints (`POST/GET /api/v1/reports/*`) which previously had no frontend
+  UI; wired into the Session detail page.
+- **test**: Playwright end-to-end suite (`frontend/e2e/full-flow.spec.ts`)
+  covering the complete Register → Login → Upload Resume → Generate Questions
+  → Interview → Generate Report → Dashboard flow. Drives a real browser
+  against a real backend (no network mocking). Local/manual only — not in CI
+  gate (CI has no `GEMINI_API_KEY`). See
+  [docs/TESTING.md](./TESTING.md#end-to-end-playwright) for prerequisites.
+- **docs**: `RELEASE.md` — v1.0.0 release notes, migration checklist,
+  known limitations, roadmap. `docs/TESTING.md` extended with E2E section.
+  `docs/screenshots.md` updated with 4 real captured screenshots.
+- **chore**: backend test count updated to 251; README updated to reflect
+  v1.0.0 completion, real screenshots, and E2E test suite.
+
+## 2026-06-30
+
+- **refactor!**: renamed the "interview prediction" feature to **Interview
+  Readiness Score** and replaced its scikit-learn `LogisticRegression`
+  (trained on 2,000 synthetic, formula-generated samples) with a fully
+  transparent, deterministic weighted-average formula over existing
+  evaluation/voice signals — no training step, no ML dependency, no claim of
+  predicting real-world hiring outcomes. `POST/GET
+  /api/v1/interviews/{id}/predict` and `/prediction` are now `/readiness`;
+  response fields renamed `success_probability`→`readiness_score`,
+  `predicted_outcome`→`readiness_level`, `model_version`→`scoring_method`.
+  Breaking change, taken pre-v1.0.0 (no tagged release, no existing frontend
+  consumer of the old contract). `scikit-learn` removed from
+  `requirements.txt`. See [AI_PIPELINE.md §9](./AI_PIPELINE.md#9-interview-readiness-scoring--benchmarking-prediction_servicepy-benchmark_servicepy)
+  for the exact formula and weights.
+
 ## 2026-06-29
 
 - **fix**: resolved GitHub Actions CI failures (`openai-whisper` build

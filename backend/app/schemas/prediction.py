@@ -6,13 +6,19 @@ from datetime import datetime
 from pydantic import BaseModel
 
 
-class InterviewPredictionResponse(BaseModel):
+class InterviewReadinessResponse(BaseModel):
+    """A transparent, weighted-average readiness summary for a session.
+
+    Not a prediction of a real-world interview or hiring outcome — see
+    app/services/prediction_service.py for the exact (non-ML) formula.
+    """
+
     id: uuid.UUID
     session_id: uuid.UUID
-    success_probability: float | None
+    readiness_score: float | None
     percentile_rank: float | None
-    predicted_outcome: str | None
-    model_version: str | None
+    readiness_level: str | None
+    scoring_method: str | None
     created_at: datetime
 
     model_config = {"from_attributes": True}

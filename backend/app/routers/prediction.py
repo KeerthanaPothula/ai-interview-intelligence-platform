@@ -1,4 +1,4 @@
-"""Interview prediction, career coaching, and benchmarking endpoints."""
+"""Interview readiness scoring, career coaching, and benchmarking endpoints."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from app.routers.auth import get_current_user
 from app.schemas.prediction import (
     BenchmarkResponse,
     CoachingPlanResponse,
-    InterviewPredictionResponse,
+    InterviewReadinessResponse,
 )
 from app.services import (
     benchmark_service,
@@ -29,7 +29,7 @@ from app.services import (
 )
 from app.models.user import User
 
-router = APIRouter(tags=["Prediction & Coaching"])
+router = APIRouter(tags=["Readiness & Coaching"])
 
 
 def _get_session_averages(session_id: uuid.UUID, db: Session) -> dict:
@@ -74,17 +74,40 @@ def _get_session_averages(session_id: uuid.UUID, db: Session) -> dict:
     }
 
 
+def _readiness_response(pred: InterviewPrediction) -> InterviewReadinessResponse:
+    """Map the stored row onto the honestly-named response schema.
+
+    The DB column names (success_probability, predicted_outcome,
+    model_version) predate this rename; renaming them would require an
+    Alembic migration with no functional benefit, so the mapping happens
+    here at the API boundary instead.
+    """
+    return InterviewReadinessResponse(
+        id=pred.id,
+        session_id=pred.session_id,
+        readiness_score=pred.success_probability,
+        percentile_rank=pred.percentile_rank,
+        readiness_level=pred.predicted_outcome,
+        scoring_method=pred.model_version,
+        created_at=pred.created_at,
+    )
+
+
 @router.post(
-    f"{API_V1_PREFIX}/interviews/{{session_id}}/predict",
-    response_model=InterviewPredictionResponse,
+    f"{API_V1_PREFIX}/interviews/{{session_id}}/readiness",
+    response_model=InterviewReadinessResponse,
     status_code=201,
 )
-def generate_prediction(
+def generate_readiness_assessment(
     session_id: uuid.UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Generate a success probability prediction for this session."""
+    """Compute a transparent, weighted-average readiness score for this session.
+
+    Not a prediction of a real-world interview or hiring outcome — see
+    app/services/prediction_service.py for the exact formula and weights.
+    """
     interview_service.get_session_or_404(db, session_id, current_user.id)
     metrics = _get_session_averages(session_id, db)
 
@@ -93,7 +116,7 @@ def generate_prediction(
             "No analyses found for this session. Process some responses first."
         )
 
-    prob, outcome = prediction_service.predict_success(**metrics)
+    readiness_score, readiness_level = prediction_service.compute_readiness(**metrics)
 
     # Compute percentile vs all platform users via COUNT aggregates instead of
     # fetching every InterviewAnalysis row in the platform into Python.
@@ -122,23 +145,23 @@ def generate_prediction(
 
     pred = InterviewPrediction(
         session_id=session_id,
-        success_probability=round(prob, 4),
+        success_probability=readiness_score,
         percentile_rank=percentile,
-        predicted_outcome=outcome,
+        predicted_outcome=readiness_level,
         feature_vector=json.dumps(metrics),
-        model_version=prediction_service._MODEL_VERSION,
+        model_version=prediction_service.SCORING_METHOD,
     )
     db.add(pred)
     db.commit()
     db.refresh(pred)
-    return InterviewPredictionResponse.model_validate(pred)
+    return _readiness_response(pred)
 
 
 @router.get(
-    f"{API_V1_PREFIX}/interviews/{{session_id}}/prediction",
-    response_model=InterviewPredictionResponse,
+    f"{API_V1_PREFIX}/interviews/{{session_id}}/readiness",
+    response_model=InterviewReadinessResponse,
 )
-def get_prediction(
+def get_readiness_assessment(
     session_id: uuid.UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -148,8 +171,8 @@ def get_prediction(
         select(InterviewPrediction).where(InterviewPrediction.session_id == session_id)
     ).scalar_one_or_none()
     if pred is None:
-        raise ResourceNotFound("No prediction generated yet.")
-    return InterviewPredictionResponse.model_validate(pred)
+        raise ResourceNotFound("No readiness assessment generated yet.")
+    return _readiness_response(pred)
 
 
 @router.post(

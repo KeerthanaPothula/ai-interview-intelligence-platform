@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   CartesianGrid,
   Legend,
@@ -14,6 +14,8 @@ import {
   YAxis,
 } from 'recharts';
 import { getAnalyticsOverview, getAnalyticsTrends, getBenchmarks } from '../api/client';
+import { StatGridSkeleton } from '../components/Skeleton';
+import { ErrorState } from '../components/StateMessage';
 import type {
   AnalyticsOverviewResponse,
   BenchmarkResponse,
@@ -38,8 +40,10 @@ export function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const loadAnalytics = useCallback(() => {
     if (!token) return;
+    setLoading(true);
+    setError(null);
     Promise.all([
       getAnalyticsOverview(token),
       getAnalyticsTrends(token),
@@ -54,10 +58,16 @@ export function DashboardPage() {
       .finally(() => setLoading(false));
   }, [token]);
 
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- standard data-fetching pattern
+    loadAnalytics();
+  }, [loadAnalytics]);
+
   if (loading) {
     return (
       <div className="page-container">
-        <div className="spinner" aria-label="Loading analytics" />
+        <h1>Analytics Dashboard</h1>
+        <StatGridSkeleton />
       </div>
     );
   }
@@ -65,7 +75,8 @@ export function DashboardPage() {
   if (error) {
     return (
       <div className="page-container">
-        <p className="error-message">{error}</p>
+        <h1>Analytics Dashboard</h1>
+        <ErrorState message={error} onRetry={loadAnalytics} />
       </div>
     );
   }

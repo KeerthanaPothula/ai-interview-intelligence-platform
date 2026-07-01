@@ -175,8 +175,8 @@ Partially update a **draft** session only.
 ### `DELETE /api/v1/interviews/{session_id}`
 
 Delete a session and everything that cascades from it (questions, audio
-responses, transcripts, analyses, report, prediction, coaching plan — see
-[DATABASE.md](./DATABASE.md#cascade-behavior)). **Response 204**.
+responses, transcripts, analyses, report, readiness score, coaching plan —
+see [DATABASE.md](./DATABASE.md#cascade-behavior)). **Response 204**.
 
 ### `POST /api/v1/interviews/{session_id}/questions/generate`
 
@@ -415,22 +415,24 @@ questions fall back to job-description-only generation rather than failing.
 
 ---
 
-## Predictive Analytics & Career Coaching — `/api/v1` 🔒
+## Interview Readiness Score & Career Coaching — `/api/v1` 🔒
 
-### `POST /api/v1/interviews/{session_id}/predict`
+### `POST /api/v1/interviews/{session_id}/readiness`
 
-Runs the logistic-regression model (trained at startup on synthetic data)
-over the session's analyzed responses.
+Computes a transparent, deterministic weighted average over the session's
+analyzed responses (see [AI_PIPELINE.md §9](./AI_PIPELINE.md#9-interview-readiness-scoring--benchmarking-prediction_servicepy-benchmark_servicepy)
+for the exact weights). **Not** a machine-learned prediction of a
+real-world interview or hiring outcome.
 
-**Response 201** (`InterviewPredictionResponse`):
+**Response 201** (`InterviewReadinessResponse`):
 ```json
-{ "id": "...", "session_id": "...", "success_probability": 0.78, "percentile_rank": 82.5, "predicted_outcome": "Pass", "model_version": "v1-synthetic-2000", "created_at": "..." }
+{ "id": "...", "session_id": "...", "readiness_score": 0.78, "percentile_rank": 82.5, "readiness_level": "Strong", "scoring_method": "weighted-v1", "created_at": "..." }
 ```
-`predicted_outcome` ∈ `Strong Pass | Pass | Borderline | Fail`.
+`readiness_level` ∈ `Excellent | Strong | Developing | Needs Improvement`.
 
 **Errors**: `422` no analyzed responses in the session yet.
 
-### `GET /api/v1/interviews/{session_id}/prediction`
+### `GET /api/v1/interviews/{session_id}/readiness`
 
 Same shape. `404` if not yet generated.
 

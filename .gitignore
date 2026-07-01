@@ -1,5 +1,11 @@
 # Node.js / frontend
 node_modules/
+frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
+
+# Uploaded audio files (runtime data, not source)
+backend/uploads/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

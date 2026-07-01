@@ -174,10 +174,9 @@ python-docx==1.1.2
 # Requires transformers + torch (already present via openai-whisper).
 sentence-transformers==3.0.1
 
-# ML toolkit — scikit-learn logistic regression is used by prediction_service
-# to estimate interview success probability from session score features.
-# Trained on synthetic data at module load time (no external data required).
-scikit-learn==1.5.2
+# Note: prediction_service.py (Interview Readiness Score) is a transparent
+# weighted-average formula, not a trained model — no ML toolkit dependency
+# (e.g. scikit-learn) is required for it. See docs/AI_PIPELINE.md.
 
 
 # -------------------------------------------------------------
