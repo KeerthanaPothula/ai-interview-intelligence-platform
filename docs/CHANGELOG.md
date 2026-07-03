@@ -1,11 +1,27 @@
 # Changelog
 
 All notable changes to this project, grouped by date. Format loosely follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project has
-not yet tagged any releases, so entries are organized by commit date rather
-than version number — see [CONTRIBUTING.md § Versioning](./CONTRIBUTING.md#versioning--releases)
-for the semantic-versioning scheme recommended starting with the first
-tagged release.
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+See [CONTRIBUTING.md § Versioning](./CONTRIBUTING.md#versioning--releases)
+for the semantic-versioning scheme.
+
+## 2026-07-02 — v1.0.1
+
+- **fix**: CORS connection — backend config now searches `[".env", "../.env"]`
+  so the standard `cp .env.example .env` (at repo root) works without a
+  separate `backend/.env`. Added a `model_validator` that auto-populates
+  `CORS_ORIGINS` with `localhost:5173` and `localhost:3000` when
+  `ENVIRONMENT=development` and no explicit value is set — local dev now
+  works out-of-the-box from a clean clone.
+- **fix**: improved network-error message in `client.ts` to include the
+  actual backend URL and actionable guidance instead of a generic string.
+- **feat**: public landing page at `/` — hero section with readiness score
+  mock, feature highlights grid, tech-stack badges, production-features
+  breakdown, screenshot mockups, CTA banner, and footer. Matches existing
+  design-language CSS variables; fully responsive.
+- **chore**: routing — `SessionsListPage` moved from `/` to `/sessions`;
+  `/login` and `/register` redirect authenticated users to `/sessions`;
+  `Layout` nav links updated accordingly.
 
 ## 2026-07-01 — v1.0.0
 

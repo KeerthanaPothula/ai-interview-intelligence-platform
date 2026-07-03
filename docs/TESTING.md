@@ -115,7 +115,7 @@ Generate Report → Navigate to Dashboard.
 | Frontend dev server | `http://localhost:5173` (`npm run dev` in `frontend/`) |
 | Backend (uvicorn) | `http://localhost:8000` (host venv or Docker) |
 | PostgreSQL | Reachable at `DATABASE_URL` in `backend/.env` |
-| `CORS_ORIGINS` | Must include `http://localhost:5173` in `backend/.env` |
+| `CORS_ORIGINS` | Defaults to `http://localhost:5173,http://localhost:3000` when `ENVIRONMENT=development` — no explicit setting needed for local runs |
 | `GEMINI_API_KEY` | A real key — placeholder value causes question/report steps to fail |
 | `WHISPER_MODEL` | `base` is sufficient for the 2-second fixture WAV |
 

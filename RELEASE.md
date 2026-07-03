@@ -109,10 +109,11 @@ for prerequisites and how to run it.
    from `requirements.txt`, it can be uninstalled (`pip uninstall scikit-learn`).
    No other dependencies changed in this release.
 
-4. **`CORS_ORIGINS`**: if you run the frontend dev server and backend together
-   locally, make sure `CORS_ORIGINS=http://localhost:5173` (or your frontend
-   origin) is set in `backend/.env`. This was always required but is now
-   explicitly called out in the documentation.
+4. **`CORS_ORIGINS`**: in development mode (`ENVIRONMENT=development`), the
+   backend now defaults `CORS_ORIGINS` to `http://localhost:5173,http://localhost:3000`
+   if no value is set — so local dev works out-of-the-box from a clean clone.
+   In production (`ENVIRONMENT=production`), you must set `CORS_ORIGINS` explicitly
+   to your deployed frontend origin.
 
 ---
 

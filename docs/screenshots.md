@@ -1,8 +1,9 @@
 # Screenshots
 
 Screenshots live in `docs/screenshots/`. Four were captured automatically
-via Playwright against a real running stack (no mocking); five require a
-session with completed Whisper transcription + Gemini analysis to capture.
+via Playwright against a real running stack (no mocking); six require a
+session with completed Whisper transcription + Gemini analysis, or the
+new landing page, to capture.
 
 ## Captured (real, from a running local stack)
 
@@ -10,10 +11,10 @@ session with completed Whisper transcription + Gemini analysis to capture.
 |---|---|---|
 | 1 | [`docs/screenshots/01-login.png`](screenshots/01-login.png) | Login page (`/login`) |
 | 2 | [`docs/screenshots/02-register.png`](screenshots/02-register.png) | Registration form (`/register`) |
-| 3 | [`docs/screenshots/03-session-list.png`](screenshots/03-session-list.png) | Sessions list with resume upload card and create-session form (`/`) |
+| 3 | [`docs/screenshots/03-session-list.png`](screenshots/03-session-list.png) | Sessions list with resume upload card and create-session form (`/sessions`) |
 | 4 | [`docs/screenshots/04-session-detail.png`](screenshots/04-session-detail.png) | Session detail before questions are generated (`/sessions/:id`) |
 
-## Still needed (require a Gemini API key and a completed session)
+## Still needed (require a running stack; some require Gemini key)
 
 To capture these, run the full app with a real `GEMINI_API_KEY`, complete
 at least one interview session (upload audio → wait for Whisper + Gemini
@@ -21,6 +22,7 @@ to finish), then screenshot each state.
 
 | # | Filename | Page / Component | How to capture |
 |---|---|---|---|
+| 0 | `docs/screenshots/00-landing.png` | Landing page (`/`) | Visit `http://localhost:5173/` — no login required. |
 | 5 | `docs/screenshots/05-questions.png` | `SessionDetailPage` — question list | After clicking "Generate Questions" — shows the Gemini-generated question list (category + text). |
 | 6 | `docs/screenshots/06-upload.png` | `SessionDetailPage` — `QuestionCard` upload control | A question card with the file picker ready to upload. |
 | 7 | `docs/screenshots/07-processing.png` | `ResponseCard` → `ProcessingStatusCard` | Immediately after upload, while `status === 'processing'` (spinner visible). |
@@ -39,7 +41,7 @@ to finish), then screenshot each state.
 cd backend && uvicorn app.main:app --port 8000 --reload
 cd frontend && npm run dev
 
-# Open http://localhost:5173 in a browser
+# Open http://localhost:5173 in a browser (landing page, no login needed)
 # Navigate to each page listed above and screenshot manually
 # Save to docs/screenshots/ using the exact filenames
 ```

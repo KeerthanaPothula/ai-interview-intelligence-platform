@@ -383,6 +383,7 @@ questions and Whisper transcription — see
 
 | View | File |
 |---|---|
+| Landing page | see [docs/screenshots.md](docs/screenshots.md) |
 | Login | [docs/screenshots/01-login.png](docs/screenshots/01-login.png) |
 | Register | [docs/screenshots/02-register.png](docs/screenshots/02-register.png) |
 | Sessions list (with resume upload) | [docs/screenshots/03-session-list.png](docs/screenshots/03-session-list.png) |
