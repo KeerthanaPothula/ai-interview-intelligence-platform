@@ -35,9 +35,8 @@ services:
     # Render hits this path to determine if the instance is healthy.
     healthCheckPath: /health
 
-    # Runs `alembic upgrade head` inside the deployed container BEFORE the
-    # new revision starts receiving traffic. Idempotent on every deploy.
-    preDeployCommand: alembic upgrade head
+    # NOTE: preDeployCommand is not supported on the Free plan.
+    # Run migrations manually after each deploy — see docs/PRODUCTION_DEPLOYMENT.md.
 
     envVars:
       # ----------------------------------------------------------------

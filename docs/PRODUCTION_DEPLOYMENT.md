@@ -78,12 +78,22 @@ Neon enforces SSL on all connections. `sslmode=require` in the connection string
 
 ### 1.4 Migrations
 
-Migrations run automatically before every Render deploy via `preDeployCommand: alembic upgrade head` in `render.yaml`. For the very first deploy:
+> **Free plan limitation**: Render Free does not support `preDeployCommand`, so migrations do **not** run automatically on deploy. You must run them manually after each deploy that includes schema changes.
 
-1. The pre-deploy command runs, finds an empty database, and applies all migrations from scratch.
-2. Subsequent deploys apply only new migrations — the command is idempotent.
+**How to run migrations manually:**
 
-To run migrations manually (e.g. to verify before deploy):
+1. Open the Render dashboard → `aiip-backend` → **Shell** tab.
+2. Run:
+   ```bash
+   alembic upgrade head
+   ```
+3. The command is idempotent — safe to run on every deploy even when there are no new migrations.
+
+**First deploy**: the database is empty; `alembic upgrade head` applies all migrations from scratch.
+
+**Subsequent deploys**: only new migrations are applied.
+
+To run migrations from your local machine instead (requires the Neon connection string):
 ```bash
 DATABASE_URL="postgresql+psycopg2://..." alembic upgrade head
 ```
@@ -132,8 +142,14 @@ On the Free plan, the service spins down after 15 minutes of inactivity. The fir
 
 1. Click **Deploy** (or it starts automatically after the Blueprint is applied).
 2. Watch the build logs — `pip install -r requirements.txt` fetches dependencies and takes 3–5 minutes on first build (no PyTorch on free tier, so it's faster than a full build).
-3. After the image builds, the pre-deploy command runs: `alembic upgrade head`.
-4. The web service starts. Check `/health` returns `{"status":"healthy","audio_processing_enabled":false,...}`.
+3. Once the service is live, open the **Shell** tab in the Render dashboard and run:
+   ```bash
+   alembic upgrade head
+   ```
+   This applies all migrations to the empty Neon database.
+4. Check `/health` returns `{"status":"healthy","audio_processing_enabled":false,...}`.
+
+> **Important**: Without this step the app will fail on any request that touches the database. The Free plan does not support automatic pre-deploy commands.
 
 ### 2.6 Production URLs
 
