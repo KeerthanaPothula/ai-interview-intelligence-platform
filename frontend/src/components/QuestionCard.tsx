@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { ApiError, uploadResponse } from '../api/client';
 import { useAuth } from '../context/AuthContext';
-import { useFeatures } from '../context/FeaturesContext';
+import { useFeatures } from '../context/FeaturesContext.shared';
 import type { AudioResponseResponse, QuestionResponse } from '../api/types';
 import { ResponseCard } from './ResponseCard';
 

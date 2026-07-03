@@ -1,11 +1,6 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { getHealth } from '../api/client';
-
-interface FeaturesContextValue {
-  audioEnabled: boolean;
-}
-
-const FeaturesContext = createContext<FeaturesContextValue>({ audioEnabled: true });
+import { FeaturesContext } from './FeaturesContext.shared';
 
 export function FeaturesProvider({ children }: { children: ReactNode }) {
   const [audioEnabled, setAudioEnabled] = useState(true);
@@ -24,8 +19,4 @@ export function FeaturesProvider({ children }: { children: ReactNode }) {
       {children}
     </FeaturesContext.Provider>
   );
-}
-
-export function useFeatures(): FeaturesContextValue {
-  return useContext(FeaturesContext);
 }

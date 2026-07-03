@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-import re
+import threading
 import time
 
 import httpx
@@ -11,6 +11,7 @@ from google.genai import errors as genai_errors
 from fastapi import HTTPException
 
 from app.config import get_settings
+from app.core.ai_reliability import strip_fences
 from app.core.metrics import observe_ai_request
 from app.core.tracing import get_tracer
 from app.models.interview import (
@@ -20,12 +21,6 @@ from app.models.interview import (
 
 logger = logging.getLogger(__name__)
 tracer = get_tracer(__name__)
-
-# Compiled once at module load — matches both ```json ... ``` and ``` ... ```
-# Gemini wraps JSON in markdown fences even when instructed not to. The fence
-# may use "json" as the language tag or no tag at all. The pattern uses
-# re.DOTALL so that the inner content can span multiple lines.
-_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
 
 _VALID_CATEGORIES = (
     VALID_QUESTION_CATEGORIES  # {"behavioral", "technical", "situational"}
@@ -40,10 +35,20 @@ def _build_client() -> genai.Client:
     )
 
 
-# Module-level singleton. Initialised once on first import so the API key is
-# read from settings (which are cached by @lru_cache) rather than on every
-# request. Tests that need to swap the client should patch _client directly.
-_client = _build_client()
+# Lazy singleton — same rationale as evaluation_service: defer API-key reads
+# and HTTP pool creation to the first actual request, reducing cold-start
+# latency and avoiding import-time failures in non-production environments.
+_client: genai.Client | None = None
+_client_lock = threading.Lock()
+
+
+def _get_client() -> genai.Client:
+    global _client
+    if _client is None:
+        with _client_lock:
+            if _client is None:
+                _client = _build_client()
+    return _client
 
 
 def _build_prompt(job_role: str, job_description: str, count: int) -> str:
@@ -71,20 +76,6 @@ Requirements:
 - Questions must be specific to the job description, not generic.
 - Return exactly {count} questions.
 - Do not include a "sequence_order" field — ordering is handled by the application."""
-
-
-def _strip_fences(text: str) -> str:
-    """Remove markdown code fences from Gemini output before JSON parsing.
-
-    Gemini instruction-following models frequently wrap JSON in ``` or ```json
-    fences despite prompts requesting plain JSON. This stripping step is
-    unconditional — if no fences are present, the regex finds no match and
-    the original text is returned unchanged.
-    """
-    match = _FENCE_RE.search(text)
-    if match:
-        return match.group(1)
-    return text.strip()
 
 
 def _validate_and_normalize(raw: list[object], count: int) -> list[dict]:
@@ -189,7 +180,7 @@ def generate_questions(
     try:
         with tracer.start_as_current_span("gemini.generate_questions") as span:
             span.set_attribute("gemini.model", model)
-            response = _client.models.generate_content(
+            response = _get_client().models.generate_content(
                 model=model,
                 contents=prompt,
             )
@@ -232,7 +223,7 @@ def generate_questions(
         duration_seconds=time.perf_counter() - start,
     )
 
-    stripped = _strip_fences(raw_text)
+    stripped = strip_fences(raw_text)
 
     try:
         parsed = json.loads(stripped)

@@ -19,7 +19,6 @@ from app.core.constants import API_V1_PREFIX
 from app.core.deps import get_current_user
 from app.database import get_db
 from app.models.analysis import AudioResponse
-from app.models.features import VoiceAnalysis
 from app.models.interview import Question
 from app.models.user import User
 from app.schemas.analysis import (
@@ -354,6 +353,7 @@ def get_voice_analysis(
     """
     response = (
         db.query(AudioResponse)
+        .options(joinedload(AudioResponse.voice_analysis))
         .filter(
             AudioResponse.id == response_id,
             AudioResponse.user_id == current_user.id,
@@ -363,12 +363,7 @@ def get_voice_analysis(
     if response is None:
         raise HTTPException(status_code=404, detail="Response not found.")
 
-    voice = (
-        db.query(VoiceAnalysis)
-        .filter(VoiceAnalysis.audio_response_id == response_id)
-        .first()
-    )
-    if voice is None:
+    if response.voice_analysis is None:
         raise HTTPException(status_code=404, detail="Voice analysis not found.")
 
-    return VoiceAnalysisResponse.model_validate(voice)
+    return VoiceAnalysisResponse.model_validate(response.voice_analysis)

@@ -78,20 +78,21 @@ def get_analytics_overview(
         weakest_skill = min(skill_scores, key=lambda k: skill_scores[k])
 
     # Improvement: latest overall score minus first overall score.
+    # Two LIMIT 1 queries instead of loading all rows — O(1) instead of O(N).
     if total_responses_analyzed >= 2:
-        base_q = (
-            db.query(InterviewAnalysis.overall_score, InterviewAnalysis.created_at)
+        _base = (
+            db.query(InterviewAnalysis.overall_score)
             .join(
                 AudioResponse, InterviewAnalysis.audio_response_id == AudioResponse.id
             )
             .filter(AudioResponse.user_id == user_id)
-            .order_by(InterviewAnalysis.created_at)
         )
-        rows = base_q.all()
-        if rows:
-            first_score = float(rows[0].overall_score)
-            last_score = float(rows[-1].overall_score)
-            improvement_score = round(last_score - first_score, 1)
+        first_score_val = _base.order_by(InterviewAnalysis.created_at).limit(1).scalar()
+        last_score_val = (
+            _base.order_by(InterviewAnalysis.created_at.desc()).limit(1).scalar()
+        )
+        if first_score_val is not None and last_score_val is not None:
+            improvement_score = round(float(last_score_val) - float(first_score_val), 1)
 
     return AnalyticsOverviewResponse(
         total_sessions=total_sessions,
@@ -112,44 +113,49 @@ def get_analytics_trends(
     """Return per-session score averages for trend charts."""
     user_id: uuid.UUID = current_user.id
 
-    sessions = (
-        db.query(InterviewSession)
+    def _f(v: object) -> float | None:
+        return round(float(v), 1) if v is not None else None  # type: ignore[arg-type]
+
+    # Single GROUP BY query replaces the previous N+1 pattern (one query per
+    # session). OUTER JOINs preserve sessions that have no analyses yet so
+    # they appear in the trend with null scores rather than being silently
+    # dropped.
+    rows = (
+        db.query(
+            InterviewSession.id.label("session_id"),
+            InterviewSession.title.label("session_title"),
+            InterviewSession.created_at.label("created_at"),
+            func.avg(InterviewAnalysis.overall_score).label("overall"),
+            func.avg(InterviewAnalysis.communication_score).label("comm"),
+            func.avg(InterviewAnalysis.technical_score).label("tech"),
+            func.avg(InterviewAnalysis.problem_solving_score).label("ps"),
+            func.avg(InterviewAnalysis.confidence_score).label("conf"),
+        )
+        .outerjoin(AudioResponse, AudioResponse.session_id == InterviewSession.id)
+        .outerjoin(
+            InterviewAnalysis,
+            InterviewAnalysis.audio_response_id == AudioResponse.id,
+        )
         .filter(InterviewSession.user_id == user_id)
+        .group_by(
+            InterviewSession.id,
+            InterviewSession.title,
+            InterviewSession.created_at,
+        )
         .order_by(InterviewSession.created_at)
         .all()
     )
 
-    result: list[SessionTrendResponse] = []
-    for session in sessions:
-        avg_row = (
-            db.query(
-                func.avg(InterviewAnalysis.overall_score).label("overall"),
-                func.avg(InterviewAnalysis.communication_score).label("comm"),
-                func.avg(InterviewAnalysis.technical_score).label("tech"),
-                func.avg(InterviewAnalysis.problem_solving_score).label("ps"),
-                func.avg(InterviewAnalysis.confidence_score).label("conf"),
-            )
-            .join(
-                AudioResponse, InterviewAnalysis.audio_response_id == AudioResponse.id
-            )
-            .filter(AudioResponse.session_id == session.id)
-            .one()
+    return [
+        SessionTrendResponse(
+            session_id=row.session_id,
+            session_title=row.session_title,
+            created_at=row.created_at,
+            average_overall_score=_f(row.overall),
+            average_communication_score=_f(row.comm),
+            average_technical_score=_f(row.tech),
+            average_problem_solving_score=_f(row.ps),
+            average_confidence_score=_f(row.conf),
         )
-
-        def _f(v: object) -> float | None:
-            return round(float(v), 1) if v is not None else None  # type: ignore[arg-type]
-
-        result.append(
-            SessionTrendResponse(
-                session_id=session.id,
-                session_title=session.title,
-                created_at=session.created_at,
-                average_overall_score=_f(avg_row.overall),
-                average_communication_score=_f(avg_row.comm),
-                average_technical_score=_f(avg_row.tech),
-                average_problem_solving_score=_f(avg_row.ps),
-                average_confidence_score=_f(avg_row.conf),
-            )
-        )
-
-    return result
+        for row in rows
+    ]

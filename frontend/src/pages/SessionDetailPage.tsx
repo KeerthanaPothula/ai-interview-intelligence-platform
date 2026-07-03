@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { ApiError, generateQuestions, getSession, listResponses } from '../api/client';
 import { QuestionCard } from '../components/QuestionCard';
@@ -23,6 +23,21 @@ export function SessionDetailPage() {
   const [generateError, setGenerateError] = useState<string | null>(null);
 
   const [report, setReport] = useState<SessionReportResponse | null>(null);
+
+  // Precompute once per responses change (O(R)) instead of re-filtering per
+  // question on every render (O(Q×R)).
+  const responsesByQuestion = useMemo(() => {
+    const map = new Map<string, AudioResponseResponse[]>();
+    for (const r of responses) {
+      const bucket = map.get(r.question_id);
+      if (bucket) {
+        bucket.push(r);
+      } else {
+        map.set(r.question_id, [r]);
+      }
+    }
+    return map;
+  }, [responses]);
 
   const loadSession = useCallback(() => {
     if (!token || !sessionId) return;
@@ -112,7 +127,7 @@ export function SessionDetailPage() {
                 key={question.id}
                 question={question}
                 sessionId={session.id}
-                responses={responses.filter((response) => response.question_id === question.id)}
+                responses={responsesByQuestion.get(question.id) ?? []}
                 onUploaded={handleUploaded}
               />
             ))}

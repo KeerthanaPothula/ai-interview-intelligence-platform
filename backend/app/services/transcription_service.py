@@ -62,6 +62,7 @@ def get_model() -> Any:
         with _model_lock:
             if _model is None:
                 import whisper  # lazy — PyTorch is not loaded until this point
+
                 model_name = get_settings().WHISPER_MODEL
                 logger.info("Loading Whisper model '%s'", model_name)
                 _model = whisper.load_model(model_name)
