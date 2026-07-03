@@ -302,14 +302,30 @@ are in **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**.
 
 ## Deployment
 
-The backend is a single Docker image deployable to **Render** (documented
-in full at [docs/RENDER_DEPLOYMENT.md](docs/RENDER_DEPLOYMENT.md)) or
-**Railway**; the frontend is a static Vite build deployable to Render
-Static Site or **Vercel**. Database migrations run as a pre-deploy step
-(not at application startup) and uploaded audio requires a persistent
-volume (Render Disk / Railway Volume) — see
-**[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** for the full strategy and
-platform-by-platform steps.
+### Production architecture
+
+```
+Vercel (frontend) → Render Web Service (backend) → Neon PostgreSQL
+```
+
+| Service | Platform | Config |
+|---|---|---|
+| Frontend | Vercel (Hobby, free) | `frontend/vercel.json` — SPA rewrites |
+| Backend | Render Standard ($25/mo) | `render.yaml` — Docker + Disk + pre-deploy migration |
+| Database | Neon PostgreSQL (free tier) | External; `DATABASE_URL` with `sslmode=require` |
+
+One-click deploy via Render Blueprint (reads `render.yaml`):
+1. Render → New → Blueprint → connect this repo → Apply.
+2. Set three secrets in Render dashboard: `DATABASE_URL`, `GEMINI_API_KEY`, `CORS_ORIGINS`.
+3. Vercel → New Project → Root Directory: `frontend` → set `VITE_API_BASE_URL`.
+
+Full step-by-step instructions, migration workflow, environment variable
+reference, and post-deploy verification checklist are in
+**[docs/PRODUCTION_DEPLOYMENT.md](docs/PRODUCTION_DEPLOYMENT.md)**.
+
+Database migration strategy, persistent storage approach, and
+platform-specific notes (Railway alternative) are in
+**[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
 
 ## Testing
 
@@ -396,6 +412,7 @@ questions and Whisper transcription — see
 
 | Doc | Covers |
 |---|---|
+| [docs/PRODUCTION_DEPLOYMENT.md](docs/PRODUCTION_DEPLOYMENT.md) | **Production deploy: Neon + Render + Vercel (start here)** |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System, request-flow, auth-flow, deployment diagrams |
 | [docs/DATABASE.md](docs/DATABASE.md) | Full ER diagram, table reference, migrations |
 | [docs/API.md](docs/API.md) | Every endpoint, with request/response examples |

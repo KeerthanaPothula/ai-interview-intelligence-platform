@@ -1,0 +1,156 @@
+# render.yaml — Render Infrastructure as Code
+# https://render.com/docs/infrastructure-as-code
+#
+# Defines the backend web service and its persistent upload disk.
+# The frontend is deployed separately on Vercel (see docs/PRODUCTION_DEPLOYMENT.md).
+# The database is Neon PostgreSQL (external) — no `databases:` block needed here.
+#
+# Deploy: push this file to main and connect the repo in the Render dashboard,
+# OR use `render deploy --confirm` with the Render CLI.
+#
+# Secrets marked `sync: false` MUST be added manually in the Render dashboard
+# under Environment → Environment Variables before the first deploy.
+
+services:
+  - type: web
+    name: aiip-backend
+    runtime: docker
+
+    # Docker build context is the backend/ subdirectory of the monorepo.
+    rootDir: backend
+    dockerfilePath: Dockerfile
+
+    # Region — choose the region closest to your Neon database.
+    # Neon free tier defaults to aws-us-east-2 (Ohio).
+    # Render regions: oregon | ohio | virginia | frankfurt | singapore
+    region: ohio
+
+    # plan: starter (512 MB, $7/mo) is NOT enough for PyTorch + Whisper.
+    # Use standard (2 GB RAM, $25/mo) as the minimum for this workload.
+    # Scale up to pro (4 GB, $85/mo) if transcription queues under load.
+    plan: standard
+
+    # Render hits this path to determine if the instance is healthy.
+    # /health never touches the database — intentional for liveness probes.
+    healthCheckPath: /health
+
+    # Runs `alembic upgrade head` inside the deployed container — using the
+    # same image and environment variables as the web service — BEFORE the
+    # new revision starts receiving traffic. Idempotent: safe to run on
+    # every deploy, including the first one against a brand-new database.
+    preDeployCommand: alembic upgrade head
+
+    envVars:
+      # ----------------------------------------------------------------
+      # Application
+      # ----------------------------------------------------------------
+      - key: ENVIRONMENT
+        value: production
+
+      - key: DEBUG
+        value: false
+
+      # ----------------------------------------------------------------
+      # Database  (set to your Neon internal connection string)
+      # Format: postgresql+psycopg2://user:pass@host/dbname?sslmode=require
+      # ----------------------------------------------------------------
+      - key: DATABASE_URL
+        sync: false          # set manually in Render dashboard
+
+      # ----------------------------------------------------------------
+      # JWT
+      # generateValue: true — Render generates and stores a secure random
+      # value automatically. Regenerating it invalidates all existing tokens.
+      # ----------------------------------------------------------------
+      - key: JWT_SECRET_KEY
+        generateValue: true
+
+      - key: JWT_ALGORITHM
+        value: HS256
+
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: 1440
+
+      # ----------------------------------------------------------------
+      # Gemini AI
+      # ----------------------------------------------------------------
+      - key: GEMINI_API_KEY
+        sync: false          # set manually in Render dashboard
+
+      - key: MAX_QUESTIONS_PER_SESSION
+        value: 10
+
+      - key: GEMINI_TIMEOUT_SECONDS
+        value: 30
+
+      # ----------------------------------------------------------------
+      # Whisper
+      # Use "base" for the standard plan (2 GB RAM).
+      # Upgrade to "small" only if you have at least 4 GB RAM.
+      # ----------------------------------------------------------------
+      - key: WHISPER_MODEL
+        value: base
+
+      - key: WHISPER_TIMEOUT_SECONDS
+        value: 300
+
+      - key: ENABLE_AUDIO_PROCESSING
+        value: true
+
+      - key: MAX_TRANSCRIPT_CHARS
+        value: 20000
+
+      # ----------------------------------------------------------------
+      # File uploads  (absolute path — matches the disk mountPath below)
+      # ----------------------------------------------------------------
+      - key: UPLOAD_DIR
+        value: /app/uploads
+
+      - key: MAX_UPLOAD_SIZE_MB
+        value: 50
+
+      # ----------------------------------------------------------------
+      # CORS  (set to your Vercel frontend URL, no trailing slash)
+      # Example: https://aiip.vercel.app
+      # ----------------------------------------------------------------
+      - key: CORS_ORIGINS
+        sync: false          # set manually in Render dashboard
+
+      # ----------------------------------------------------------------
+      # Observability
+      # ----------------------------------------------------------------
+      - key: LOG_LEVEL
+        value: INFO
+
+      - key: LOG_FORMAT
+        value: json
+
+      - key: REQUEST_ID_HEADER
+        value: X-Request-ID
+
+      - key: SLOW_REQUEST_THRESHOLD_MS
+        value: 1000
+
+      - key: ENABLE_METRICS
+        value: true
+
+      - key: ENABLE_TRACING
+        value: false
+
+      - key: OTEL_SERVICE_NAME
+        value: ai-interview-intelligence-platform
+
+      - key: OTEL_TRACES_SAMPLE_RATE
+        value: 1.0
+
+      - key: READINESS_DB_TIMEOUT_SECONDS
+        value: 2.0
+
+    # Persistent disk for uploaded audio files.
+    # Audio files referenced by AudioResponse.file_path must survive
+    # deploys and restarts — named volumes don't persist on Render Web
+    # Services, but a Disk does.
+    disk:
+      name: uploads-disk
+      mountPath: /app/uploads
+      sizeGB: 10
