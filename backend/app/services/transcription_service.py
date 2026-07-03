@@ -6,8 +6,6 @@ import time
 from pathlib import Path
 from typing import Any
 
-import whisper
-
 from app.config import get_settings
 from app.core.metrics import observe_ai_request
 from app.core.tracing import get_tracer
@@ -24,14 +22,24 @@ tracer = get_tracer(__name__)
 # _model_lock serializes initialization only. It is never held during
 # transcription; inference concurrency is controlled by the semaphore in
 # processing_service (see Thread Safety Review below).
+#
+# whisper (and therefore PyTorch) is NOT imported at module level.
+# The `import whisper` statement is deferred to the first call to get_model(),
+# inside the lock — so PyTorch is only loaded into memory when a real
+# transcription is requested. With ENABLE_AUDIO_PROCESSING=false the import
+# never happens, keeping idle RAM well under Render Free's 512 MB limit.
 # ---------------------------------------------------------------------------
 
-_model: whisper.Whisper | None = None
+_model: Any | None = None
 _model_lock = threading.Lock()
 
 
-def get_model() -> whisper.Whisper:
+def get_model() -> Any:
     """Return the loaded Whisper model, loading it exactly once per process.
+
+    Raises RuntimeError immediately if ENABLE_AUDIO_PROCESSING is false so
+    the caller gets a clear diagnostic rather than an ImportError or a
+    cryptic failure from whisper.load_model.
 
     Double-checked locking:
       - Outer check (no lock): fast path for all calls after first load.
@@ -44,9 +52,16 @@ def get_model() -> whisper.Whisper:
         skips the load.
     """
     global _model
+    if not get_settings().ENABLE_AUDIO_PROCESSING:
+        raise RuntimeError(
+            "Audio processing is disabled (ENABLE_AUDIO_PROCESSING=false). "
+            "Set ENABLE_AUDIO_PROCESSING=true and restart the server to enable "
+            "Whisper transcription."
+        )
     if _model is None:
         with _model_lock:
             if _model is None:
+                import whisper  # lazy — PyTorch is not loaded until this point
                 model_name = get_settings().WHISPER_MODEL
                 logger.info("Loading Whisper model '%s'", model_name)
                 _model = whisper.load_model(model_name)

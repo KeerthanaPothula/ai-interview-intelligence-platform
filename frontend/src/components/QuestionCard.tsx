@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { ApiError, uploadResponse } from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import { useFeatures } from '../context/FeaturesContext';
 import type { AudioResponseResponse, QuestionResponse } from '../api/types';
 import { ResponseCard } from './ResponseCard';
 
@@ -13,6 +14,7 @@ interface QuestionCardProps {
 
 export function QuestionCard({ question, sessionId, responses, onUploaded }: QuestionCardProps) {
   const { token } = useAuth();
+  const { audioEnabled } = useFeatures();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,21 +46,30 @@ export function QuestionCard({ question, sessionId, responses, onUploaded }: Que
       </div>
       <p className="question-body">{question.body}</p>
 
-      <div className="upload-controls">
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="audio/*"
-          disabled={uploading}
-          aria-label={`Audio recording for question ${question.sequence_order}`}
-        />
-        <button type="button" onClick={handleUpload} disabled={uploading}>
-          {uploading ? 'Uploading…' : 'Upload Recording'}
-        </button>
-      </div>
-      {error && (
-        <p className="status-error-text" role="alert">
-          {error}
+      {audioEnabled ? (
+        <>
+          <div className="upload-controls">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="audio/*"
+              disabled={uploading}
+              aria-label={`Audio recording for question ${question.sequence_order}`}
+            />
+            <button type="button" onClick={handleUpload} disabled={uploading}>
+              {uploading ? 'Uploading…' : 'Upload Recording'}
+            </button>
+          </div>
+          {error && (
+            <p className="status-error-text" role="alert">
+              {error}
+            </p>
+          )}
+        </>
+      ) : (
+        <p className="audio-disabled-notice">
+          Audio upload is not available in this deployment. Use the live interview
+          or text-based practice modes instead.
         </p>
       )}
 

@@ -1,12 +1,15 @@
 # render.yaml — Render Infrastructure as Code
 # https://render.com/docs/infrastructure-as-code
 #
-# Defines the backend web service and its persistent upload disk.
-# The frontend is deployed separately on Vercel (see docs/PRODUCTION_DEPLOYMENT.md).
-# The database is Neon PostgreSQL (external) — no `databases:` block needed here.
+# Free-tier configuration: Render Free plan (512 MB RAM, spins down after
+# 15 min idle). Audio processing (Whisper / PyTorch) is intentionally
+# disabled — those libraries consume ~300–400 MB at startup and would
+# immediately OOM-kill the free instance. All other features (resume upload,
+# AI question generation, live interview, readiness score, reports,
+# analytics) remain fully functional.
 #
-# Deploy: push this file to main and connect the repo in the Render dashboard,
-# OR use `render deploy --confirm` with the Render CLI.
+# To enable audio later, upgrade to the Starter plan ($7/mo, 512 MB) or
+# Standard plan ($25/mo, 2 GB) and set ENABLE_AUDIO_PROCESSING=true.
 #
 # Secrets marked `sync: false` MUST be added manually in the Render dashboard
 # under Environment → Environment Variables before the first deploy.
@@ -22,22 +25,18 @@ services:
 
     # Region — choose the region closest to your Neon database.
     # Neon free tier defaults to aws-us-east-2 (Ohio).
-    # Render regions: oregon | ohio | virginia | frankfurt | singapore
     region: ohio
 
-    # plan: starter (512 MB, $7/mo) is NOT enough for PyTorch + Whisper.
-    # Use standard (2 GB RAM, $25/mo) as the minimum for this workload.
-    # Scale up to pro (4 GB, $85/mo) if transcription queues under load.
-    plan: standard
+    # Free plan: 512 MB RAM, shared CPU, spins down after 15 min idle.
+    # First request after spin-down takes ~30–40 s (cold start).
+    # Upgrade to starter ($7/mo) or standard ($25/mo) to eliminate cold starts.
+    plan: free
 
     # Render hits this path to determine if the instance is healthy.
-    # /health never touches the database — intentional for liveness probes.
     healthCheckPath: /health
 
-    # Runs `alembic upgrade head` inside the deployed container — using the
-    # same image and environment variables as the web service — BEFORE the
-    # new revision starts receiving traffic. Idempotent: safe to run on
-    # every deploy, including the first one against a brand-new database.
+    # Runs `alembic upgrade head` inside the deployed container BEFORE the
+    # new revision starts receiving traffic. Idempotent on every deploy.
     preDeployCommand: alembic upgrade head
 
     envVars:
@@ -51,7 +50,7 @@ services:
         value: false
 
       # ----------------------------------------------------------------
-      # Database  (set to your Neon internal connection string)
+      # Database  (set to your Neon connection string)
       # Format: postgresql+psycopg2://user:pass@host/dbname?sslmode=require
       # ----------------------------------------------------------------
       - key: DATABASE_URL
@@ -84,24 +83,28 @@ services:
         value: 30
 
       # ----------------------------------------------------------------
-      # Whisper
-      # Use "base" for the standard plan (2 GB RAM).
-      # Upgrade to "small" only if you have at least 4 GB RAM.
+      # Audio processing — DISABLED on free tier to stay under 512 MB RAM.
+      # Whisper imports PyTorch (~200–400 MB) at startup when enabled.
+      # The UI automatically hides audio upload controls when this is false.
       # ----------------------------------------------------------------
+      - key: ENABLE_AUDIO_PROCESSING
+        value: false
+
       - key: WHISPER_MODEL
         value: base
 
       - key: WHISPER_TIMEOUT_SECONDS
         value: 300
 
-      - key: ENABLE_AUDIO_PROCESSING
-        value: true
-
       - key: MAX_TRANSCRIPT_CHARS
         value: 20000
 
       # ----------------------------------------------------------------
-      # File uploads  (absolute path — matches the disk mountPath below)
+      # File uploads
+      # No persistent disk on the free tier. UPLOAD_DIR writes to the
+      # container's ephemeral filesystem — files survive restarts but are
+      # lost on redeploy. Since audio upload is disabled (above), no user
+      # files are actually written here in practice.
       # ----------------------------------------------------------------
       - key: UPLOAD_DIR
         value: /app/uploads
@@ -146,11 +149,5 @@ services:
       - key: READINESS_DB_TIMEOUT_SECONDS
         value: 2.0
 
-    # Persistent disk for uploaded audio files.
-    # Audio files referenced by AudioResponse.file_path must survive
-    # deploys and restarts — named volumes don't persist on Render Web
-    # Services, but a Disk does.
-    disk:
-      name: uploads-disk
-      mountPath: /app/uploads
-      sizeGB: 10
+# No disk block — free plan does not support persistent disks.
+# Audio processing is disabled so no uploaded files need to persist.

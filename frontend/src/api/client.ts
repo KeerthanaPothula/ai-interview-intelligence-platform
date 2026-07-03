@@ -7,6 +7,7 @@ import type {
   EndInterviewResponse,
   FollowUpQuestionResponse,
   FollowUpRequest,
+  HealthResponse,
   InterviewAnalysisResponse,
   InterviewReadinessResponse,
   LiveInterviewSessionResponse,
@@ -103,6 +104,14 @@ async function request<T>(
   }
 
   return (await response.json()) as T;
+}
+
+// ---------------------------------------------------------------------------
+// Health / features (no auth)
+// ---------------------------------------------------------------------------
+
+export function getHealth(): Promise<HealthResponse> {
+  return request<HealthResponse>('/health');
 }
 
 // ---------------------------------------------------------------------------

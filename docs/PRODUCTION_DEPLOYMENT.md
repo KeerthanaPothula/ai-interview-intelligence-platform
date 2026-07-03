@@ -16,7 +16,6 @@ Browser
 ┌─────────────────────────────────┐
 │ Render — Web Service             │  https://<your-app>.onrender.com
 │ Docker: FastAPI + Uvicorn        │
-│ Disk: /app/uploads (10 GB)       │
 │ Pre-deploy: alembic upgrade head │
 └──────────────┬──────────────────┘
                │ postgresql+psycopg2 + SSL
@@ -28,11 +27,20 @@ Browser
 └─────────────────────────────────┘
 ```
 
-Estimated monthly cost (minimum):
+Estimated monthly cost (all free tiers):
 - Neon Free tier: $0 (5 GB storage, auto-suspend after 5 min idle)
-- Render Standard (2 GB RAM): $25/month
+- Render Free plan: $0 (512 MB RAM, spins down after 15 min idle)
 - Vercel Hobby: $0
-- **Total: ~$25/month**
+- **Total: $0/month**
+
+> **Audio processing note**: Whisper and PyTorch require ~300–400 MB RAM at
+> startup. On Render Free (512 MB) that leaves no headroom. `render.yaml`
+> therefore sets `ENABLE_AUDIO_PROCESSING=false`. The frontend automatically
+> hides the audio upload controls when this flag is off. All other features —
+> resume upload, AI question generation, live interview, readiness score,
+> reports, dashboard — remain fully functional. To enable audio later, upgrade
+> to Render Starter ($7/mo) or Standard ($25/mo) and set
+> `ENABLE_AUDIO_PROCESSING=true`.
 
 ---
 
@@ -110,18 +118,22 @@ In the Render dashboard → `aiip-backend` → **Environment**, add the followin
 
 ### 2.3 Plan selection
 
-The `render.yaml` requests the **Standard** plan (2 GB RAM, $25/month). This is the minimum for PyTorch + Whisper `base` model. The free tier (512 MB) will OOM-kill during model load.
+`render.yaml` requests the **Free** plan (512 MB RAM, $0/month). Audio processing is disabled (`ENABLE_AUDIO_PROCESSING=false`) to stay within the memory limit.
 
-### 2.4 Disk
+To upgrade later:
+- **Starter** ($7/mo, 512 MB, no spin-down): set `plan: starter` in `render.yaml` — suitable for demo use without cold starts, but still no audio processing.
+- **Standard** ($25/mo, 2 GB RAM): set `plan: standard` and `ENABLE_AUDIO_PROCESSING=true` — enables full Whisper transcription.
 
-`render.yaml` defines a 10 GB disk mounted at `/app/uploads`. Render creates this automatically when you apply the Blueprint. Audio files uploaded by users persist across deploys and restarts.
+### 2.4 Cold starts
+
+On the Free plan, the service spins down after 15 minutes of inactivity. The first request after spin-down takes **30–40 seconds** to respond while the container restarts. Subsequent requests are fast. This is expected behavior for the free tier.
 
 ### 2.5 First deploy
 
 1. Click **Deploy** (or it starts automatically after the Blueprint is applied).
-2. Watch the build logs — `pip install -r requirements.txt` fetches PyTorch (~800 MB) and takes 5–10 minutes on first build.
+2. Watch the build logs — `pip install -r requirements.txt` fetches dependencies and takes 3–5 minutes on first build (no PyTorch on free tier, so it's faster than a full build).
 3. After the image builds, the pre-deploy command runs: `alembic upgrade head`.
-4. The web service starts. Check `/health` returns `{"status":"ok"}`.
+4. The web service starts. Check `/health` returns `{"status":"healthy","audio_processing_enabled":false,...}`.
 
 ### 2.6 Production URLs
 
@@ -198,15 +210,15 @@ Run through this checklist after both services are live:
 ✓ https://<vercel-url>/register             Registration form works
 ✓ https://<vercel-url>/login                Login works; redirects to /sessions
 ✓ https://<vercel-url>/sessions             Sessions list renders
-✓ https://<render-url>/health               {"status":"ok"}
+✓ https://<render-url>/health               {"status":"healthy","audio_processing_enabled":false}
 ✓ https://<render-url>/ready                {"status":"ok","database":"connected"}
 ✓ Resume upload                             POST /api/v1/documents/resume/upload 200
 ✓ Create session + generate questions       POST /api/v1/interviews/{id}/questions/generate 200
-✓ Upload audio response                     POST /api/v1/interviews/{id}/responses 201
-✓ Processing completes (Whisper + Gemini)   GET /api/v1/responses/{id}/processing-status → "completed"
 ✓ Interview Readiness Score                 POST /api/v1/interviews/{id}/readiness 200
 ✓ Generate report                           POST /api/v1/reports/{id} 200
 ✓ Dashboard loads                           GET /api/v1/analytics/overview 200
+✗ Audio upload UI                           Hidden (audio_processing_enabled=false)
+✗ Upload audio response                     Returns 503 if attempted directly via API
 ```
 
 ---
@@ -225,10 +237,10 @@ Run through this checklist after both services are live:
 | `DEBUG` | Yes | render.yaml | `false` |
 | `JWT_ALGORITHM` | No | render.yaml | `HS256` |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | No | render.yaml | `1440` |
-| `WHISPER_MODEL` | No | render.yaml | `base` |
+| `ENABLE_AUDIO_PROCESSING` | No | render.yaml | `false` (free tier); set `true` on Standard plan |
+| `WHISPER_MODEL` | No | render.yaml | `base` (used only when audio enabled) |
 | `UPLOAD_DIR` | No | render.yaml | `/app/uploads` |
 | `MAX_UPLOAD_SIZE_MB` | No | render.yaml | `50` |
-| `ENABLE_AUDIO_PROCESSING` | No | render.yaml | `true` |
 | `LOG_FORMAT` | No | render.yaml | `json` |
 | `ENABLE_METRICS` | No | render.yaml | `true` |
 
@@ -253,12 +265,54 @@ No manual steps required after the initial setup.
 
 ---
 
+## Enabling audio processing (upgrading from free tier)
+
+1. In the Render dashboard, change the service plan to **Standard** ($25/mo, 2 GB RAM).
+2. Update `render.yaml`: set `plan: standard` and `ENABLE_AUDIO_PROCESSING: true`.
+3. Add a disk block for uploaded audio files:
+   ```yaml
+   disk:
+     name: uploads-disk
+     mountPath: /app/uploads
+     sizeGB: 10
+   ```
+4. Push to `main` — Render redeploys with the new plan and settings.
+5. The frontend will detect `audio_processing_enabled: true` from `/health` and automatically show the audio upload controls.
+
+---
+
 ## Known limitations
 
 | Limitation | Impact |
 |---|---|
-| Neon autosuspend (free tier) | First request after 5 min idle has ~1–3s cold start delay |
-| Single Uvicorn worker | Whisper transcriptions queue; concurrent uploads don't parallelize |
-| Render Standard cold start | ~40s on first deploy or after inactivity (free tier) |
-| Audio stored on Render Disk | No CDN; large files served directly from the backend |
+| Audio upload disabled on free tier | Users cannot upload audio responses; live interview and text mode are unaffected |
+| Render Free cold start | First request after 15 min idle takes ~30–40 s |
+| Neon autosuspend (free tier) | First DB query after 5 min idle adds ~1–3 s |
+| Single Uvicorn worker | Gemini calls queue under concurrent load |
+| No persistent disk (free tier) | Ephemeral uploads lost on redeploy (moot when audio is disabled) |
 | No password reset | Users who forget passwords cannot recover their account |
+
+---
+
+## Estimated idle memory (Render Free)
+
+With `ENABLE_AUDIO_PROCESSING=false`:
+
+| Component | RAM |
+|---|---|
+| Python runtime + OS | ~50 MB |
+| FastAPI + SQLAlchemy + pydantic + httpx | ~80 MB |
+| google-genai + other deps | ~30 MB |
+| PyTorch / Whisper | 0 MB (never imported) |
+| sentence-transformers model | 0 MB at idle (lazy, loads on first resume upload) |
+| **Total idle** | **~160 MB** |
+
+After the first resume is uploaded (sentence-transformers loads PyTorch):
+
+| Component | RAM |
+|---|---|
+| Previous idle | ~160 MB |
+| PyTorch + sentence-transformers model | ~240 MB |
+| **Total after first embed** | **~400 MB** |
+
+400 MB is comfortably within Render Free's 512 MB limit with ~110 MB headroom.

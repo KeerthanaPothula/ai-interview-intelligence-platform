@@ -1,5 +1,16 @@
 // Mirrors backend/app/schemas/*.py response/request shapes.
 
+// ---------------------------------------------------------------------------
+// Health (/health — no auth required)
+// ---------------------------------------------------------------------------
+
+export interface HealthResponse {
+  status: string;
+  environment: string;
+  version: string;
+  audio_processing_enabled: boolean;
+}
+
 export type ResponseStatus = 'uploaded' | 'processing' | 'completed' | 'failed';
 
 export type SessionStatus = 'draft' | 'in_progress' | 'processing' | 'completed';
