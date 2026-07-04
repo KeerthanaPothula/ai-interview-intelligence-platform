@@ -131,9 +131,15 @@ async def lifespan(_app: FastAPI):
     db = SessionLocal()
     try:
         recovered = processing_service.recover_stuck_jobs(db)
+        logger.info("Startup recovery: %d job(s) recovered", recovered)
+    except Exception as exc:
+        # Neon Free (and other serverless DBs) may be suspended at container
+        # startup. A failed recovery is non-fatal: stuck jobs will be cleaned
+        # up on the next successful startup. The app still starts and serves
+        # traffic; the first real request wakes the DB.
+        logger.warning("Startup recovery skipped — DB unavailable at boot: %s", exc)
     finally:
         db.close()
-    logger.info("Startup recovery: %d job(s) recovered", recovered)
 
     yield
 
