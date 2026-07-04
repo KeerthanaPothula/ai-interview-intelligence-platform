@@ -33,6 +33,12 @@ _pool_kwargs: dict = (
         # Force-replace connections older than 1 hour to avoid firewall
         # and PostgreSQL tcp_keepalive drops.
         "pool_recycle": 3600,
+        # Socket-level TCP connect timeout (seconds). Without this the OS
+        # default (~30 s) applies, leaving threads in the readiness
+        # ThreadPoolExecutor blocked for up to 30 s on each Neon cold-start
+        # attempt. 10 s matches READINESS_DB_TIMEOUT_SECONDS in render.yaml
+        # so the socket fails before the future timeout fires.
+        "connect_args": {"connect_timeout": 10},
     }
 )
 

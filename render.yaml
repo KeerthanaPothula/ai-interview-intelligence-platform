@@ -145,8 +145,10 @@ services:
       - key: OTEL_TRACES_SAMPLE_RATE
         value: 1.0
 
+      # Neon Free autosuspends after 5 min idle; cold start takes 1–5 s.
+      # 10 s gives Neon enough time to wake up before the check is declared failed.
       - key: READINESS_DB_TIMEOUT_SECONDS
-        value: 2.0
+        value: 10.0
 
 # No disk block — free plan does not support persistent disks.
 # Audio processing is disabled so no uploaded files need to persist.
