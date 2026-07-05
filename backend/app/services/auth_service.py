@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.core.security import get_password_hash, hash_refresh_token, verify_password
+from app.models.password_reset_token import PasswordResetToken
 from app.models.refresh_token import RefreshToken
 from app.models.user import User
 from app.schemas.auth import UserCreate
@@ -226,3 +227,109 @@ def revoke_all_refresh_tokens_for_user(db: Session, user_id: uuid.UUID) -> None:
         RefreshToken.revoked_at.is_(None),
     ).update({"revoked_at": now})
     db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Password reset — secure token issuance and redemption
+# ---------------------------------------------------------------------------
+
+_RESET_TOKEN_BYTES = 32
+_RESET_TOKEN_EXPIRE_MINUTES = 30
+
+
+def _generate_reset_token() -> tuple[str, str]:
+    """Return (raw_token, token_hash) for a new password reset token.
+
+    raw_token — URL-safe random bytes, sent to the user via email.
+    token_hash — SHA-256 hex digest stored in the DB; the raw value is never persisted.
+    """
+    import hashlib
+    import secrets
+
+    raw = secrets.token_urlsafe(_RESET_TOKEN_BYTES)
+    token_hash = hashlib.sha256(raw.encode()).hexdigest()
+    return raw, token_hash
+
+
+def _hash_reset_token(raw_token: str) -> str:
+    import hashlib
+
+    return hashlib.sha256(raw_token.encode()).hexdigest()
+
+
+def create_password_reset_token(db: Session, email: str) -> str | None:
+    """Issue a password-reset token for the account with `email`.
+
+    Returns the raw (unhashed) token on success, or None if no account
+    exists for that email. Always returns the same shape to the router so
+    the router can give a generic response either way (no email enumeration).
+
+    Side-effects:
+      - Any existing unused reset tokens for this user are invalidated (marked used).
+      - A new PasswordResetToken row is inserted.
+    """
+    user = get_user_by_email(db, email)
+    if user is None:
+        return None
+
+    now = datetime.now(timezone.utc)
+
+    # Invalidate all previous unused tokens for this user.
+    db.query(PasswordResetToken).filter(
+        PasswordResetToken.user_id == user.id,
+        PasswordResetToken.used_at.is_(None),
+    ).update({"used_at": now})
+
+    raw_token, token_hash = _generate_reset_token()
+    row = PasswordResetToken(
+        user_id=user.id,
+        token_hash=token_hash,
+        expires_at=now + timedelta(minutes=_RESET_TOKEN_EXPIRE_MINUTES),
+    )
+    db.add(row)
+    db.commit()
+    return raw_token
+
+
+def redeem_password_reset_token(db: Session, raw_token: str, new_password: str) -> bool:
+    """Validate and consume a password-reset token, updating the user's password.
+
+    Returns True on success, False if the token is invalid, expired, or already used.
+
+    On success:
+      - used_at is set (token becomes single-use).
+      - The user's hashed_password is updated.
+      - token_version is incremented to invalidate all previously issued access tokens.
+      - All active refresh tokens for the user are revoked.
+    """
+    token_hash = _hash_reset_token(raw_token)
+    row = (
+        db.query(PasswordResetToken)
+        .filter(PasswordResetToken.token_hash == token_hash)
+        .first()
+    )
+
+    if row is None:
+        return False
+    if row.used_at is not None:
+        return False
+    if _as_aware_utc(row.expires_at) < datetime.now(timezone.utc):
+        return False
+
+    user = db.get(User, row.user_id)
+    if user is None:
+        return False
+
+    now = datetime.now(timezone.utc)
+    row.used_at = now
+    user.hashed_password = get_password_hash(new_password)
+    user.token_version += 1
+
+    # Revoke all active refresh tokens so existing sessions can't be reused.
+    db.query(RefreshToken).filter(
+        RefreshToken.user_id == user.id,
+        RefreshToken.revoked_at.is_(None),
+    ).update({"revoked_at": now})
+
+    db.commit()
+    return True

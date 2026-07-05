@@ -37,6 +37,7 @@ from . import (  # noqa: F401
     documents,
     features,
     interview,
+    password_reset_token,
     prediction,
     refresh_token,
     user,

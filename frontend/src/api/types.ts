@@ -37,6 +37,19 @@ export interface UserResponse {
   created_at: string;
 }
 
+export interface ForgotPasswordRequest {
+  email: string;
+}
+
+export interface ResetPasswordRequest {
+  token: string;
+  new_password: string;
+}
+
+export interface DetailResponse {
+  detail: string;
+}
+
 // ---------------------------------------------------------------------------
 // Interviews (backend/app/schemas/interview.py)
 // ---------------------------------------------------------------------------

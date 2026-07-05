@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from app.models.conversation import LiveInterviewSession
     from app.models.documents import DocumentChunk, ResumeDocument
     from app.models.interview import InterviewSession
+    from app.models.password_reset_token import PasswordResetToken
     from app.models.refresh_token import RefreshToken
 
 
@@ -216,6 +217,13 @@ class User(Base):
 
     refresh_tokens: Mapped[list["RefreshToken"]] = relationship(
         "RefreshToken",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+    password_reset_tokens: Mapped[list["PasswordResetToken"]] = relationship(
+        "PasswordResetToken",
         back_populates="user",
         cascade="all, delete-orphan",
         passive_deletes=True,

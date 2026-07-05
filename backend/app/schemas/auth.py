@@ -58,3 +58,16 @@ class DetailResponse(BaseModel):
     """Generic {"detail": "..."} acknowledgement, e.g. for logout."""
 
     detail: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    """Request body for POST /auth/forgot-password."""
+
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    """Request body for POST /auth/reset-password."""
+
+    token: str = Field(..., min_length=20, max_length=512)
+    new_password: str = Field(..., min_length=8, max_length=128)

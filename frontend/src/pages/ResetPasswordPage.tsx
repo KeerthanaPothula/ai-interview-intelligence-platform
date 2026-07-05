@@ -1,8 +1,7 @@
 import { useState, type FormEvent } from 'react';
-import { Eye, EyeOff, Lock, Mail, User } from 'lucide-react';
-import { Link, Navigate } from 'react-router-dom';
-import { ApiError } from '../api/client';
-import { useAuth } from '../context/AuthContext';
+import { Eye, EyeOff, Lock } from 'lucide-react';
+import { Link, useParams } from 'react-router-dom';
+import { ApiError, resetPassword } from '../api/client';
 
 function passwordStrength(pw: string): 0 | 1 | 2 | 3 | 4 {
   if (pw.length === 0) return 0;
@@ -16,27 +15,25 @@ function passwordStrength(pw: string): 0 | 1 | 2 | 3 | 4 {
 
 const STRENGTH_LABEL = ['', 'Weak', 'Fair', 'Good', 'Strong'];
 
-export function RegisterPage() {
-  const { register, isAuthenticated } = useAuth();
-  const [fullName, setFullName] = useState('');
-  const [email, setEmail] = useState('');
+export function ResetPasswordPage() {
+  const { token } = useParams<{ token: string }>();
   const [password, setPassword] = useState('');
   const [confirmPw, setConfirmPw] = useState('');
   const [showPw, setShowPw] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const strength = passwordStrength(password);
-
-  if (isAuthenticated) {
-    return <Navigate to="/sessions" replace />;
-  }
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     setError(null);
 
+    if (!token) {
+      setError('Invalid reset link. Please request a new one.');
+      return;
+    }
     if (password !== confirmPw) {
       setError('Passwords do not match.');
       return;
@@ -48,10 +45,14 @@ export function RegisterPage() {
 
     setSubmitting(true);
     try {
-      await register({ email, password, full_name: fullName });
+      await resetPassword({ token, new_password: password });
       setSuccess(true);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Unable to register. Please try again.');
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : 'This reset link is invalid or has expired. Please request a new one.',
+      );
     } finally {
       setSubmitting(false);
     }
@@ -78,16 +79,12 @@ export function RegisterPage() {
           >
             ✓
           </div>
-          <h1 style={{ marginTop: 0 }}>Account created!</h1>
+          <h1 style={{ marginTop: 0 }}>Password updated!</h1>
           <p style={{ color: 'var(--muted)', marginBottom: '1.5rem' }}>
-            Your account is ready. Sign in to start your first interview.
+            Your password has been changed. You can now sign in with your new password.
           </p>
-          <Link
-            to="/login"
-            className="btn btn-primary"
-            style={{ display: 'inline-flex' }}
-          >
-            Sign in now
+          <Link to="/login" className="btn btn-primary" style={{ display: 'inline-flex' }}>
+            Sign in
           </Link>
         </div>
       </div>
@@ -102,50 +99,16 @@ export function RegisterPage() {
           AIIP
         </div>
 
-        <h1>Create an account</h1>
-        <p className="auth-subtitle">Start your interview preparation journey</p>
+        <h1>Set new password</h1>
+        <p className="auth-subtitle">Choose a strong password for your account.</p>
 
-        <label htmlFor="reg-name" style={{ marginBottom: '0.3rem' }}>
-          Full name
-        </label>
-        <div className="auth-input-wrap" style={{ marginBottom: '1rem' }}>
-          <User className="auth-input-icon" size={16} aria-hidden="true" />
-          <input
-            id="reg-name"
-            type="text"
-            value={fullName}
-            onChange={(e) => setFullName(e.target.value)}
-            autoComplete="name"
-            placeholder="Jane Smith"
-            required
-            style={{ paddingLeft: '2.25rem' }}
-          />
-        </div>
-
-        <label htmlFor="reg-email" style={{ marginBottom: '0.3rem' }}>
-          Email
-        </label>
-        <div className="auth-input-wrap" style={{ marginBottom: '1rem' }}>
-          <Mail className="auth-input-icon" size={16} aria-hidden="true" />
-          <input
-            id="reg-email"
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            autoComplete="email"
-            placeholder="you@example.com"
-            required
-            style={{ paddingLeft: '2.25rem' }}
-          />
-        </div>
-
-        <label htmlFor="reg-password" style={{ marginBottom: '0.3rem' }}>
-          Password
+        <label htmlFor="rp-password" style={{ marginBottom: '0.3rem' }}>
+          New password
         </label>
         <div className="auth-input-wrap has-toggle" style={{ marginBottom: '0.35rem' }}>
           <Lock className="auth-input-icon" size={16} aria-hidden="true" />
           <input
-            id="reg-password"
+            id="rp-password"
             type={showPw ? 'text' : 'password'}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
@@ -187,20 +150,20 @@ export function RegisterPage() {
         )}
 
         <label
-          htmlFor="reg-confirm"
+          htmlFor="rp-confirm"
           style={{ marginBottom: '0.3rem', marginTop: '1rem' }}
         >
-          Confirm password
+          Confirm new password
         </label>
         <div className="auth-input-wrap" style={{ marginBottom: '1.25rem' }}>
           <Lock className="auth-input-icon" size={16} aria-hidden="true" />
           <input
-            id="reg-confirm"
+            id="rp-confirm"
             type={showPw ? 'text' : 'password'}
             value={confirmPw}
             onChange={(e) => setConfirmPw(e.target.value)}
             autoComplete="new-password"
-            placeholder="Repeat password"
+            placeholder="Repeat new password"
             required
             style={{ paddingLeft: '2.25rem' }}
           />
@@ -232,16 +195,17 @@ export function RegisterPage() {
           {submitting ? (
             <>
               <span className="spinner" aria-hidden="true" />
-              Creating account…
+              Updating password…
             </>
           ) : (
-            'Create account'
+            'Update password'
           )}
         </button>
 
         <p className="auth-footer-text">
-          Already have an account?{' '}
-          <Link to="/login">Sign in</Link>
+          <Link to="/forgot-password" className="auth-link">
+            Request a new link
+          </Link>
         </p>
       </form>
     </div>

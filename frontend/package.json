@@ -14,6 +14,8 @@
     "audit": "npm audit --omit=dev"
   },
   "dependencies": {
+    "framer-motion": "^12.42.2",
+    "lucide-react": "^1.23.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-router-dom": "^6.30.4",

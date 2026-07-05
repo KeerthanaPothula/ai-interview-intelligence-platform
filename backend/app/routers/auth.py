@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
+from app.config import Settings, get_settings
 from app.core.deps import get_current_user
 from app.core.rate_limit import enforce_login_rate_limit
 from app.core.security import create_access_token, generate_refresh_token
@@ -17,7 +18,9 @@ from app.database import get_db
 from app.models.user import User
 from app.schemas.auth import (
     DetailResponse,
+    ForgotPasswordRequest,
     RefreshRequest,
+    ResetPasswordRequest,
     Token,
     UserCreate,
     UserResponse,
@@ -193,3 +196,111 @@ def logout(
 )
 def get_me(current_user: User = Depends(get_current_user)) -> User:
     return current_user
+
+
+@router.post(
+    "/forgot-password",
+    response_model=DetailResponse,
+    summary="Request a password-reset link",
+)
+def forgot_password(
+    body: ForgotPasswordRequest,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> DetailResponse:
+    """Issue a one-time password-reset token for the given email.
+
+    Always returns HTTP 200 with the same message regardless of whether the
+    email is registered — this prevents user enumeration attacks.
+
+    In production, configure SMTP via the SMTP_* environment variables and the
+    token will be sent as an email link. Without SMTP config, the raw token is
+    logged at WARNING level so it can be retrieved from server logs during
+    development/testing.
+    """
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    raw_token = auth_service.create_password_reset_token(db, body.email)
+
+    if raw_token is not None:
+        reset_url = f"{settings.FRONTEND_URL}/reset-password/{raw_token}"
+        _send_reset_email(body.email, reset_url, logger, settings)
+
+    return DetailResponse(
+        detail="If an account with that email exists, a password-reset link has been sent."
+    )
+
+
+@router.post(
+    "/reset-password",
+    response_model=DetailResponse,
+    summary="Set a new password using a reset token",
+)
+def reset_password(
+    body: ResetPasswordRequest,
+    db: Session = Depends(get_db),
+) -> DetailResponse:
+    """Consume a password-reset token and update the user's password.
+
+    The token must be unused and not expired (30-minute window). On success,
+    all existing access tokens and refresh tokens for the user are invalidated.
+    Returns HTTP 400 on any invalid/expired/reused token — the error message
+    is deliberately generic to avoid leaking token validity information.
+    """
+    success = auth_service.redeem_password_reset_token(db, body.token, body.new_password)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This reset link is invalid or has expired. Please request a new one.",
+        )
+    return DetailResponse(detail="Password updated successfully. You can now log in.")
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+def _send_reset_email(email: str, reset_url: str, logger: object, settings: Settings) -> None:
+    """Send a password-reset email, or log the URL if SMTP is not configured."""
+    import logging
+    import smtplib
+    from email.message import EmailMessage
+
+    _logger = logger if isinstance(logger, logging.Logger) else logging.getLogger(__name__)
+
+    smtp_host = getattr(settings, "SMTP_HOST", None)
+    if not smtp_host:
+        _logger.warning(
+            "SMTP not configured — password reset URL for %s: %s",
+            email,
+            reset_url,
+        )
+        return
+
+    try:
+        smtp_port = getattr(settings, "SMTP_PORT", 587)
+        smtp_user = getattr(settings, "SMTP_USER", "")
+        smtp_password = getattr(settings, "SMTP_PASSWORD", "")
+        from_email = getattr(settings, "SMTP_FROM", smtp_user)
+
+        msg = EmailMessage()
+        msg["Subject"] = "Reset your password — AI Interview Intelligence Platform"
+        msg["From"] = from_email
+        msg["To"] = email
+        msg.set_content(
+            f"You requested a password reset.\n\n"
+            f"Click the link below to set a new password (valid for 30 minutes):\n\n"
+            f"{reset_url}\n\n"
+            f"If you did not request this, you can safely ignore this email."
+        )
+
+        with smtplib.SMTP(smtp_host, smtp_port) as server:
+            server.starttls()
+            if smtp_user and smtp_password:
+                server.login(smtp_user, smtp_password)
+            server.send_message(msg)
+    except Exception as exc:
+        _logger.error("Failed to send password-reset email to %s: %s", email, exc)

@@ -4,9 +4,11 @@ import type {
   BenchmarkResponse,
   CoachingPlanResponse,
   ConversationTurnResponse,
+  DetailResponse,
   EndInterviewResponse,
   FollowUpQuestionResponse,
   FollowUpRequest,
+  ForgotPasswordRequest,
   HealthResponse,
   InterviewAnalysisResponse,
   InterviewReadinessResponse,
@@ -14,6 +16,7 @@ import type {
   ProcessingStatusResponse,
   QuestionResponse,
   RAGQuestionsResponse,
+  ResetPasswordRequest,
   ResumeDocumentResponse,
   SessionCreate,
   SessionDetailResponse,
@@ -134,6 +137,20 @@ export function register(data: UserCreate): Promise<UserResponse> {
 
 export function getMe(token: string): Promise<UserResponse> {
   return request<UserResponse>('/api/v1/auth/me', {}, token);
+}
+
+export function forgotPassword(data: ForgotPasswordRequest): Promise<DetailResponse> {
+  return request<DetailResponse>('/api/v1/auth/forgot-password', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function resetPassword(data: ResetPasswordRequest): Promise<DetailResponse> {
+  return request<DetailResponse>('/api/v1/auth/reset-password', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
 }
 
 // ---------------------------------------------------------------------------

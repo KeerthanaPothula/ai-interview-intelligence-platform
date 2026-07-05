@@ -401,6 +401,22 @@ class Settings(BaseSettings):
     # detecting a genuinely unready instance.
     READINESS_DB_TIMEOUT_SECONDS: float = Field(default=2.0, gt=0)
 
+    # ------------------------------------------------------------------
+    # Frontend URL — used to construct password-reset links in emails.
+    # Set to the deployed frontend URL in production.
+    # ------------------------------------------------------------------
+    FRONTEND_URL: str = "http://localhost:5173"
+
+    # ------------------------------------------------------------------
+    # SMTP — optional; if SMTP_HOST is not set, password-reset tokens are
+    # logged at WARNING level instead of emailed (development fallback).
+    # ------------------------------------------------------------------
+    SMTP_HOST: str | None = None
+    SMTP_PORT: int = Field(default=587, gt=0)
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = "noreply@ai-interview-platform.app"
+
 
 @lru_cache
 def get_settings() -> Settings:
