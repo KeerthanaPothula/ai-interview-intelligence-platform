@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
+import { FileBarChart2 } from 'lucide-react';
 import { ApiError, generateQuestions, getSession, listResponses } from '../api/client';
 import { QuestionCard } from '../components/QuestionCard';
 import { SessionReportCard } from '../components/SessionReportCard';
@@ -101,10 +102,22 @@ export function SessionDetailPage() {
   return (
     <div className="session-detail-page">
       <header className="session-detail-header">
-        <h1>{session.title}</h1>
-        <p className="session-job-role">{session.job_role}</p>
-        <p className="session-job-description">{session.job_description}</p>
-        <span className={`session-status status-${session.status}`}>{session.status}</span>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
+          <div>
+            <h1>{session.title}</h1>
+            <p className="session-job-role">{session.job_role}</p>
+            <p className="session-job-description">{session.job_description}</p>
+            <span className={`session-status status-${session.status}`}>{session.status}</span>
+          </div>
+          <Link
+            to={`/sessions/${session.id}/report`}
+            className="btn btn-ghost btn-sm"
+            style={{ flexShrink: 0, alignSelf: 'flex-start', marginTop: '0.25rem' }}
+          >
+            <FileBarChart2 size={14} aria-hidden="true" />
+            View Report
+          </Link>
+        </div>
       </header>
 
       {session.questions.length === 0 ? (

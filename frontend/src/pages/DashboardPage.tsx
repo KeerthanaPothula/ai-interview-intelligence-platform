@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { motion } from 'framer-motion';
 import {
   CartesianGrid,
   Legend,
@@ -394,7 +395,12 @@ export function DashboardPage() {
   }
 
   return (
-    <div className="page-container">
+    <motion.div
+      className="page-container"
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, ease: 'easeOut' }}
+    >
       <PageHeader onRefresh={loadAnalytics} />
 
       {/* Primary stat row */}
@@ -576,7 +582,7 @@ export function DashboardPage() {
           </p>
         </div>
       )}
-    </div>
+    </motion.div>
   );
 }
 
