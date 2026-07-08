@@ -1,7 +1,9 @@
 import type {
+  ActivityTimelineResponse,
   AnalyticsOverviewResponse,
   AudioResponseResponse,
   BenchmarkResponse,
+  ChangePasswordRequest,
   CoachingPlanResponse,
   ConversationTurnResponse,
   DetailResponse,
@@ -10,6 +12,7 @@ import type {
   FollowUpRequest,
   ForgotPasswordRequest,
   HealthResponse,
+  InsightsResponse,
   InterviewAnalysisResponse,
   InterviewReadinessResponse,
   LiveInterviewSessionResponse,
@@ -17,6 +20,7 @@ import type {
   QuestionResponse,
   RAGQuestionsResponse,
   ResetPasswordRequest,
+  ResumeAnalysisResponse,
   ResumeDocumentResponse,
   SessionCreate,
   SessionDetailResponse,
@@ -437,4 +441,43 @@ export function getCoachingPlan(
 
 export function getBenchmarks(token: string): Promise<BenchmarkResponse> {
   return request<BenchmarkResponse>('/api/v1/analytics/benchmarks', {}, token);
+}
+
+// ---------------------------------------------------------------------------
+// Activity Timeline
+// ---------------------------------------------------------------------------
+
+export function getActivityTimeline(token: string): Promise<ActivityTimelineResponse> {
+  return request<ActivityTimelineResponse>('/api/v1/analytics/activity', {}, token);
+}
+
+// ---------------------------------------------------------------------------
+// AI Insights
+// ---------------------------------------------------------------------------
+
+export function getInsights(token: string): Promise<InsightsResponse> {
+  return request<InsightsResponse>('/api/v1/analytics/insights', {}, token);
+}
+
+// ---------------------------------------------------------------------------
+// Resume Analysis
+// ---------------------------------------------------------------------------
+
+export function analyzeResume(token: string): Promise<ResumeAnalysisResponse> {
+  return request<ResumeAnalysisResponse>('/api/v1/documents/resume/analysis', {}, token);
+}
+
+export function deleteResume(token: string): Promise<void> {
+  return request<void>('/api/v1/documents/resume/current', { method: 'DELETE' }, token);
+}
+
+// ---------------------------------------------------------------------------
+// Change Password
+// ---------------------------------------------------------------------------
+
+export function changePassword(data: ChangePasswordRequest, token: string): Promise<DetailResponse> {
+  return request<DetailResponse>('/api/v1/auth/change-password', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }, token);
 }

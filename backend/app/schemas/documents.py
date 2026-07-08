@@ -35,3 +35,12 @@ class RAGQuestionsResponse(BaseModel):
     questions: list[RAGQuestionItem]
     resume_context_used: bool
     chunks_retrieved: int
+
+
+class ResumeAnalysisResponse(BaseModel):
+    ats_score: int
+    skills: list[str]
+    missing_skills: list[str]
+    keywords: list[str]
+    suggestions: list[str]
+    word_count: int

@@ -5,7 +5,8 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
+from fastapi.responses import Response
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
@@ -28,6 +29,7 @@ from app.routers.auth import get_current_user
 from app.schemas.documents import (
     RAGQuestionsRequest,
     RAGQuestionsResponse,
+    ResumeAnalysisResponse,
     ResumeDocumentResponse,
     RAGQuestionItem,
 )
@@ -239,3 +241,98 @@ def generate_rag_questions(
         resume_context_used=resume_context_used,
         chunks_retrieved=len(relevant_chunks),
     )
+
+
+@router.delete(
+    "/resume/current",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete the current resume",
+)
+def delete_current_resume(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    """Delete the current user's resume and all associated chunks."""
+    stmt = (
+        select(ResumeDocument)
+        .where(ResumeDocument.user_id == current_user.id)
+        .order_by(ResumeDocument.created_at.desc())
+        .limit(1)
+    )
+    doc = db.execute(stmt).scalar_one_or_none()
+    if doc is None:
+        raise HTTPException(status_code=404, detail="No resume uploaded yet")
+
+    db.execute(
+        delete(DocumentChunk).where(DocumentChunk.user_id == current_user.id)
+    )
+    db.delete(doc)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/resume/analysis", response_model=ResumeAnalysisResponse)
+def analyze_resume(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ResumeAnalysisResponse:
+    """Analyze the current resume: ATS score, skills, suggestions."""
+    import json as _json
+    import re as _re
+
+    stmt = (
+        select(ResumeDocument)
+        .where(ResumeDocument.user_id == current_user.id)
+        .order_by(ResumeDocument.created_at.desc())
+        .limit(1)
+    )
+    doc = db.execute(stmt).scalar_one_or_none()
+    if doc is None:
+        raise HTTPException(status_code=404, detail="No resume uploaded yet")
+
+    text = doc.extracted_text or ""
+    word_count = len(text.split()) if text else 0
+
+    # Call Gemini for structured resume analysis
+    try:
+        from app.services import gemini_service
+
+        prompt = (
+            "Analyze the following resume text and respond with ONLY valid JSON "
+            "(no markdown fences, no extra text) matching this schema:\n"
+            '{"ats_score": <int 0-100>, "skills": [<str>, ...], '
+            '"missing_skills": [<str>, ...], "keywords": [<str>, ...], '
+            '"suggestions": [<str>, ...]}\n\n'
+            "Rules:\n"
+            "- ats_score: estimate how well this resume would pass an ATS scan (0-100)\n"
+            "- skills: up to 20 technical and soft skills found in the resume\n"
+            "- missing_skills: up to 10 common skills for the role that are missing\n"
+            "- keywords: up to 15 important keywords from the resume\n"
+            "- suggestions: up to 5 actionable improvement suggestions\n\n"
+            f"Resume text (first 3000 chars):\n{text[:3000]}"
+        )
+        raw = gemini_service.generate_text(prompt)
+        data = _json.loads(raw)
+        return ResumeAnalysisResponse(
+            ats_score=int(data.get("ats_score", 70)),
+            skills=data.get("skills", [])[:20],
+            missing_skills=data.get("missing_skills", [])[:10],
+            keywords=data.get("keywords", [])[:15],
+            suggestions=data.get("suggestions", [])[:5],
+            word_count=word_count,
+        )
+    except Exception:
+        # Graceful fallback: extract skills via regex, return basic analysis
+        common_skills = [
+            "Python", "JavaScript", "TypeScript", "React", "Node.js",
+            "SQL", "Git", "Docker", "AWS", "REST API",
+        ]
+        found = [s for s in common_skills if s.lower() in text.lower()]
+        return ResumeAnalysisResponse(
+            ats_score=max(40, min(90, 40 + word_count // 20)),
+            skills=found,
+            missing_skills=[s for s in common_skills if s not in found][:5],
+            keywords=[],
+            suggestions=["Add more quantifiable achievements", "Include relevant certifications"],
+            word_count=word_count,
+        )

@@ -273,3 +273,19 @@ def generate_questions(
         )
 
     return questions
+
+
+def generate_text(prompt: str) -> str:
+    """Call Gemini with an arbitrary prompt and return the raw text response.
+
+    Used for flexible AI tasks (resume analysis, insights, etc.).
+    Raises RuntimeError on failure so callers can apply their own fallback.
+    """
+    model = get_settings().GEMINI_MODEL
+    try:
+        response = _get_client().models.generate_content(model=model, contents=prompt)
+        raw: str = response.text
+        return strip_fences(raw)
+    except Exception as exc:
+        logger.warning("generate_text failed: %s", exc)
+        raise RuntimeError(str(exc)) from exc

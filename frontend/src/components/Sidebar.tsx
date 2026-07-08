@@ -1,10 +1,12 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   BarChart2,
+  FileText,
   LayoutDashboard,
   LogOut,
   Mic,
-  FileText,
+  Settings,
+  Upload,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -12,7 +14,8 @@ const NAV = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/sessions', icon: FileText, label: 'Interviews' },
   { to: '/live-interview', icon: Mic, label: 'Live Interview' },
-  { to: '/sessions', icon: BarChart2, label: 'Analytics', end: false },
+  { to: '/analytics', icon: BarChart2, label: 'Analytics' },
+  { to: '/resume', icon: Upload, label: 'Resume' },
 ];
 
 export function Sidebar() {
@@ -34,14 +37,12 @@ export function Sidebar() {
       <nav className="sb-nav" aria-label="Primary">
         <div className="sb-nav-section">
           <div className="sb-nav-label">Platform</div>
-          {NAV.map(({ to, icon: Icon, label, end }) => (
+          {NAV.map(({ to, icon: Icon, label }) => (
             <NavLink
               key={label}
               to={to}
-              end={end ?? true}
-              className={({ isActive }) =>
-                'sb-nav-item' + (isActive ? ' active' : '')
-              }
+              end
+              className={({ isActive }) => 'sb-nav-item' + (isActive ? ' active' : '')}
               aria-label={label}
             >
               <Icon className="sb-nav-icon" aria-hidden="true" size={18} />
@@ -52,7 +53,17 @@ export function Sidebar() {
       </nav>
 
       <div className="sb-sidebar-footer">
+        <NavLink
+          to="/profile"
+          end
+          className={({ isActive }) => 'sb-nav-item' + (isActive ? ' active' : '')}
+          aria-label="Profile & Settings"
+        >
+          <Settings className="sb-nav-icon" aria-hidden="true" size={18} />
+          Settings
+        </NavLink>
         <button
+          type="button"
           className="sb-nav-item"
           onClick={handleLogout}
           aria-label="Log out"

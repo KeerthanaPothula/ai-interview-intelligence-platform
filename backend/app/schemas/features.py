@@ -88,6 +88,36 @@ class SessionTrendResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Activity Timeline
+# ---------------------------------------------------------------------------
+
+
+class ActivityEvent(BaseModel):
+    event_type: str
+    title: str
+    subtitle: str | None
+    created_at: datetime
+
+
+class ActivityTimelineResponse(BaseModel):
+    events: list[ActivityEvent]
+
+
+# ---------------------------------------------------------------------------
+# AI Insights
+# ---------------------------------------------------------------------------
+
+
+class InsightItem(BaseModel):
+    text: str
+    kind: str  # 'positive' | 'warning' | 'info'
+
+
+class InsightsResponse(BaseModel):
+    insights: list[InsightItem]
+
+
 class SessionReportResponse(BaseModel):
     id: uuid.UUID
     session_id: uuid.UUID

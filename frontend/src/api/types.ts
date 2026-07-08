@@ -323,3 +323,53 @@ export interface BenchmarkResponse {
   total_platform_responses: number;
   user_responses_analyzed: number;
 }
+
+// ---------------------------------------------------------------------------
+// Activity Timeline (backend/app/schemas/features.py)
+// ---------------------------------------------------------------------------
+
+export interface ActivityEvent {
+  event_type: string;
+  title: string;
+  subtitle: string | null;
+  created_at: string;
+}
+
+export interface ActivityTimelineResponse {
+  events: ActivityEvent[];
+}
+
+// ---------------------------------------------------------------------------
+// AI Insights (backend/app/schemas/features.py)
+// ---------------------------------------------------------------------------
+
+export interface InsightItem {
+  text: string;
+  kind: 'positive' | 'warning' | 'info';
+}
+
+export interface InsightsResponse {
+  insights: InsightItem[];
+}
+
+// ---------------------------------------------------------------------------
+// Resume Analysis (backend/app/schemas/documents.py)
+// ---------------------------------------------------------------------------
+
+export interface ResumeAnalysisResponse {
+  ats_score: number;
+  skills: string[];
+  missing_skills: string[];
+  keywords: string[];
+  suggestions: string[];
+  word_count: number;
+}
+
+// ---------------------------------------------------------------------------
+// Change Password (backend/app/schemas/auth.py)
+// ---------------------------------------------------------------------------
+
+export interface ChangePasswordRequest {
+  current_password: string;
+  new_password: string;
+}

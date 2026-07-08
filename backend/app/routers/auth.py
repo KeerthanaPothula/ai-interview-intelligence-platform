@@ -17,6 +17,7 @@ from app.core.security_logging import (
 from app.database import get_db
 from app.models.user import User
 from app.schemas.auth import (
+    ChangePasswordRequest,
     DetailResponse,
     ForgotPasswordRequest,
     RefreshRequest,
@@ -196,6 +197,34 @@ def logout(
 )
 def get_me(current_user: User = Depends(get_current_user)) -> User:
     return current_user
+
+
+@router.post(
+    "/change-password",
+    response_model=DetailResponse,
+    summary="Change the current user's password",
+)
+def change_password(
+    body: ChangePasswordRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> DetailResponse:
+    """Change password for the authenticated user.
+
+    Validates current_password before updating. Increments token_version to
+    invalidate all existing access tokens on success.
+    """
+    from app.core.security import get_password_hash, verify_password
+
+    if not verify_password(body.current_password, current_user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect.",
+        )
+    current_user.hashed_password = get_password_hash(body.new_password)
+    current_user.token_version = (current_user.token_version or 0) + 1
+    db.commit()
+    return DetailResponse(detail="Password changed successfully. Please log in again.")
 
 
 @router.post(
