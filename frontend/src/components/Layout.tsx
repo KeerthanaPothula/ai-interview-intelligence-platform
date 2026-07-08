@@ -7,6 +7,9 @@ const PAGE_TITLES: Record<string, string> = {
   '/dashboard': 'Dashboard',
   '/sessions': 'Interviews',
   '/live-interview': 'Live Interview',
+  '/analytics': 'Analytics',
+  '/resume': 'Resume Analyzer',
+  '/profile': 'Profile & Settings',
 };
 
 export function Layout() {
@@ -17,7 +20,11 @@ export function Layout() {
     return <Navigate to="/login" replace />;
   }
 
-  const title = PAGE_TITLES[pathname] ?? 'AI Interview Platform';
+  const title =
+    PAGE_TITLES[pathname] ??
+    (pathname.endsWith('/report') ? 'Interview Report' :
+     pathname.startsWith('/sessions/') ? 'Session Detail' :
+     'AI Interview Platform');
 
   return (
     <div className="sb-shell">

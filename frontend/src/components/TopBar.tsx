@@ -1,5 +1,6 @@
-import { Bell, Search } from 'lucide-react';
+import { Search } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { NotificationBell } from './NotificationBell';
 
 interface TopBarProps {
   title?: string;
@@ -7,7 +8,6 @@ interface TopBarProps {
 
 export function TopBar({ title }: TopBarProps) {
   const { token } = useAuth();
-
   const initials = token ? 'U' : '?';
 
   return (
@@ -38,13 +38,7 @@ export function TopBar({ title }: TopBarProps) {
       </div>
 
       <div className="sb-topbar-actions">
-        <button
-          className="sb-topbar-icon-btn"
-          aria-label="Notifications"
-          type="button"
-        >
-          <Bell size={16} aria-hidden="true" />
-        </button>
+        <NotificationBell />
 
         <div className="sb-avatar" role="button" aria-label="Profile menu" tabIndex={0}>
           {initials}
