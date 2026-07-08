@@ -1,5 +1,6 @@
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { OfflineBanner } from './OfflineBanner';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
 
@@ -27,15 +28,18 @@ export function Layout() {
      'AI Interview Platform');
 
   return (
-    <div className="sb-shell">
-      <a href="#main-content" className="skip-link">
-        Skip to main content
-      </a>
-      <Sidebar />
-      <TopBar title={title} />
-      <main className="sb-content" id="main-content" tabIndex={-1}>
-        <Outlet />
-      </main>
-    </div>
+    <>
+      <OfflineBanner />
+      <div className="sb-shell">
+        <a href="#main-content" className="skip-link">
+          Skip to main content
+        </a>
+        <Sidebar />
+        <TopBar title={title} />
+        <main className="sb-content" id="main-content" tabIndex={-1}>
+          <Outlet />
+        </main>
+      </div>
+    </>
   );
 }
