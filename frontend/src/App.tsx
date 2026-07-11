@@ -38,6 +38,9 @@ const ResumePage = lazy(() =>
 const ProfilePage = lazy(() =>
   import('./pages/ProfilePage').then((m) => ({ default: m.ProfilePage })),
 );
+const RecruiterPage = lazy(() =>
+  import('./pages/RecruiterPage').then((m) => ({ default: m.RecruiterPage })),
+);
 
 function PageFallback() {
   return (
@@ -91,6 +94,10 @@ export default function App() {
                 <Route
                   path="/profile"
                   element={<Suspense fallback={<PageFallback />}><ProfilePage /></Suspense>}
+                />
+                <Route
+                  path="/recruiter"
+                  element={<Suspense fallback={<PageFallback />}><RecruiterPage /></Suspense>}
                 />
               </Route>
               <Route path="*" element={<NotFoundPage />} />

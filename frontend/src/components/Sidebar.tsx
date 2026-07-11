@@ -7,6 +7,7 @@ import {
   Mic,
   Settings,
   Upload,
+  Users,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -16,6 +17,7 @@ const NAV = [
   { to: '/live-interview', icon: Mic, label: 'Live Interview' },
   { to: '/analytics', icon: BarChart2, label: 'Analytics' },
   { to: '/resume', icon: Upload, label: 'Resume' },
+  { to: '/recruiter', icon: Users, label: 'Recruiter' },
 ];
 
 export function Sidebar() {

@@ -1,4 +1,4 @@
-import { Navigate, Outlet, useLocation } from 'react-router-dom';
+﻿import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { OfflineBanner } from './OfflineBanner';
 import { Sidebar } from './Sidebar';
@@ -11,6 +11,8 @@ const PAGE_TITLES: Record<string, string> = {
   '/analytics': 'Analytics',
   '/resume': 'Resume Analyzer',
   '/profile': 'Profile & Settings',
+  '/recruiter': 'Recruiter Dashboard',
+  '/recruiter': 'Recruiter Dashboard',
 };
 
 export function Layout() {
@@ -43,3 +45,4 @@ export function Layout() {
     </>
   );
 }
+
