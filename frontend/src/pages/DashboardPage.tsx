@@ -302,6 +302,8 @@ function filterTrends(trends: SessionTrendResponse[], range: Range): SessionTren
   return trends.filter((t) => new Date(t.created_at) >= cutoff);
 }
 
+const ease = [0.4, 0, 0.2, 1] as [number, number, number, number];
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export function DashboardPage() {
@@ -399,7 +401,7 @@ export function DashboardPage() {
       className="page-container"
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, ease: 'easeOut' }}
+      transition={{ duration: 0.28, ease }}
     >
       <PageHeader onRefresh={loadAnalytics} />
 
@@ -599,9 +601,9 @@ function PageHeader({ onRefresh }: { onRefresh?: () => void }) {
       }}
     >
       <div>
-        <h1 style={{ margin: 0, fontSize: '1.35rem' }}>Analytics Dashboard</h1>
+        <h1 style={{ margin: 0, fontSize: '1.35rem' }}>Dashboard</h1>
         <p style={{ margin: '0.2rem 0 0', color: 'var(--muted)', fontSize: '0.875rem' }}>
-          Track your interview performance over time
+          Your interview readiness at a glance
         </p>
       </div>
       {onRefresh && (

@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { motion } from 'framer-motion';
 import { Link, useParams } from 'react-router-dom';
-import { FileBarChart2 } from 'lucide-react';
+import { FileBarChart2, Sparkles } from 'lucide-react';
+
+const ease = [0.4, 0, 0.2, 1] as [number, number, number, number];
 import { ApiError, generateQuestions, getSession, listResponses } from '../api/client';
 import { QuestionCard } from '../components/QuestionCard';
 import { SessionReportCard } from '../components/SessionReportCard';
@@ -86,7 +89,7 @@ export function SessionDetailPage() {
 
   if (loading) {
     return (
-      <div className="session-detail-page" aria-busy="true" aria-label="Loading session">
+      <div className="page-container" aria-busy="true" aria-label="Loading session">
         <header className="session-detail-header">
           <Skeleton width="40%" height="1.6rem" />
           <Skeleton width="25%" height="1rem" className="skeleton-spaced" />
@@ -100,7 +103,12 @@ export function SessionDetailPage() {
   if (!session) return null;
 
   return (
-    <div className="session-detail-page">
+    <motion.div
+      className="page-container"
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.28, ease }}
+    >
       <header className="session-detail-header">
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
           <div>
@@ -122,12 +130,26 @@ export function SessionDetailPage() {
 
       {session.questions.length === 0 ? (
         <section className="generate-questions">
-          <p>No questions yet for this session.</p>
-          <button type="button" onClick={handleGenerateQuestions} disabled={generating}>
-            {generating ? 'Generating…' : 'Generate Questions'}
+          <div className="generate-questions-icon" aria-hidden="true">
+            <Sparkles size={22} />
+          </div>
+          <h2>No questions yet</h2>
+          <p>Generate AI-tailored interview questions based on this session's job description.</p>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={handleGenerateQuestions}
+            disabled={generating}
+            aria-busy={generating}
+          >
+            {generating ? (
+              <><span className="spinner" aria-hidden="true" /> Generating…</>
+            ) : (
+              'Generate Questions'
+            )}
           </button>
           {generateError && (
-            <p className="status-error-text" role="alert">
+            <p className="error-banner" role="alert" style={{ marginTop: '1rem', textAlign: 'left' }}>
               {generateError}
             </p>
           )}
@@ -149,6 +171,6 @@ export function SessionDetailPage() {
           <SessionReportCard sessionId={session.id} report={report} onGenerated={setReport} />
         </>
       )}
-    </div>
+    </motion.div>
   );
 }

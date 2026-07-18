@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { Plus, RefreshCw, Search } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { motion } from 'framer-motion';
+import { FileText, RefreshCw, Search } from 'lucide-react';
 import { ApiError, createSession, listSessions } from '../api/client';
 import { ResumeUploadCard } from '../components/ResumeUploadCard';
 import { SessionCard } from '../components/SessionCard';
@@ -9,6 +10,15 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import type { SessionListResponse } from '../api/types';
 
+const ease = [0.4, 0, 0.2, 1] as [number, number, number, number];
+type StatusFilter = 'all' | 'draft' | 'in_progress' | 'completed';
+const STATUS_LABELS: Record<StatusFilter, string> = {
+  all: 'All',
+  draft: 'Draft',
+  in_progress: 'In Progress',
+  completed: 'Completed',
+};
+
 export function SessionsListPage() {
   const { token } = useAuth();
   const { showToast } = useToast();
@@ -16,7 +26,7 @@ export function SessionsListPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
-  const [showCreate, setShowCreate] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
 
   const [title, setTitle] = useState('');
   const [jobRole, setJobRole] = useState('');
@@ -64,7 +74,6 @@ export function SessionsListPage() {
       setTitle('');
       setJobRole('');
       setJobDescription('');
-      setShowCreate(false);
       showToast('Interview session created.', 'success');
     } catch (err) {
       setCreateError(
@@ -75,98 +84,86 @@ export function SessionsListPage() {
     }
   }
 
-  const filtered = filter.trim()
-    ? sessions.filter(
-        (s) =>
-          s.title.toLowerCase().includes(filter.toLowerCase()) ||
-          s.job_role?.toLowerCase().includes(filter.toLowerCase()),
-      )
-    : sessions;
+  const statusCounts = useMemo(() => ({
+    all: sessions.length,
+    draft: sessions.filter((s) => s.status === 'draft').length,
+    in_progress: sessions.filter((s) => s.status === 'in_progress').length,
+    completed: sessions.filter((s) => s.status === 'completed').length,
+  }), [sessions]);
+
+  const filtered = useMemo(() => {
+    let list = sessions;
+    if (statusFilter !== 'all') list = list.filter((s) => s.status === statusFilter);
+    if (filter.trim()) {
+      const q = filter.toLowerCase();
+      list = list.filter(
+        (s) => s.title.toLowerCase().includes(q) || s.job_role?.toLowerCase().includes(q),
+      );
+    }
+    return list;
+  }, [sessions, statusFilter, filter]);
 
   return (
-    <div className="page-container">
+    <motion.div
+      className="page-container"
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.28, ease }}
+    >
       {/* Page header */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '1rem',
-          flexWrap: 'wrap',
-          marginBottom: '1.5rem',
-        }}
-      >
-        <div>
-          <h1 style={{ margin: 0, fontSize: '1.35rem' }}>Interviews</h1>
-          <p style={{ margin: '0.2rem 0 0', color: 'var(--muted)', fontSize: '0.875rem' }}>
+      <div className="page-hd">
+        <div className="page-hd-text">
+          <h1>Interviews</h1>
+          <p>
             {sessions.length > 0
-              ? `${sessions.length} session${sessions.length === 1 ? '' : 's'}`
-              : 'No sessions yet'}
+              ? `${sessions.length} session${sessions.length === 1 ? '' : 's'} · ${statusCounts.completed} completed`
+              : 'No sessions yet — create your first below'}
           </p>
-        </div>
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            onClick={loadSessions}
-            aria-label="Refresh sessions"
-          >
-            <RefreshCw size={14} aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            onClick={() => setShowCreate((v) => !v)}
-            aria-expanded={showCreate}
-          >
-            <Plus size={14} aria-hidden="true" />
-            New Interview
-          </button>
         </div>
       </div>
 
-      {/* Resume upload */}
-      <ResumeUploadCard />
+      {/* 2-column dashboard layout */}
+      <div className="sessions-dashboard">
 
-      {/* Create form (collapsible) */}
-      {showCreate && (
-        <section
-          className="create-session"
-          aria-label="Create new interview session"
-          style={{ marginBottom: '1rem' }}
-        >
-          <h2 style={{ margin: '0 0 1.25rem', fontSize: '1rem' }}>New Interview Session</h2>
-          <form onSubmit={handleCreate}>
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-                gap: '0.75rem',
-                marginBottom: '0.75rem',
-              }}
-            >
-              <label>
-                Title
-                <input
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="e.g. Amazon SDE Prep"
-                  required
-                />
-              </label>
-              <label>
-                Job role
-                <input
-                  value={jobRole}
-                  onChange={(e) => setJobRole(e.target.value)}
-                  placeholder="e.g. Software Engineer"
-                  required
-                />
-              </label>
+        {/* ── Left: Create Interview ── */}
+        <div className="sessions-create-panel">
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.4rem' }}>
+              <div style={{ width: 32, height: 32, borderRadius: 8, background: 'var(--primary-dim)', color: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <FileText size={15} aria-hidden="true" />
+              </div>
+              <h2 className="sessions-create-heading">New Interview</h2>
             </div>
-            <label>
+            <p className="sessions-create-sub">
+              Set up a practice session tailored to your target role and job description.
+            </p>
+          </div>
+
+          <form className="sessions-create-form" onSubmit={handleCreate} noValidate>
+            <label htmlFor="sess-title">
+              Session title
+              <input
+                id="sess-title"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="e.g. Amazon SDE Prep"
+                required
+              />
+            </label>
+            <label htmlFor="sess-role">
+              Target role
+              <input
+                id="sess-role"
+                value={jobRole}
+                onChange={(e) => setJobRole(e.target.value)}
+                placeholder="e.g. Software Engineer"
+                required
+              />
+            </label>
+            <label htmlFor="sess-desc">
               Job description
               <textarea
+                id="sess-desc"
                 value={jobDescription}
                 onChange={(e) => setJobDescription(e.target.value)}
                 placeholder="Paste the job description here (at least 20 characters)…"
@@ -174,125 +171,114 @@ export function SessionsListPage() {
                 minLength={20}
                 rows={4}
               />
-              <span className="field-hint">At least 20 characters — used to generate questions.</span>
+              <span className="field-hint">At least 20 characters — used to generate tailored questions.</span>
             </label>
 
             {createError && (
-              <p
-                role="alert"
-                style={{
-                  color: 'var(--error-text)',
-                  background: 'var(--error-bg)',
-                  border: '1px solid rgba(239,68,68,0.2)',
-                  padding: '0.55rem 0.75rem',
-                  borderRadius: 'var(--radius-sm)',
-                  fontSize: '0.84rem',
-                  margin: '0.5rem 0',
-                }}
-              >
-                {createError}
-              </p>
+              <p className="error-banner" role="alert">{createError}</p>
             )}
 
-            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
-              <button
-                type="submit"
-                className="btn btn-primary btn-sm"
-                disabled={creating}
-                aria-busy={creating}
-              >
-                {creating ? (
-                  <>
-                    <span className="spinner" aria-hidden="true" />
-                    Creating…
-                  </>
-                ) : (
-                  'Create Session'
-                )}
-              </button>
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => setShowCreate(false)}
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
-        </section>
-      )}
-
-      {/* Session list */}
-      <section className="sessions-list" aria-label="Your interview sessions">
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            marginBottom: '1rem',
-            gap: '0.75rem',
-            flexWrap: 'wrap',
-          }}
-        >
-          <h2 style={{ margin: 0, fontSize: '1rem' }}>Your Sessions</h2>
-
-          {sessions.length > 0 && (
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                background: 'var(--surface-2)',
-                border: '1px solid var(--border)',
-                borderRadius: 'var(--radius-sm)',
-                padding: '0.3rem 0.65rem',
-                minWidth: 200,
-              }}
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={creating}
+              aria-busy={creating}
             >
+              {creating ? (
+                <>
+                  <span className="spinner" aria-hidden="true" />
+                  Creating…
+                </>
+              ) : (
+                'Create Interview'
+              )}
+            </button>
+          </form>
+
+          <ResumeUploadCard />
+        </div>
+
+        {/* ── Right: Session list ── */}
+        <div className="sessions-list-panel" aria-label="Your interview sessions">
+
+          {/* Toolbar: search + refresh */}
+          <div className="sessions-toolbar">
+            <div className="sessions-search-wrap">
               <Search size={13} style={{ color: 'var(--muted)', flexShrink: 0 }} aria-hidden="true" />
               <input
                 type="search"
-                placeholder="Filter sessions…"
+                className="sessions-search-input"
+                placeholder="Search by title or role…"
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  padding: 0,
-                  fontSize: '0.84rem',
-                  color: 'var(--text)',
-                  outline: 'none',
-                  boxShadow: 'none',
-                  width: '100%',
-                }}
-                aria-label="Filter sessions by title or role"
+                aria-label="Search sessions by title or role"
               />
+            </div>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={loadSessions}
+              aria-label="Refresh sessions"
+            >
+              <RefreshCw size={14} aria-hidden="true" />
+            </button>
+          </div>
+
+          {/* Status filter chips */}
+          {sessions.length > 0 && (
+            <div className="sessions-filter-chips" role="group" aria-label="Filter sessions by status">
+              {(Object.keys(STATUS_LABELS) as StatusFilter[]).map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  className={`sessions-filter-chip${statusFilter === s ? ' active' : ''}`}
+                  onClick={() => setStatusFilter(s)}
+                  aria-pressed={statusFilter === s}
+                >
+                  {STATUS_LABELS[s]} ({statusCounts[s]})
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Meta row */}
+          {sessions.length > 0 && (
+            <div className="sessions-meta-row" aria-live="polite">
+              <span><strong>{filtered.length}</strong> shown</span>
+              <span><strong>{statusCounts.completed}</strong> completed</span>
+              <span><strong>{statusCounts.draft}</strong> drafts</span>
+            </div>
+          )}
+
+          {/* Content */}
+          {loading && <SessionListSkeleton />}
+          {!loading && loadError && <ErrorState message={loadError} onRetry={loadSessions} />}
+          {!loading && !loadError && sessions.length === 0 && (
+            <EmptyState
+              title="No interview sessions yet"
+              description="Fill out the form on the left to create your first session."
+            />
+          )}
+          {!loading && !loadError && sessions.length > 0 && filtered.length === 0 && (
+            <EmptyState
+              title="No matching sessions"
+              description={
+                statusFilter !== 'all'
+                  ? `No ${STATUS_LABELS[statusFilter].toLowerCase()} sessions found.`
+                  : `No sessions match "${filter}".`
+              }
+            />
+          )}
+          {!loading && !loadError && filtered.length > 0 && (
+            <div className="session-grid">
+              {filtered.map((session) => (
+                <SessionCard key={session.id} session={session} />
+              ))}
             </div>
           )}
         </div>
 
-        {loading && <SessionListSkeleton />}
-        {!loading && loadError && <ErrorState message={loadError} onRetry={loadSessions} />}
-        {!loading && !loadError && sessions.length === 0 && (
-          <EmptyState
-            title="No interview sessions yet"
-            description="Click 'New Interview' above to create your first session and start preparing."
-          />
-        )}
-        {!loading && !loadError && sessions.length > 0 && filtered.length === 0 && (
-          <EmptyState
-            title="No matching sessions"
-            description={`No sessions match "${filter}". Try a different search term.`}
-          />
-        )}
-        {!loading && !loadError && filtered.length > 0 && (
-          <div className="session-grid">
-            {filtered.map((session) => (
-              <SessionCard key={session.id} session={session} />
-            ))}
-          </div>
-        )}
-      </section>
-    </div>
+      </div>
+    </motion.div>
   );
 }

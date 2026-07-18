@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { motion } from 'framer-motion';
 import {
   CartesianGrid,
   Legend,
@@ -14,6 +15,8 @@ import {
   YAxis,
 } from 'recharts';
 import { RefreshCw } from 'lucide-react';
+
+const ease = [0.4, 0, 0.2, 1] as [number, number, number, number];
 import { getAnalyticsOverview, getAnalyticsTrends, getBenchmarks } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import type { AnalyticsOverviewResponse, BenchmarkResponse, SessionTrendResponse } from '../api/types';
@@ -124,7 +127,12 @@ export function AnalyticsPage() {
   );
 
   return (
-    <div className="page-container">
+    <motion.div
+      className="page-container"
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.28, ease }}
+    >
       <PageHeader range={range} onRange={setRange} onRefresh={load} />
 
       {/* Summary stat row */}
@@ -254,7 +262,7 @@ export function AnalyticsPage() {
           </p>
         </div>
       )}
-    </div>
+    </motion.div>
   );
 }
 

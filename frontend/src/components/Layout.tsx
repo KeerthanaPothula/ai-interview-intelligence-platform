@@ -12,7 +12,6 @@ const PAGE_TITLES: Record<string, string> = {
   '/resume': 'Resume Analyzer',
   '/profile': 'Profile & Settings',
   '/recruiter': 'Recruiter Dashboard',
-  '/recruiter': 'Recruiter Dashboard',
 };
 
 export function Layout() {
