@@ -68,7 +68,7 @@ export function ResponseCard({ response }: { response: AudioResponseResponse }) 
         </p>
       )}
 
-      {voiceAnalysis && <VoiceAnalyticsCard voiceAnalysis={voiceAnalysis} />}
+      {voiceAnalysis && <VoiceAnalyticsCard voiceAnalysis={voiceAnalysis} transcript={transcript} />}
       {transcript && <TranscriptCard transcript={transcript} />}
       {analysis && <AnalysisCard analysis={analysis} />}
     </div>

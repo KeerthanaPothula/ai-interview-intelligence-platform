@@ -2,6 +2,29 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!--
+      Blocking, synchronous theme script — must run before first paint to
+      avoid a flash of the wrong theme. Reads the persisted preference or
+      falls back to the OS preference, then stamps data-theme on <html>
+      before any stylesheet paints. ThemeContext (src/context/ThemeContext.tsx)
+      reads this same attribute on mount rather than re-deciding it.
+    -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('aiip-theme');
+          var theme =
+            stored === 'light' || stored === 'dark'
+              ? stored
+              : window.matchMedia('(prefers-color-scheme: light)').matches
+                ? 'light'
+                : 'dark';
+          document.documentElement.setAttribute('data-theme', theme);
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      })();
+    </script>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AI Interview Intelligence Platform</title>

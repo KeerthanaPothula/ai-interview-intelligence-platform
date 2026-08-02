@@ -55,6 +55,15 @@ class TestCiWorkflow:
         run_commands = [s.get("run", "") for s in steps]
         assert any("pytest" in cmd and "--cov" in cmd for cmd in run_commands)
 
+    def test_backend_test_job_gates_on_a_coverage_floor(self):
+        jobs = _load("ci.yml")["jobs"]
+        steps = jobs["backend-test"]["steps"]
+        run_commands = [s.get("run", "") for s in steps]
+        assert any("--cov-fail-under" in cmd for cmd in run_commands), (
+            "coverage gating was removed from ci.yml — a coverage regression "
+            "would no longer fail the build"
+        )
+
 
 class TestSecurityWorkflow:
     def test_security_workflow_parses_as_valid_yaml(self):
@@ -63,7 +72,7 @@ class TestSecurityWorkflow:
 
     def test_security_workflow_has_required_jobs(self):
         jobs = _load("security.yml")["jobs"]
-        for job in ("pip-audit", "npm-audit", "codeql"):
+        for job in ("pip-audit", "npm-audit", "secrets-scan", "codeql"):
             assert job in jobs, f"expected job {job!r} in security.yml"
 
     def test_codeql_job_declares_security_events_permission(self):

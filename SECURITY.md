@@ -53,6 +53,30 @@ known limitations, and how to keep dependencies up to date.
   naturally). Logging out of all devices/sessions immediately requires
   bumping `token_version`, which is not exposed via an endpoint yet.
 
+## Cross-Site Request Forgery (CSRF)
+
+No CSRF middleware/token is implemented, and this is a deliberate
+assessment, not an oversight:
+
+- The API is authenticated exclusively via a Bearer token in the
+  `Authorization` header (`app/core/deps.py::get_current_user`), read from
+  JavaScript-managed storage (`localStorage`, `AuthContext.tsx`) — never a
+  cookie.
+- CSRF is fundamentally an attack on **ambient authority**: a browser
+  automatically attaching a cookie to a cross-origin request the victim
+  didn't intend to make. A cross-site page cannot read `localStorage`
+  belonging to another origin, and cannot set a custom `Authorization`
+  header on a simple cross-origin form/image/script request — so it
+  cannot forge an authenticated request to this API. The CORS
+  configuration (`CORS_ORIGINS` allow-list, `app/main.py`) additionally
+  blocks a cross-origin script from reading the response even if it could
+  make the request.
+- **This would need revisiting** if the token storage strategy ever moves
+  to cookies (e.g. to mitigate XSS token theft via `httpOnly` cookies) —
+  that trade-off swaps one risk (XSS-readable token) for another (CSRF
+  exposure) and would require adding real CSRF protection (double-submit
+  token or `SameSite=Strict`) at the same time.
+
 ## Security Headers
 
 `SecurityHeadersMiddleware` (`app/core/security_headers.py`) sets

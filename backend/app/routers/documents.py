@@ -323,13 +323,15 @@ def analyze_resume(
         )
     except Exception:
         # Graceful fallback: extract skills via regex, return basic analysis
+        from app.services.resume_scoring import estimate_ats_score
+
         common_skills = [
             "Python", "JavaScript", "TypeScript", "React", "Node.js",
             "SQL", "Git", "Docker", "AWS", "REST API",
         ]
         found = [s for s in common_skills if s.lower() in text.lower()]
         return ResumeAnalysisResponse(
-            ats_score=max(40, min(90, 40 + word_count // 20)),
+            ats_score=estimate_ats_score(word_count),
             skills=found,
             missing_skills=[s for s in common_skills if s not in found][:5],
             keywords=[],

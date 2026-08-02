@@ -473,6 +473,99 @@ per-category average scores — what powers the dashboard's `LineChart`.
 
 ---
 
+## Recruiter — `/api/v1/recruiter` 🔒
+
+No role/organisation model exists on `User` (see
+`app/services/recruiter_service.py` docstring) — these endpoints are
+reachable by any authenticated user, not gated behind a "recruiter" role.
+This is a documented trade-off for the current single-tenant schema, not
+an oversight; see the Roadmap in the root [README](../README.md).
+
+### `GET /api/v1/recruiter/candidates`
+
+Aggregates every user's **latest completed** interview session into one
+row per candidate. Query params: `search`, `status`
+(`shortlisted`/`reviewing`/`pending`/`rejected` — derived from score
+bands, not persisted), `sort_by`, `sort_dir`, `skip`, `limit`.
+
+```json
+{
+  "items": [
+    {
+      "id": "uuid", "session_id": "uuid", "name": "Jane Doe",
+      "email": "jane@example.com", "role": "Backend Engineer",
+      "resume_score": 78, "interview_score": 85, "communication": 90,
+      "technical": 83, "sessions_completed": 2, "status": "shortlisted",
+      "applied_days": 5
+    }
+  ],
+  "total": 1,
+  "summary": { "total_candidates": 1, "shortlisted_count": 1, "avg_resume_score": 78.0, "avg_interview_score": 85.0 }
+}
+```
+
+`resume_score` is a deterministic word-count heuristic
+(`app/services/resume_scoring.py`, shared with the Gemini-failure fallback
+in the resume analysis endpoint) — not a live Gemini call per candidate,
+which would be too slow/expensive for a list endpoint. It's `null` when
+the candidate has no uploaded resume.
+
+---
+
+## Admin — `/api/v1/admin` 🔒
+
+Same access-model note as Recruiter above — open to any authenticated
+user. Every field below is a real query against existing tables; nothing
+is mocked.
+
+### `GET /api/v1/admin/overview`
+
+```json
+{
+  "total_users": 42, "total_sessions": 118,
+  "sessions_by_status": { "draft": 3, "in_progress": 2, "processing": 0, "completed": 113 },
+  "total_reports": 113, "avg_platform_score": 7.42, "total_resumes": 38,
+  "ai_usage": {
+    "questions_generated": 590, "transcriptions_completed": 401,
+    "evaluations_completed": 401, "reports_generated": 113,
+    "coaching_plans_generated": 67, "predictions_generated": 89
+  },
+  "storage": { "audio_bytes": 104857600, "audio_file_count": 401, "resume_bytes": 2097152, "resume_file_count": 38 },
+  "signups_last_30_days": [{ "date": "2026-07-04", "count": 2 }],
+  "sessions_last_30_days": [{ "date": "2026-07-04", "count": 5 }]
+}
+```
+
+`ai_usage` counts real AI-artifact rows (`Question`, `Transcript`,
+`InterviewAnalysis`, `SessionReport`, `CoachingPlan`,
+`InterviewPrediction`) — the DB doesn't log literal external API calls, so
+these are honest proxies, not a Gemini/Whisper billing count.
+`storage.resume_bytes` is computed by `os.path.getsize()` on each stored
+resume file path (there's no size column on `ResumeDocument`, unlike
+`AudioResponse.file_size_bytes`) — missing files are skipped rather than
+failing the request. 30-day trend buckets are computed in Python, not SQL
+(`func.date()` isn't portable between SQLite and PostgreSQL).
+
+### `GET /api/v1/admin/users`
+
+Query params: `search`, `skip`, `limit`. Each item includes
+`sessions_completed` and `latest_session_at` (aggregated separately, not
+denormalized onto `User`).
+
+### `GET /api/v1/admin/jobs`
+
+`list[{"role": str, "session_count": int}]` — distinct `job_role` values
+across all sessions, ranked by count.
+
+### `GET /api/v1/admin/activity`
+
+Platform-wide recent-activity feed (session created, report generated,
+resume uploaded) merged and sorted across all users — the same shape as
+`GET /api/v1/analytics/activity`, but not scoped to the current user.
+Query param: `limit` (default 20, max 50).
+
+---
+
 ## Error response shape
 
 Every non-2xx response (except FastAPI's own `422` validation responses)

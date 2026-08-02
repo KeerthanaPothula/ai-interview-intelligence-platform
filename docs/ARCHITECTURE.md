@@ -20,7 +20,7 @@ flowchart TB
     subgraph Backend["FastAPI Backend (Docker)"]
         MW["ObservabilityMiddleware\n+ SecurityHeadersMiddleware\n+ CORS"]
         Auth["JWT Auth Dependency\n(get_current_user)"]
-        Routers["Routers\nauth · interviews · questions · responses\nprocessing · live-interviews · documents\nanalytics · readiness · reports"]
+        Routers["Routers\nauth · interviews · questions · responses\nprocessing · live-interviews · documents\nanalytics · readiness · reports\nrecruiter · admin"]
         Services["Services\n(one per domain — see AI_PIPELINE.md)"]
         ORM["SQLAlchemy ORM"]
     end

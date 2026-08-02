@@ -45,6 +45,15 @@ tests
 # (see docs/DEPLOYMENT.md for the production storage strategy)
 uploads
 
+# Local SQLite databases (e.g. smoke-test DBs created for manual
+# verification against DATABASE_URL=sqlite:///...) — production always
+# uses PostgreSQL via DATABASE_URL, so a stray .db file here would only
+# ever be leftover local-dev noise
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
 # Editor / OS files
 .vscode
 .idea

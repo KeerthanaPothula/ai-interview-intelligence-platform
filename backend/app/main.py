@@ -52,6 +52,7 @@ from app.core.middleware import ObservabilityMiddleware
 from app.core.security_headers import SecurityHeadersMiddleware
 from app.core.tracing import configure_tracing
 from app.database import SessionLocal, engine
+from app.routers.admin import router as admin_router
 from app.routers.analytics import router as analytics_router
 from app.routers.auth import router as auth_router
 from app.routers.documents import router as documents_router
@@ -60,6 +61,7 @@ from app.routers.interviews import router as interviews_router
 from app.routers.live_interview import router as live_interview_router
 from app.routers.prediction import router as prediction_router
 from app.routers.processing import router as processing_router
+from app.routers.recruiter import router as recruiter_router
 from app.routers.reports import router as reports_router
 from app.routers.responses import router as responses_router
 from app.services import processing_service
@@ -265,6 +267,12 @@ app.include_router(documents_router)
 
 # prediction_router uses full /api/v1/... paths inline — no extra prefix.
 app.include_router(prediction_router)
+
+# recruiter_router already has prefix="/api/v1/recruiter" — no extra prefix.
+app.include_router(recruiter_router)
+
+# admin_router already has prefix="/api/v1/admin" — no extra prefix.
+app.include_router(admin_router)
 
 # ---------------------------------------------------------------------------
 # Health check

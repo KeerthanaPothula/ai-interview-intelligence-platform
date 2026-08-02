@@ -13,6 +13,11 @@
   --border: rgba(255, 255, 255, 0.07);
   --border-strong: rgba(255, 255, 255, 0.14);
 
+  /* Overlays — subtle tint used for hover states and glows.
+     Theme-aware: dark theme lightens with white, light theme darkens with ink. */
+  --overlay-hover: rgba(255, 255, 255, 0.05);
+  --overlay-subtle: rgba(255, 255, 255, 0.04);
+
   /* Text */
   --text: #EDF1FF;
   --text-2: #A8B4D0;
@@ -68,9 +73,71 @@
   --shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
   --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.6);
 
+  color-scheme: dark;
   font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
   color: var(--text);
   background-color: var(--bg);
+}
+
+/* ================================================================== */
+/* Light theme — activated via [data-theme="light"] on <html>, set by   */
+/* ThemeContext (src/context/ThemeContext.tsx) before first paint.      */
+/* Every component reads colors through the tokens above, so this one   */
+/* block is the entire light-theme implementation — no per-component    */
+/* overrides needed. Values re-tuned (not just inverted) for WCAG AA    */
+/* contrast against a white/near-white surface.                        */
+/* ================================================================== */
+
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  /* Backgrounds */
+  --bg: #F6F8FC;
+  --surface: #FFFFFF;
+  --surface-2: #F1F4F9;
+  --surface-3: #E7EBF3;
+
+  /* Borders */
+  --border: rgba(15, 23, 42, 0.09);
+  --border-strong: rgba(15, 23, 42, 0.18);
+
+  /* Overlays */
+  --overlay-hover: rgba(15, 23, 42, 0.045);
+  --overlay-subtle: rgba(15, 23, 42, 0.035);
+
+  /* Text — #0F172A on #FFFFFF is ~16.5:1; #45526E on #FFFFFF is ~7.3:1;
+     #5B6B85 on #FFFFFF is ~5.1:1 — all comfortably pass WCAG AA. */
+  --text: #0F172A;
+  --text-2: #45526E;
+  --muted: #5B6B85;
+
+  /* Brand */
+  --primary: #2563EB;
+  --primary-hover: #1D4ED8;
+  --primary-dim: rgba(37, 99, 235, 0.10);
+  --accent: #7C3AED;
+  --accent-dim: rgba(124, 58, 237, 0.10);
+
+  /* Semantic — darkened vs. the dark-theme hues so text usage stays AA
+     on a light surface, not just the tinted -bg chips. */
+  --success: #16A34A;
+  --success-bg: rgba(22, 163, 74, 0.10);
+  --success-text: #15803D;
+  --error: #DC2626;
+  --error-bg: rgba(220, 38, 38, 0.10);
+  --error-text: #B91C1C;
+  --warning: #D97706;
+  --warning-bg: rgba(217, 119, 6, 0.10);
+  --warning-text: #B45309;
+  --info: #2563EB;
+  --info-bg: rgba(37, 99, 235, 0.10);
+  --info-text: #1D4ED8;
+
+  /* Shadows — lighter, since a dark shadow on white reads as elevation,
+     not the near-black glow that works on a dark surface. */
+  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.08);
+  --shadow: 0 4px 16px rgba(15, 23, 42, 0.10);
+  --shadow-lg: 0 12px 40px rgba(15, 23, 42, 0.14);
 }
 
 /* ================================================================== */
@@ -305,7 +372,7 @@ h1, h2, h3 {
 }
 
 .sb-nav-item:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--overlay-hover);
   color: var(--text);
 }
 
@@ -386,7 +453,7 @@ h1, h2, h3 {
 }
 
 .sb-topbar-icon-btn:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--overlay-hover);
   color: var(--text);
 }
 
@@ -469,7 +536,7 @@ h1, h2, h3 {
   padding: 2.25rem;
   width: 100%;
   max-width: 400px;
-  box-shadow: var(--shadow-lg), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  box-shadow: var(--shadow-lg), 0 0 0 1px var(--overlay-subtle);
 }
 
 .auth-form h1 {
@@ -720,7 +787,7 @@ h1, h2, h3 {
   border: 1px solid var(--border);
 }
 .btn-ghost:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--overlay-hover);
   color: var(--text);
 }
 
@@ -1128,6 +1195,22 @@ h1, h2, h3 {
   color: var(--error-text);
 }
 
+.voice-explanation {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.voice-explanation p {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+
 /* ================================================================== */
 /* Analytics Dashboard                                                  */
 /* ================================================================== */
@@ -1352,7 +1435,7 @@ h1, h2, h3 {
 
 .nav-link:hover {
   color: var(--text);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--overlay-hover);
 }
 
 .nav-link-active {
@@ -1770,6 +1853,26 @@ h1, h2, h3 {
   pointer-events: none;
 }
 
+.lp-hero-glow {
+  position: absolute;
+  inset: -20% -10%;
+  pointer-events: none;
+  background:
+    radial-gradient(38% 45% at 18% 25%, rgba(37, 99, 235, 0.22), transparent 70%),
+    radial-gradient(32% 40% at 82% 70%, rgba(139, 92, 246, 0.18), transparent 70%);
+  filter: blur(40px);
+  animation: lp-glow-drift 14s ease-in-out infinite alternate;
+}
+
+@keyframes lp-glow-drift {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(2%, -3%) scale(1.06); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lp-hero-glow { animation: none; }
+}
+
 .lp-hero-inner {
   position: relative;
   max-width: 1100px;
@@ -2020,62 +2123,73 @@ h1, h2, h3 {
   .lp-tech-track { animation: none; }
 }
 
-/* ── How it works ────────────────────────────────────────── */
+/* ── AI Pipeline timeline ────────────────────────────────── */
 
-.lp-steps {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 1.25rem;
+.lp-pipeline {
+  max-width: 640px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
 }
 
-.lp-step {
+.lp-pipeline-row {
+  display: flex;
+  flex-direction: column;
+}
+
+.lp-pipeline-node {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
   background: var(--lp-surface);
   border: 1px solid var(--lp-border);
   border-radius: 12px;
-  padding: 1.5rem;
-  position: relative;
-  overflow: hidden;
-  transition: border-color 0.2s;
+  padding: 1.1rem 1.25rem;
+  transition: border-color 0.2s, transform 0.2s;
 }
 
-.lp-step::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 2px;
-  background: var(--lp-primary);
-  transform: scaleX(0);
-  transform-origin: left;
-  transition: transform 0.25s ease;
+.lp-pipeline-node:hover {
+  border-color: rgba(37, 99, 235, 0.4);
+  transform: translateX(4px);
 }
 
-.lp-step:hover::after {
-  transform: scaleX(1);
+.lp-pipeline-icon {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(37, 99, 235, 0.15);
+  border: 1px solid rgba(37, 99, 235, 0.3);
+  color: #60A5FA;
 }
 
-.lp-step-n {
-  display: block;
-  font-size: 0.67rem;
-  font-weight: 800;
-  letter-spacing: 0.1em;
-  color: var(--lp-primary);
-  margin-bottom: 0.75rem;
+.lp-pipeline-copy {
+  min-width: 0;
 }
 
-.lp-step-title {
+.lp-pipeline-title {
   font-size: 0.92rem;
   font-weight: 700;
   color: var(--lp-text);
-  margin: 0 0 0.5rem;
+  margin: 0 0 0.3rem;
 }
 
-.lp-step-body {
+.lp-pipeline-body {
   font-size: 0.82rem;
   color: var(--lp-muted);
   line-height: 1.55;
   margin: 0;
+}
+
+.lp-pipeline-connector {
+  width: 2px;
+  height: 28px;
+  margin-left: 1.95rem;
+  background: linear-gradient(var(--lp-primary), transparent);
+  opacity: 0.5;
 }
 
 /* ── Features ────────────────────────────────────────────── */
@@ -2111,6 +2225,293 @@ h1, h2, h3 {
   color: var(--lp-muted);
   line-height: 1.6;
   margin: 0;
+}
+
+/* ── Why choose / comparison ─────────────────────────────── */
+
+.lp-compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem;
+  max-width: 900px;
+  margin: 0 auto;
+  align-items: start;
+}
+
+.lp-compare-col {
+  border-radius: 12px;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.lp-compare-col--trad {
+  background: var(--lp-surface);
+  border: 1px solid var(--lp-border);
+}
+
+.lp-compare-col--aiip {
+  background: rgba(37, 99, 235, 0.08);
+  border: 1px solid rgba(37, 99, 235, 0.35);
+}
+
+.lp-compare-head {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--lp-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 0.25rem;
+}
+
+.lp-compare-head--highlight {
+  color: #93C5FD;
+}
+
+.lp-compare-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  font-size: 0.85rem;
+  color: var(--lp-text);
+  line-height: 1.5;
+}
+
+.lp-compare-icon {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.65rem;
+  font-weight: 800;
+  margin-top: 0.1rem;
+}
+
+.lp-compare-icon--no {
+  background: rgba(239, 68, 68, 0.15);
+  color: #F87171;
+}
+
+.lp-compare-icon--yes {
+  background: rgba(34, 197, 94, 0.15);
+  color: #4ADE80;
+}
+
+/* ── Technology architecture flow ────────────────────────── */
+
+.lp-arch-flow {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: 1000px;
+  margin: 0 auto;
+}
+
+.lp-arch-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.lp-arch-node {
+  background: var(--lp-surface);
+  border: 1px solid var(--lp-border);
+  border-radius: 12px;
+  padding: 1rem 1.1rem;
+  min-width: 130px;
+  text-align: center;
+  transition: border-color 0.2s, transform 0.2s;
+}
+
+.lp-arch-node:hover {
+  border-color: rgba(37, 99, 235, 0.4);
+  transform: translateY(-3px);
+}
+
+.lp-arch-icon {
+  width: 36px;
+  height: 36px;
+  margin: 0 auto 0.6rem;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(37, 99, 235, 0.15);
+  border: 1px solid rgba(37, 99, 235, 0.3);
+  color: #60A5FA;
+}
+
+.lp-arch-name {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--lp-text);
+  margin-bottom: 0.2rem;
+}
+
+.lp-arch-role {
+  font-size: 0.7rem;
+  color: var(--lp-muted);
+  line-height: 1.4;
+}
+
+.lp-arch-arrow {
+  color: var(--lp-muted);
+  opacity: 0.5;
+  flex-shrink: 0;
+}
+
+/* ── Screenshots carousel ─────────────────────────────────── */
+
+.lp-carousel {
+  max-width: 880px;
+  margin: 0 auto;
+}
+
+.lp-carousel-frame {
+  position: relative;
+  aspect-ratio: 16 / 9.4;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid var(--lp-border);
+  background: var(--lp-surface);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+}
+
+.lp-carousel-slide {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top;
+  opacity: 0;
+  transition: opacity 0.5s ease;
+}
+
+.lp-carousel-slide.active {
+  opacity: 1;
+}
+
+.lp-carousel-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(7, 12, 24, 0.65);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  transition: background 0.15s;
+}
+
+.lp-carousel-arrow:hover {
+  background: rgba(7, 12, 24, 0.9);
+}
+
+.lp-carousel-arrow--prev { left: 12px; }
+.lp-carousel-arrow--next { right: 12px; }
+
+.lp-carousel-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
+.lp-carousel-caption {
+  text-align: center;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--lp-text);
+}
+
+.lp-carousel-play-toggle {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid var(--lp-border);
+  background: var(--lp-surface);
+  color: var(--lp-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.lp-carousel-play-toggle:hover {
+  color: var(--lp-text);
+  border-color: var(--lp-primary);
+}
+
+.lp-carousel-dots {
+  display: flex;
+  justify-content: center;
+  gap: 0.4rem;
+  margin-top: 0.6rem;
+}
+
+.lp-carousel-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: none;
+  background: var(--lp-border);
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.15s, transform 0.15s;
+}
+
+.lp-carousel-dot.active {
+  background: var(--lp-primary);
+  transform: scale(1.3);
+}
+
+/* ── Statistics ───────────────────────────────────────────── */
+
+.lp-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1.25rem;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.lp-stat-card {
+  text-align: center;
+  padding: 1.5rem 1rem;
+  background: var(--lp-surface);
+  border: 1px solid var(--lp-border);
+  border-radius: 12px;
+}
+
+.lp-stat-value {
+  font-size: 2.25rem;
+  font-weight: 800;
+  color: #60A5FA;
+  font-variant-numeric: tabular-nums;
+}
+
+.lp-stat-label {
+  margin-top: 0.4rem;
+  font-size: 0.78rem;
+  color: var(--lp-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 /* ── Engineering ─────────────────────────────────────────── */
@@ -2237,15 +2638,15 @@ h1, h2, h3 {
 /* ── Responsive ──────────────────────────────────────────── */
 
 @media (max-width: 960px) {
-  .lp-steps {
-    grid-template-columns: repeat(2, 1fr);
-  }
-
   .lp-features-grid {
     grid-template-columns: repeat(2, 1fr);
   }
 
   .lp-eng-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .lp-stats-grid {
     grid-template-columns: repeat(2, 1fr);
   }
 }
@@ -2277,18 +2678,22 @@ h1, h2, h3 {
     margin-left: auto;
     margin-right: auto;
   }
+
+  .lp-compare {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 560px) {
-  .lp-steps {
-    grid-template-columns: 1fr;
-  }
-
   .lp-features-grid {
     grid-template-columns: 1fr;
   }
 
   .lp-eng-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .lp-stats-grid {
     grid-template-columns: 1fr;
   }
 
@@ -3606,6 +4011,23 @@ h1, h2, h3 {
 
 .recruiter-page { display: flex; flex-direction: column; gap: 1.5rem; }
 
+.recruiter-layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.recruiter-layout.has-detail {
+  grid-template-columns: minmax(0, 1fr) 380px;
+}
+
+@media (max-width: 900px) {
+  .recruiter-layout.has-detail {
+    grid-template-columns: 1fr;
+  }
+}
+
 .recruiter-filters { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
 
 .recruiter-filter-chip {
@@ -3772,7 +4194,7 @@ input:focus, textarea:focus {
 .skeleton-chart::after {
   content: "";
   position: absolute; inset: 0;
-  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.04) 50%, transparent 100%);
+  background: linear-gradient(90deg, transparent 0%, var(--overlay-subtle) 50%, transparent 100%);
   background-size: 200% 100%;
   animation: skeleton-shimmer 1.4s ease-in-out infinite;
 }
@@ -4134,6 +4556,81 @@ button:focus-visible, a:focus-visible { outline-offset: 3px; }
 @media (prefers-reduced-motion: no-preference) {
   .page-animate {
     animation: page-fade-up 0.28s ease both;
+  }
+}
+
+/* ================================================================== */
+/* Admin Dashboard                                                      */
+/* ================================================================== */
+
+.admin-content-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .admin-content-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ================================================================== */
+/* Print (used for "Export to PDF" via window.print())                */
+/* ================================================================== */
+
+@media print {
+  /* Flip the theme tokens to a light, ink-friendly palette regardless of
+     which theme (dark or light) is active on screen. Every component
+     reads colors via var(--text), var(--surface), etc., so overriding
+     the tokens here cascades everywhere without needing print-specific
+     overrides on each component.
+     !important is required: :root[data-theme='light'] has higher
+     selector specificity than a bare :root, so without it, printing
+     while the light theme is active would let the light theme's tokens
+     win over these regardless of source order. */
+  :root {
+    --bg: #ffffff !important;
+    --surface: #ffffff !important;
+    --surface-2: #f8fafc !important;
+    --surface-3: #f1f5f9 !important;
+    --border: #d1d5db !important;
+    --border-strong: #9ca3af !important;
+    --text: #111827 !important;
+    --text-2: #374151 !important;
+    --muted: #6b7280 !important;
+  }
+
+  .sb-sidebar,
+  .sb-topbar,
+  .skip-link,
+  .offline-banner,
+  .no-print {
+    display: none !important;
+  }
+
+  .sb-shell {
+    display: block;
+    min-height: 0;
+  }
+
+  .sb-content {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+  }
+
+  .section-panel,
+  .stat-card,
+  .cand-detail {
+    box-shadow: none !important;
+    break-inside: avoid;
+  }
+
+  a[href]::after {
+    content: none !important;
   }
 }
 

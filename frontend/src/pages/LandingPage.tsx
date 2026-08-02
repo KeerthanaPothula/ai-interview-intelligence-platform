@@ -1,34 +1,66 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import {
+  AudioLines,
+  ChevronRight,
+  Container,
+  Database,
+  FileBarChart2,
+  FileSearch,
+  HelpCircle,
+  LayoutDashboard,
+  Network,
+  Server,
+  Sparkles,
+  Upload,
+  Users2,
+  Video,
+} from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { ScreenshotsCarousel, type CarouselSlide } from '../components/ScreenshotsCarousel';
 
-const GITHUB_URL = 'https://github.com/mohankrishna0089/ai-interview-intelligence-platform';
+const GITHUB_URL = 'https://github.com/KeerthanaPothula/ai-interview-intelligence-platform';
 
 const TECH_ITEMS = [
   'FastAPI', 'React 19', 'Gemini 1.5', 'Whisper', 'PostgreSQL',
   'Docker', 'Alembic', 'OpenTelemetry', 'SQLAlchemy', 'Vite', 'TypeScript', 'psycopg2',
 ];
 
-const STEPS = [
+const PIPELINE_STEPS = [
   {
-    n: '01',
-    title: 'Upload your resume',
-    body: 'Drop a PDF or DOCX. RAG indexes your experience so every question is precisely tailored to your background.',
+    icon: Upload,
+    title: 'Resume Upload',
+    body: 'Drop a PDF or DOCX. The document is parsed and chunked for retrieval.',
   },
   {
-    n: '02',
-    title: 'Generate questions',
-    body: 'Gemini crafts interview questions matched to the target role, job description, and your resume history.',
+    icon: FileSearch,
+    title: 'Resume Analysis',
+    body: 'Sentence-transformer embeddings index your experience via RAG so every question references your real background.',
   },
   {
-    n: '03',
-    title: 'Answer & record',
-    body: 'Type answers or upload audio. Whisper transcribes speech; Gemini evaluates clarity, depth, and confidence.',
+    icon: HelpCircle,
+    title: 'Question Generation',
+    body: 'Gemini crafts role-specific questions from your resume and the target job description.',
   },
   {
-    n: '04',
-    title: 'Review your score',
-    body: 'Receive a detailed readiness report: a weighted 0–10 score, identified strengths, gaps, and an improvement plan.',
+    icon: Video,
+    title: 'Live AI Interview',
+    body: 'Answer in a real-time conversational session with adaptive follow-up questions.',
+  },
+  {
+    icon: AudioLines,
+    title: 'Voice Analytics',
+    body: 'Whisper transcribes your speech; pace, filler words, pauses, and energy are measured automatically.',
+  },
+  {
+    icon: FileBarChart2,
+    title: 'Performance Report',
+    body: 'A weighted 0–10 readiness score with strengths, gaps, and a personalised improvement plan.',
+  },
+  {
+    icon: Users2,
+    title: 'Recruiter Dashboard',
+    body: 'Aggregate candidate scores, filter and rank by readiness — built for the hiring side too.',
   },
 ] as const;
 
@@ -57,6 +89,14 @@ const FEATURES = [
     title: 'Analytics Dashboard',
     body: 'Track score trends, benchmark against session history, and visualise performance across all competency dimensions.',
   },
+  {
+    title: 'Recruiter Dashboard',
+    body: 'Aggregate every candidate’s latest interview into a searchable, sortable, paginated ranking — built on live backend data, not mock rows.',
+  },
+  {
+    title: 'PDF Report Export',
+    body: 'Export any interview report to a clean, print-ready PDF for offline review or sharing with a hiring manager.',
+  },
 ] as const;
 
 const PROD_FEATURES = [
@@ -76,6 +116,24 @@ const PROD_FEATURES = [
     title: 'Observability',
     points: ['Structured JSON logging', 'OpenTelemetry tracing', 'Prometheus /metrics endpoint', 'Readiness & health probes'],
   },
+] as const;
+
+const ARCH_LAYERS = [
+  { icon: LayoutDashboard, name: 'React', role: 'Frontend UI' },
+  { icon: Server, name: 'FastAPI', role: 'Backend API' },
+  { icon: Sparkles, name: 'Gemini', role: 'Question gen · evaluation' },
+  { icon: Network, name: 'Sentence Transformers', role: 'Resume embeddings · RAG' },
+  { icon: Database, name: 'PostgreSQL', role: 'Persistence' },
+  { icon: Container, name: 'Docker', role: 'Containerised deployment' },
+] as const;
+
+const COMPARISON = [
+  { traditional: 'Generic, one-size-fits-all questions', aiip: 'Questions generated from your resume + the target job description via RAG' },
+  { traditional: 'No feedback until the real interview', aiip: 'Instant, transparent 0–10 readiness score after every session' },
+  { traditional: 'No way to measure filler words or pace', aiip: 'Voice analytics: speaking rate, pauses, filler words, energy consistency' },
+  { traditional: 'Practice sessions vanish afterward', aiip: 'Full session history with score trends on an analytics dashboard' },
+  { traditional: 'No structured path to improve', aiip: 'Personalised 7 / 14 / 30-day AI coaching plan' },
+  { traditional: 'Static follow-up, if any', aiip: 'Live conversational interview with real-time adaptive follow-ups' },
 ] as const;
 
 const TESTIMONIALS = [
@@ -144,6 +202,23 @@ const PRICING = [
     ],
     cta: 'Contact sales',
   },
+] as const;
+
+const SCREENSHOTS: CarouselSlide[] = [
+  { src: '/screenshots/landing.png', label: 'Landing Page' },
+  { src: '/screenshots/dashboard.png', label: 'Intelligent Dashboard' },
+  { src: '/screenshots/resume.png', label: 'Resume Analysis' },
+  { src: '/screenshots/interview.png', label: 'Live AI Interview' },
+  { src: '/screenshots/analytics.png', label: 'Analytics Center' },
+  { src: '/screenshots/recruiter.png', label: 'Recruiter Dashboard' },
+  { src: '/screenshots/admin.png', label: 'Admin Dashboard' },
+];
+
+const STATS = [
+  { target: 267, suffix: '+', label: 'Automated Backend Tests' },
+  { target: 79, suffix: '%', label: 'Backend Test Coverage' },
+  { target: 7, suffix: '', label: 'AI Pipeline Stages' },
+  { target: 31, suffix: '', label: 'Frontend Component Tests' },
 ] as const;
 
 const FAQS = [
@@ -303,6 +378,50 @@ function DashboardMock() {
   );
 }
 
+function prefersReducedMotion(): boolean {
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+function AnimatedCounter({ target, suffix = '' }: { target: number; suffix?: string }) {
+  const [value, setValue] = useState(() => (prefersReducedMotion() ? target : 0));
+  const ref = useRef<HTMLSpanElement>(null);
+  const started = useRef(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || prefersReducedMotion()) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting || started.current) return;
+          started.current = true;
+          const duration = 1400;
+          const start = performance.now();
+          const tick = (now: number) => {
+            const progress = Math.min(1, (now - start) / duration);
+            const eased = 1 - (1 - progress) ** 3;
+            setValue(Math.round(target * eased));
+            if (progress < 1) requestAnimationFrame(tick);
+          };
+          requestAnimationFrame(tick);
+          observer.disconnect();
+        });
+      },
+      { threshold: 0.3 },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [target]);
+
+  return (
+    <span ref={ref}>
+      {value}
+      {suffix}
+    </span>
+  );
+}
+
 function useReveal() {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -357,32 +476,30 @@ export function LandingPage() {
 
       {/* ── Hero ────────────────────────────────────────── */}
       <section className="lp-hero" aria-label="Hero">
+        <div className="lp-hero-glow" aria-hidden="true" />
         <div className="lp-hero-dots" aria-hidden="true" />
         <div className="lp-hero-inner">
           <div className="lp-hero-copy">
             <span className="lp-badge">v1.0.0 · Open Source</span>
             <h1 className="lp-h1">
-              Interview intelligence,<br />
-              <em className="lp-h1-em">engineered.</em>
+              Practice Interviews.<br />
+              Analyze Performance.<br />
+              <em className="lp-h1-em">Get Hired Faster.</em>
             </h1>
             <p className="lp-hero-sub">
-              Full-stack AI toolkit that turns practice sessions into measurable progress.
-              Resume analysis, voice scoring, readiness reports — all in one platform.
+              An end-to-end AI interview coach: resume analysis, adaptive AI-generated
+              questions, voice scoring, and a transparent readiness report — so every
+              practice session turns into measurable progress.
             </p>
             <div className="lp-cta-row">
               {isAuthenticated ? (
-                <Link to="/sessions" className="lp-btn lp-btn--primary lp-btn--lg">
-                  Go to Dashboard →
+                <Link to="/live-interview" className="lp-btn lp-btn--primary lp-btn--lg">
+                  Start Interview →
                 </Link>
               ) : (
-                <>
-                  <Link to="/register" className="lp-btn lp-btn--primary lp-btn--lg">
-                    Get Started — it's free
-                  </Link>
-                  <Link to="/login" className="lp-btn lp-btn--ghost lp-btn--lg">
-                    Log in
-                  </Link>
-                </>
+                <Link to="/register" className="lp-btn lp-btn--primary lp-btn--lg">
+                  Start Interview
+                </Link>
               )}
               <a
                 href={GITHUB_URL}
@@ -390,7 +507,7 @@ export function LandingPage() {
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                ★ GitHub
+                View GitHub
               </a>
             </div>
           </div>
@@ -409,23 +526,34 @@ export function LandingPage() {
         </div>
       </div>
 
-      {/* ── How it works ────────────────────────────────── */}
-      <section id="how" className="lp-section" aria-labelledby="how-heading">
+      {/* ── AI Pipeline ─────────────────────────────────── */}
+      <section id="how" className="lp-section" aria-labelledby="pipeline-heading">
         <div className="lp-container">
-          <h2 id="how-heading" className="lp-h2 lp-reveal">How it works</h2>
-          <p className="lp-sub lp-reveal">Four steps from resume to report.</p>
-          <div className="lp-steps">
-            {STEPS.map((step, i) => (
-              <div
-                key={step.n}
-                className="lp-step lp-reveal"
-                style={{ transitionDelay: `${i * 80}ms` }}
-              >
-                <span className="lp-step-n">{step.n}</span>
-                <h3 className="lp-step-title">{step.title}</h3>
-                <p className="lp-step-body">{step.body}</p>
-              </div>
-            ))}
+          <h2 id="pipeline-heading" className="lp-h2 lp-reveal">The AI pipeline</h2>
+          <p className="lp-sub lp-reveal">From resume to recruiter dashboard, seven stages, fully automated.</p>
+          <div className="lp-pipeline">
+            {PIPELINE_STEPS.map((step, i) => {
+              const Icon = step.icon;
+              return (
+                <div key={step.title} className="lp-pipeline-row">
+                  <div
+                    className="lp-pipeline-node lp-reveal"
+                    style={{ transitionDelay: `${i * 90}ms` }}
+                  >
+                    <div className="lp-pipeline-icon" aria-hidden="true">
+                      <Icon size={20} />
+                    </div>
+                    <div className="lp-pipeline-copy">
+                      <h3 className="lp-pipeline-title">{step.title}</h3>
+                      <p className="lp-pipeline-body">{step.body}</p>
+                    </div>
+                  </div>
+                  {i < PIPELINE_STEPS.length - 1 && (
+                    <div className="lp-pipeline-connector" aria-hidden="true" />
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       </section>
@@ -434,7 +562,7 @@ export function LandingPage() {
       <section id="features" className="lp-section lp-section--alt" aria-labelledby="features-heading">
         <div className="lp-container">
           <h2 id="features-heading" className="lp-h2 lp-reveal">Everything you need to ace your next interview</h2>
-          <p className="lp-sub lp-reveal">Six integrated features covering the full preparation lifecycle.</p>
+          <p className="lp-sub lp-reveal">Eight integrated features covering the full preparation lifecycle — from resume to recruiter.</p>
           <div className="lp-features-grid">
             {FEATURES.map((f, i) => (
               <article
@@ -446,6 +574,64 @@ export function LandingPage() {
                 <p className="lp-feature-body">{f.body}</p>
               </article>
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── Why choose this platform ────────────────────── */}
+      <section id="why" className="lp-section" aria-labelledby="why-heading">
+        <div className="lp-container">
+          <h2 id="why-heading" className="lp-h2 lp-reveal">Why choose this platform</h2>
+          <p className="lp-sub lp-reveal">Traditional mock-interview practice versus AI Interview Intelligence Platform.</p>
+          <div className="lp-compare">
+            <div className="lp-compare-col lp-compare-col--trad lp-reveal">
+              <div className="lp-compare-head">Traditional Practice</div>
+              {COMPARISON.map((row) => (
+                <div key={row.traditional} className="lp-compare-row">
+                  <span className="lp-compare-icon lp-compare-icon--no" aria-hidden="true">✕</span>
+                  <span>{row.traditional}</span>
+                </div>
+              ))}
+            </div>
+            <div className="lp-compare-col lp-compare-col--aiip lp-reveal" style={{ transitionDelay: '80ms' }}>
+              <div className="lp-compare-head lp-compare-head--highlight">AI Interview Intelligence Platform</div>
+              {COMPARISON.map((row) => (
+                <div key={row.aiip} className="lp-compare-row">
+                  <span className="lp-compare-icon lp-compare-icon--yes" aria-hidden="true">✓</span>
+                  <span>{row.aiip}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── Technology architecture ──────────────────────── */}
+      <section id="architecture" className="lp-section lp-section--alt" aria-labelledby="arch-heading">
+        <div className="lp-container">
+          <h2 id="arch-heading" className="lp-h2 lp-reveal">Technology architecture</h2>
+          <p className="lp-sub lp-reveal">Six layers, each doing one job well.</p>
+          <div className="lp-arch-flow">
+            {ARCH_LAYERS.map((layer, i) => {
+              const Icon = layer.icon;
+              return (
+                <div key={layer.name} className="lp-arch-item">
+                  <div
+                    className="lp-arch-node lp-reveal"
+                    style={{ transitionDelay: `${i * 70}ms` }}
+                  >
+                    <div className="lp-arch-icon" aria-hidden="true">
+                      <Icon size={18} />
+                    </div>
+                    <div className="lp-arch-name">{layer.name}</div>
+                    <div className="lp-arch-role">{layer.role}</div>
+                  </div>
+                  {i < ARCH_LAYERS.length - 1 && (
+                    <ChevronRight className="lp-arch-arrow" size={18} aria-hidden="true" />
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       </section>
@@ -673,6 +859,35 @@ export function LandingPage() {
         </div>
       </section>
 
+      {/* ── Screenshots ─────────────────────────────────── */}
+      <section id="screenshots" className="lp-section lp-section--alt" aria-labelledby="screenshots-heading">
+        <div className="lp-container">
+          <h2 id="screenshots-heading" className="lp-h2 lp-reveal">See it in action</h2>
+          <p className="lp-sub lp-reveal">A tour of every major screen, captured from a live running instance.</p>
+          <div className="lp-reveal">
+            <ScreenshotsCarousel slides={SCREENSHOTS} />
+          </div>
+        </div>
+      </section>
+
+      {/* ── Statistics ──────────────────────────────────── */}
+      <section id="stats" className="lp-section" aria-labelledby="stats-heading">
+        <div className="lp-container">
+          <h2 id="stats-heading" className="lp-h2 lp-reveal">Built and verified, not just demoed</h2>
+          <p className="lp-sub lp-reveal">Numbers from the project's own CI pipeline.</p>
+          <div className="lp-stats-grid">
+            {STATS.map((stat, i) => (
+              <div key={stat.label} className="lp-stat-card lp-reveal" style={{ transitionDelay: `${i * 70}ms` }}>
+                <div className="lp-stat-value">
+                  <AnimatedCounter target={stat.target} suffix={stat.suffix} />
+                </div>
+                <div className="lp-stat-label">{stat.label}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {/* ── FAQ ─────────────────────────────────────────── */}
       <section id="faq" className="lp-section lp-section--alt" aria-labelledby="faq-heading">
         <div className="lp-container lp-container--narrow">
@@ -779,10 +994,11 @@ export function LandingPage() {
           <span className="lp-footer-brand">AI Interview Intelligence Platform</span>
           <nav className="lp-footer-nav" aria-label="Footer links">
             <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">GitHub</a>
+            <a href={`${GITHUB_URL}/tree/main/docs`} target="_blank" rel="noopener noreferrer">Documentation</a>
             <Link to="/login">Log in</Link>
             <Link to="/register">Register</Link>
             <span aria-hidden="true">·</span>
-            <span>MIT License</span>
+            <a href={`${GITHUB_URL}/blob/main/LICENSE`} target="_blank" rel="noopener noreferrer">MIT License</a>
             <span aria-hidden="true">·</span>
             <span>v1.0.0</span>
           </nav>

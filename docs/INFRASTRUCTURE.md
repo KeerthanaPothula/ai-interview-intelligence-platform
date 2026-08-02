@@ -20,8 +20,8 @@ and on every `pull_request`:
 |---|---|
 | `backend-lint` | `ruff check .` + `black --check .` against `backend/` |
 | `frontend-lint` | `eslint .` against `frontend/` |
-| `backend-test` | `pytest --cov=app --cov-report=xml` (in-memory SQLite — no database service needed) |
-| `frontend-test` | `vitest run --coverage` |
+| `backend-test` | `pytest --cov=app --cov-report=xml --cov-fail-under=75` (in-memory SQLite — no database service needed) |
+| `frontend-test` | `vitest run --coverage` — gated at a low 7-8% tripwire per metric (`vite.config.ts`), not a quality bar |
 | `frontend-build` | `tsc -b && vite build` — catches type errors and build breaks |
 | `docker-build` | Builds the backend image (`docker/build-push-action`, not pushed) to confirm the Dockerfile builds |
 
@@ -38,12 +38,14 @@ third-party coverage account or token is required.
 |---|---|
 | `pip-audit` | `pip-audit -r backend/requirements.txt` against the PyPA Advisory Database |
 | `npm-audit` | `npm audit --omit=dev` against `frontend/` |
+| `secrets-scan` | `gitleaks/gitleaks-action@v2` — scans the diff (PRs) or full history (pushes) for likely committed secrets |
 | `codeql` | GitHub CodeQL static analysis for Python and JavaScript/TypeScript |
 
-`pip-audit` and `npm-audit` run with `continue-on-error: true` — they are
-informational (surface advisories for manual triage per
-[SECURITY.md](../SECURITY.md)) rather than merge-blocking, since a new
-advisory against an already-pinned, otherwise-fine transitive dependency
+`pip-audit`, `npm-audit`, and `secrets-scan` run with
+`continue-on-error: true` — they are informational (surface advisories/hits
+for manual triage per [SECURITY.md](../SECURITY.md)) rather than
+merge-blocking, since a new advisory against an already-pinned, otherwise-
+fine transitive dependency (or a gitleaks false positive on a test fixture)
 shouldn't halt unrelated PRs. `codeql` is not soft-failed; it requires the
 `security-events: write` permission to upload results, declared explicitly
 in the job.

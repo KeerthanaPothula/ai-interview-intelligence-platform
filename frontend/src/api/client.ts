@@ -1,8 +1,12 @@
 import type {
   ActivityTimelineResponse,
+  AdminActivityEvent,
+  AdminOverviewResponse,
+  AdminUserListResponse,
   AnalyticsOverviewResponse,
   AudioResponseResponse,
   BenchmarkResponse,
+  CandidateListResponse,
   ChangePasswordRequest,
   CoachingPlanResponse,
   ConversationTurnResponse,
@@ -15,10 +19,12 @@ import type {
   InsightsResponse,
   InterviewAnalysisResponse,
   InterviewReadinessResponse,
+  JobRoleCount,
   LiveInterviewSessionResponse,
   ProcessingStatusResponse,
   QuestionResponse,
   RAGQuestionsResponse,
+  ReadinessResponse,
   ResetPasswordRequest,
   ResumeAnalysisResponse,
   ResumeDocumentResponse,
@@ -119,6 +125,14 @@ async function request<T>(
 
 export function getHealth(): Promise<HealthResponse> {
   return request<HealthResponse>('/health');
+}
+
+// /ready intentionally returns HTTP 503 when not ready — that's a valid,
+// meaningful response body we want to read, not an error to throw away, so
+// this bypasses request()'s throw-on-!ok behavior.
+export async function getSystemReadiness(): Promise<ReadinessResponse> {
+  const response = await fetch(`${BASE_URL}/ready`);
+  return (await response.json()) as ReadinessResponse;
 }
 
 // ---------------------------------------------------------------------------
@@ -467,6 +481,38 @@ export function analyzeResume(token: string): Promise<ResumeAnalysisResponse> {
   return request<ResumeAnalysisResponse>('/api/v1/documents/resume/analysis', {}, token);
 }
 
+// ---------------------------------------------------------------------------
+// Recruiter Dashboard
+// ---------------------------------------------------------------------------
+
+export interface ListCandidatesParams {
+  search?: string;
+  status?: string;
+  sortBy?: string;
+  sortDir?: 'asc' | 'desc';
+  skip?: number;
+  limit?: number;
+}
+
+export function listCandidates(
+  token: string,
+  params: ListCandidatesParams = {},
+): Promise<CandidateListResponse> {
+  const query = new URLSearchParams();
+  if (params.search) query.set('search', params.search);
+  if (params.status) query.set('status', params.status);
+  if (params.sortBy) query.set('sort_by', params.sortBy);
+  if (params.sortDir) query.set('sort_dir', params.sortDir);
+  if (params.skip != null) query.set('skip', String(params.skip));
+  if (params.limit != null) query.set('limit', String(params.limit));
+  const qs = query.toString();
+  return request<CandidateListResponse>(
+    `/api/v1/recruiter/candidates${qs ? `?${qs}` : ''}`,
+    {},
+    token,
+  );
+}
+
 export function deleteResume(token: string): Promise<void> {
   return request<void>('/api/v1/documents/resume/current', { method: 'DELETE' }, token);
 }
@@ -480,4 +526,38 @@ export function changePassword(data: ChangePasswordRequest, token: string): Prom
     method: 'POST',
     body: JSON.stringify(data),
   }, token);
+}
+
+// ---------------------------------------------------------------------------
+// Admin Dashboard
+// ---------------------------------------------------------------------------
+
+export function getAdminOverview(token: string): Promise<AdminOverviewResponse> {
+  return request<AdminOverviewResponse>('/api/v1/admin/overview', {}, token);
+}
+
+export interface ListAdminUsersParams {
+  search?: string;
+  skip?: number;
+  limit?: number;
+}
+
+export function listAdminUsers(
+  token: string,
+  params: ListAdminUsersParams = {},
+): Promise<AdminUserListResponse> {
+  const query = new URLSearchParams();
+  if (params.search) query.set('search', params.search);
+  if (params.skip != null) query.set('skip', String(params.skip));
+  if (params.limit != null) query.set('limit', String(params.limit));
+  const qs = query.toString();
+  return request<AdminUserListResponse>(`/api/v1/admin/users${qs ? `?${qs}` : ''}`, {}, token);
+}
+
+export function listAdminJobRoles(token: string): Promise<JobRoleCount[]> {
+  return request<JobRoleCount[]>('/api/v1/admin/jobs', {}, token);
+}
+
+export function listAdminActivity(token: string, limit = 20): Promise<AdminActivityEvent[]> {
+  return request<AdminActivityEvent[]>(`/api/v1/admin/activity?limit=${limit}`, {}, token);
 }

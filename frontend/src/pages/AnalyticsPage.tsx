@@ -20,6 +20,7 @@ const ease = [0.4, 0, 0.2, 1] as [number, number, number, number];
 import { getAnalyticsOverview, getAnalyticsTrends, getBenchmarks } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import type { AnalyticsOverviewResponse, BenchmarkResponse, SessionTrendResponse } from '../api/types';
+import { ChartTooltip } from '../components/ChartTooltip';
 import { ErrorState } from '../components/StateMessage';
 import { StatGridSkeleton } from '../components/Skeleton';
 
@@ -35,19 +36,6 @@ function filterByRange(trends: SessionTrendResponse[], range: Range): SessionTre
   return trends.filter((t) => new Date(t.created_at) >= cutoff);
 }
 
-function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: { name: string; value: number; color: string }[]; label?: string }) {
-  if (!active || !payload?.length) return null;
-  return (
-    <div style={{ background: 'var(--surface-2)', border: '1px solid var(--border-strong)', borderRadius: 8, padding: '0.6rem 0.9rem', fontSize: '0.82rem', boxShadow: 'var(--shadow)' }}>
-      <p style={{ margin: '0 0 0.4rem', color: 'var(--muted)', fontWeight: 600 }}>{label}</p>
-      {payload.map((p) => (
-        <p key={p.name} style={{ margin: '0.15rem 0', color: p.color }}>
-          {p.name}: <strong>{p.value?.toFixed(1)}</strong>
-        </p>
-      ))}
-    </div>
-  );
-}
 
 export function AnalyticsPage() {
   const { token } = useAuth();
@@ -157,19 +145,21 @@ export function AnalyticsPage() {
               {filtered.length} session{filtered.length !== 1 ? 's' : ''}
             </span>
           </div>
-          <ResponsiveContainer width="100%" height={280}>
-            <LineChart data={chartData} margin={{ top: 4, right: 16, left: -20, bottom: 4 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-              <XAxis dataKey="name" tick={{ fontSize: 11, fill: 'var(--muted)' }} />
-              <YAxis domain={[0, 10]} tick={{ fontSize: 11, fill: 'var(--muted)' }} />
-              <Tooltip content={<ChartTooltip />} />
-              <Legend wrapperStyle={{ fontSize: '0.8rem' }} />
-              <Line type="monotone" dataKey="Overall" stroke="#3D7EFF" strokeWidth={2} dot={false} />
-              <Line type="monotone" dataKey="Communication" stroke="#22C55E" strokeWidth={2} dot={false} />
-              <Line type="monotone" dataKey="Technical" stroke="#F59E0B" strokeWidth={2} dot={false} />
-              <Line type="monotone" dataKey="Confidence" stroke="#8B5CF6" strokeWidth={2} dot={false} />
-            </LineChart>
-          </ResponsiveContainer>
+          <div role="img" aria-label={`Line chart of overall, communication, technical, and confidence scores across ${filtered.length} session${filtered.length !== 1 ? 's' : ''}`}>
+            <ResponsiveContainer width="100%" height={280}>
+              <LineChart data={chartData} margin={{ top: 4, right: 16, left: -20, bottom: 4 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                <XAxis dataKey="name" tick={{ fontSize: 11, fill: 'var(--muted)' }} />
+                <YAxis domain={[0, 10]} tick={{ fontSize: 11, fill: 'var(--muted)' }} />
+                <Tooltip content={<ChartTooltip decimals={1} />} />
+                <Legend wrapperStyle={{ fontSize: '0.8rem' }} />
+                <Line type="monotone" dataKey="Overall" stroke="#3D7EFF" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="Communication" stroke="#22C55E" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="Technical" stroke="#F59E0B" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="Confidence" stroke="#8B5CF6" strokeWidth={2} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
         </div>
       )}
 
@@ -178,14 +168,16 @@ export function AnalyticsPage() {
         {radarData && (
           <div className="section-panel">
             <h2 className="card-header-title" style={{ marginBottom: '1rem' }}>Skill Breakdown</h2>
-            <ResponsiveContainer width="100%" height={250}>
-              <RadarChart data={radarData}>
-                <PolarGrid stroke="var(--border)" />
-                <PolarAngleAxis dataKey="skill" tick={{ fontSize: 11, fill: 'var(--muted)' }} />
-                <Radar name="Average" dataKey="score" stroke="#3D7EFF" fill="#3D7EFF" fillOpacity={0.2} />
-                <Tooltip content={<ChartTooltip />} />
-              </RadarChart>
-            </ResponsiveContainer>
+            <div role="img" aria-label="Radar chart of average scores by skill dimension">
+              <ResponsiveContainer width="100%" height={250}>
+                <RadarChart data={radarData}>
+                  <PolarGrid stroke="var(--border)" />
+                  <PolarAngleAxis dataKey="skill" tick={{ fontSize: 11, fill: 'var(--muted)' }} />
+                  <Radar name="Average" dataKey="score" stroke="#3D7EFF" fill="#3D7EFF" fillOpacity={0.2} />
+                  <Tooltip content={<ChartTooltip decimals={1} />} />
+                </RadarChart>
+              </ResponsiveContainer>
+            </div>
           </div>
         )}
 

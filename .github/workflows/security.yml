@@ -48,6 +48,26 @@ jobs:
       - run: npm ci
       - run: npm audit --omit=dev
 
+  secrets-scan:
+    name: Secrets Scan (gitleaks)
+    runs-on: ubuntu-latest
+    # Informational, like pip-audit/npm-audit above: surfaces a likely
+    # committed secret without blocking merges on a false positive.
+    # gitleaks-action's free tier scans the diff on pull_request events and
+    # the full history on push; no GITLEAKS_LICENSE is required for public
+    # repos.
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   codeql:
     name: CodeQL Analysis (${{ matrix.language }})
     runs-on: ubuntu-latest

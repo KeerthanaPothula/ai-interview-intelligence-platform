@@ -11,6 +11,19 @@ export interface HealthResponse {
   audio_processing_enabled: boolean;
 }
 
+export interface ReadinessCheck {
+  ok: boolean;
+  error?: string | null;
+}
+
+export interface ReadinessResponse {
+  status: 'ready' | 'not_ready';
+  checks: {
+    database: ReadinessCheck;
+    ai_provider_configured: ReadinessCheck;
+  };
+}
+
 export type ResponseStatus = 'uploaded' | 'processing' | 'completed' | 'failed';
 
 export type SessionStatus = 'draft' | 'in_progress' | 'processing' | 'completed';
@@ -372,4 +385,102 @@ export interface ResumeAnalysisResponse {
 export interface ChangePasswordRequest {
   current_password: string;
   new_password: string;
+}
+
+// ---------------------------------------------------------------------------
+// Recruiter Dashboard (backend/app/schemas/recruiter.py)
+// ---------------------------------------------------------------------------
+
+export type CandidateStatus = 'shortlisted' | 'reviewing' | 'pending' | 'rejected';
+
+export interface CandidateResponse {
+  id: string;
+  session_id: string;
+  name: string;
+  email: string;
+  role: string;
+  resume_score: number | null;
+  interview_score: number;
+  communication: number;
+  technical: number;
+  sessions_completed: number;
+  status: CandidateStatus;
+  applied_days: number;
+}
+
+export interface CandidateSummary {
+  total_candidates: number;
+  shortlisted_count: number;
+  avg_resume_score: number | null;
+  avg_interview_score: number | null;
+}
+
+export interface CandidateListResponse {
+  items: CandidateResponse[];
+  total: number;
+  summary: CandidateSummary;
+}
+
+// ---------------------------------------------------------------------------
+// Admin Dashboard (backend/app/schemas/admin.py)
+// ---------------------------------------------------------------------------
+
+export interface AdminUserResponse {
+  id: string;
+  full_name: string;
+  email: string;
+  created_at: string;
+  sessions_completed: number;
+  latest_session_at: string | null;
+}
+
+export interface AdminUserListResponse {
+  items: AdminUserResponse[];
+  total: number;
+}
+
+export interface AiUsageStats {
+  questions_generated: number;
+  transcriptions_completed: number;
+  evaluations_completed: number;
+  reports_generated: number;
+  coaching_plans_generated: number;
+  predictions_generated: number;
+}
+
+export interface StorageStats {
+  audio_bytes: number;
+  audio_file_count: number;
+  resume_bytes: number;
+  resume_file_count: number;
+}
+
+export interface DailyCount {
+  date: string;
+  count: number;
+}
+
+export interface AdminOverviewResponse {
+  total_users: number;
+  total_sessions: number;
+  sessions_by_status: Record<string, number>;
+  total_reports: number;
+  avg_platform_score: number | null;
+  total_resumes: number;
+  ai_usage: AiUsageStats;
+  storage: StorageStats;
+  signups_last_30_days: DailyCount[];
+  sessions_last_30_days: DailyCount[];
+}
+
+export interface JobRoleCount {
+  role: string;
+  session_count: number;
+}
+
+export interface AdminActivityEvent {
+  event_type: string;
+  title: string;
+  subtitle: string | null;
+  created_at: string;
 }

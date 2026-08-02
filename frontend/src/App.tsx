@@ -3,6 +3,7 @@ import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { AuthProvider } from './context/AuthContext';
 import { FeaturesProvider } from './context/FeaturesContext';
+import { ThemeProvider } from './context/ThemeContext';
 import { ToastProvider } from './context/ToastContext';
 
 // Eagerly load the shell pages (tiny, used on first render)
@@ -41,6 +42,9 @@ const ProfilePage = lazy(() =>
 const RecruiterPage = lazy(() =>
   import('./pages/RecruiterPage').then((m) => ({ default: m.RecruiterPage })),
 );
+const AdminPage = lazy(() =>
+  import('./pages/AdminPage').then((m) => ({ default: m.AdminPage })),
+);
 
 function PageFallback() {
   return (
@@ -52,59 +56,65 @@ function PageFallback() {
 
 export default function App() {
   return (
-    <ToastProvider>
-      <AuthProvider>
-        <FeaturesProvider>
-          <BrowserRouter>
-            <Routes>
-              <Route path="/" element={<LandingPage />} />
-              <Route path="/login" element={<LoginPage />} />
-              <Route path="/register" element={<RegisterPage />} />
-              <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-              <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
-              <Route element={<Layout />}>
-                <Route
-                  path="/sessions"
-                  element={<Suspense fallback={<PageFallback />}><SessionsListPage /></Suspense>}
-                />
-                <Route
-                  path="/sessions/:sessionId"
-                  element={<Suspense fallback={<PageFallback />}><SessionDetailPage /></Suspense>}
-                />
-                <Route
-                  path="/sessions/:sessionId/report"
-                  element={<Suspense fallback={<PageFallback />}><InterviewReportPage /></Suspense>}
-                />
-                <Route
-                  path="/dashboard"
-                  element={<Suspense fallback={<PageFallback />}><DashboardPage /></Suspense>}
-                />
-                <Route
-                  path="/live-interview"
-                  element={<Suspense fallback={<PageFallback />}><LiveInterviewPage /></Suspense>}
-                />
-                <Route
-                  path="/analytics"
-                  element={<Suspense fallback={<PageFallback />}><AnalyticsPage /></Suspense>}
-                />
-                <Route
-                  path="/resume"
-                  element={<Suspense fallback={<PageFallback />}><ResumePage /></Suspense>}
-                />
-                <Route
-                  path="/profile"
-                  element={<Suspense fallback={<PageFallback />}><ProfilePage /></Suspense>}
-                />
-                <Route
-                  path="/recruiter"
-                  element={<Suspense fallback={<PageFallback />}><RecruiterPage /></Suspense>}
-                />
-              </Route>
-              <Route path="*" element={<NotFoundPage />} />
-            </Routes>
-          </BrowserRouter>
-        </FeaturesProvider>
-      </AuthProvider>
-    </ToastProvider>
+    <ThemeProvider>
+      <ToastProvider>
+        <AuthProvider>
+          <FeaturesProvider>
+            <BrowserRouter>
+              <Routes>
+                <Route path="/" element={<LandingPage />} />
+                <Route path="/login" element={<LoginPage />} />
+                <Route path="/register" element={<RegisterPage />} />
+                <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+                <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
+                <Route element={<Layout />}>
+                  <Route
+                    path="/sessions"
+                    element={<Suspense fallback={<PageFallback />}><SessionsListPage /></Suspense>}
+                  />
+                  <Route
+                    path="/sessions/:sessionId"
+                    element={<Suspense fallback={<PageFallback />}><SessionDetailPage /></Suspense>}
+                  />
+                  <Route
+                    path="/sessions/:sessionId/report"
+                    element={<Suspense fallback={<PageFallback />}><InterviewReportPage /></Suspense>}
+                  />
+                  <Route
+                    path="/dashboard"
+                    element={<Suspense fallback={<PageFallback />}><DashboardPage /></Suspense>}
+                  />
+                  <Route
+                    path="/live-interview"
+                    element={<Suspense fallback={<PageFallback />}><LiveInterviewPage /></Suspense>}
+                  />
+                  <Route
+                    path="/analytics"
+                    element={<Suspense fallback={<PageFallback />}><AnalyticsPage /></Suspense>}
+                  />
+                  <Route
+                    path="/resume"
+                    element={<Suspense fallback={<PageFallback />}><ResumePage /></Suspense>}
+                  />
+                  <Route
+                    path="/profile"
+                    element={<Suspense fallback={<PageFallback />}><ProfilePage /></Suspense>}
+                  />
+                  <Route
+                    path="/recruiter"
+                    element={<Suspense fallback={<PageFallback />}><RecruiterPage /></Suspense>}
+                  />
+                  <Route
+                    path="/admin"
+                    element={<Suspense fallback={<PageFallback />}><AdminPage /></Suspense>}
+                  />
+                </Route>
+                <Route path="*" element={<NotFoundPage />} />
+              </Routes>
+            </BrowserRouter>
+          </FeaturesProvider>
+        </AuthProvider>
+      </ToastProvider>
+    </ThemeProvider>
   );
 }

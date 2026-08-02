@@ -1,38 +1,16 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { listCandidates } from '../api/client';
+import { useAuth } from '../context/AuthContext';
+import type { CandidateResponse, CandidateStatus, CandidateSummary } from '../api/types';
+import { EmptyState, ErrorState } from '../components/StateMessage';
+import { Skeleton } from '../components/Skeleton';
 
 const ease = [0.4, 0, 0.2, 1] as [number, number, number, number];
 
-type Status = 'shortlisted' | 'reviewing' | 'rejected' | 'pending';
-
-interface Candidate {
-  id: number;
-  name: string;
-  role: string;
-  resumeScore: number;
-  interviewScore: number;
-  communication: number;
-  technical: number;
-  experience: number;
-  status: Status;
-  appliedDays: number;
-  initials: string;
-  avatarColor: string;
-}
-
-const MOCK_CANDIDATES: Candidate[] = [
-  { id: 1, name: 'Priya Sharma',    role: 'Senior Frontend Engineer',  resumeScore: 91, interviewScore: 87, communication: 90, technical: 85, experience: 6, status: 'shortlisted', appliedDays: 2, initials: 'PS', avatarColor: '#7c3aed' },
-  { id: 2, name: 'Marcus Johnson',  role: 'Full Stack Developer',       resumeScore: 83, interviewScore: 79, communication: 82, technical: 77, experience: 4, status: 'reviewing',   appliedDays: 5, initials: 'MJ', avatarColor: '#2563eb' },
-  { id: 3, name: 'Aiko Tanaka',     role: 'Backend Engineer',           resumeScore: 88, interviewScore: 92, communication: 78, technical: 94, experience: 7, status: 'shortlisted', appliedDays: 1, initials: 'AT', avatarColor: '#0891b2' },
-  { id: 4, name: 'David Okonkwo',   role: 'Senior Frontend Engineer',   resumeScore: 74, interviewScore: 68, communication: 71, technical: 65, experience: 3, status: 'rejected',    appliedDays: 9, initials: 'DO', avatarColor: '#dc2626' },
-  { id: 5, name: 'Sofia Reyes',     role: 'Full Stack Developer',       resumeScore: 79, interviewScore: 83, communication: 85, technical: 80, experience: 5, status: 'reviewing',   appliedDays: 3, initials: 'SR', avatarColor: '#059669' },
-  { id: 6, name: 'Chen Wei',        role: 'Backend Engineer',           resumeScore: 95, interviewScore: 90, communication: 88, technical: 93, experience: 9, status: 'shortlisted', appliedDays: 4, initials: 'CW', avatarColor: '#d97706' },
-  { id: 7, name: 'Fatima Al-Rashid','role': 'Senior Frontend Engineer', resumeScore: 82, interviewScore: 76, communication: 80, technical: 73, experience: 5, status: 'pending',     appliedDays: 7, initials: 'FA', avatarColor: '#7c3aed' },
-  { id: 8, name: 'James Park',      role: 'Full Stack Developer',       resumeScore: 70, interviewScore: 72, communication: 74, technical: 70, experience: 2, status: 'pending',     appliedDays: 6, initials: 'JP', avatarColor: '#6b7280' },
-];
-
+const PAGE_SIZE = 10;
 const PIPELINE_STAGES = ['Applied', 'Screened', 'Technical', 'Final Round', 'Offer'];
-const STATUS_FILTERS: { label: string; value: Status | 'all' }[] = [
+const STATUS_FILTERS: { label: string; value: CandidateStatus | 'all' }[] = [
   { label: 'All', value: 'all' },
   { label: 'Shortlisted', value: 'shortlisted' },
   { label: 'Reviewing', value: 'reviewing' },
@@ -40,9 +18,25 @@ const STATUS_FILTERS: { label: string; value: Status | 'all' }[] = [
   { label: 'Rejected', value: 'rejected' },
 ];
 
-type SortKey = 'name' | 'resumeScore' | 'interviewScore' | 'communication' | 'technical' | 'experience';
+type SortKey = 'name' | 'resumeScore' | 'interviewScore' | 'communication' | 'technical' | 'appliedDays';
 
-function ScoreBar({ value }: { value: number }) {
+const AVATAR_COLORS = ['#7c3aed', '#2563eb', '#0891b2', '#059669', '#d97706', '#dc2626'];
+
+function avatarColorFor(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+}
+
+function initialsFor(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  return ((parts[0]?.[0] ?? '') + (parts[parts.length - 1]?.[0] ?? '')).toUpperCase();
+}
+
+function ScoreBar({ value }: { value: number | null }) {
+  if (value == null) {
+    return <span style={{ color: 'var(--muted)' }}>—</span>;
+  }
   const color = value >= 85 ? '#10b981' : value >= 70 ? '#3b82f6' : '#f59e0b';
   return (
     <div className="score-with-bar">
@@ -54,8 +48,8 @@ function ScoreBar({ value }: { value: number }) {
   );
 }
 
-function StatusBadge({ status }: { status: Status }) {
-  const labels: Record<Status, string> = {
+function StatusBadge({ status }: { status: CandidateStatus }) {
+  const labels: Record<CandidateStatus, string> = {
     shortlisted: 'Shortlisted',
     reviewing: 'Reviewing',
     rejected: 'Rejected',
@@ -64,7 +58,7 @@ function StatusBadge({ status }: { status: Status }) {
   return <span className={`cand-status ${status}`}>{labels[status]}</span>;
 }
 
-function getPipelineStage(status: Status): number {
+function getPipelineStage(status: CandidateStatus): number {
   if (status === 'rejected') return -1;
   if (status === 'pending') return 0;
   if (status === 'reviewing') return 2;
@@ -72,36 +66,96 @@ function getPipelineStage(status: Status): number {
   return 0;
 }
 
+function TableSkeleton() {
+  return (
+    <div style={{ padding: '1.25rem' }}>
+      {Array.from({ length: 6 }).map((_, i) => (
+        <div key={i} style={{ display: 'flex', gap: '1rem', alignItems: 'center', padding: '0.75rem 0' }}>
+          <span className="skeleton" style={{ width: '2.25rem', height: '2.25rem', borderRadius: '50%', display: 'inline-block' }} aria-hidden="true" />
+          <Skeleton width="140px" height="0.9rem" />
+          <Skeleton width="80px" height="0.9rem" />
+          <Skeleton width="80px" height="0.9rem" />
+          <Skeleton width="80px" height="0.9rem" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function RecruiterPage() {
-  const [statusFilter, setStatusFilter] = useState<Status | 'all'>('all');
+  const { token } = useAuth();
+  const [statusFilter, setStatusFilter] = useState<CandidateStatus | 'all'>('all');
   const [sortKey, setSortKey] = useState<SortKey>('interviewScore');
   const [sortAsc, setSortAsc] = useState(false);
   const [search, setSearch] = useState('');
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [page, setPage] = useState(0);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const filtered = useMemo(() => {
-    let list = MOCK_CANDIDATES;
-    if (statusFilter !== 'all') list = list.filter((c) => c.status === statusFilter);
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      list = list.filter((c) => c.name.toLowerCase().includes(q) || c.role.toLowerCase().includes(q));
+  const [items, setItems] = useState<CandidateResponse[]>([]);
+  const [total, setTotal] = useState(0);
+  const [summary, setSummary] = useState<CandidateSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebouncedSearch(search);
+      setPage(0);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const sortKeyToApi: Record<SortKey, string> = {
+    name: 'name',
+    resumeScore: 'resumeScore',
+    interviewScore: 'interviewScore',
+    communication: 'communication',
+    technical: 'technical',
+    appliedDays: 'appliedDays',
+  };
+
+  const load = useCallback(async () => {
+    if (!token) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await listCandidates(token, {
+        search: debouncedSearch.trim() || undefined,
+        status: statusFilter === 'all' ? undefined : statusFilter,
+        sortBy: sortKeyToApi[sortKey],
+        sortDir: sortAsc ? 'asc' : 'desc',
+        skip: page * PAGE_SIZE,
+        limit: PAGE_SIZE,
+      });
+      setItems(res.items);
+      setTotal(res.total);
+      setSummary(res.summary);
+    } catch {
+      setError('Could not load candidates. Please try again.');
+    } finally {
+      setLoading(false);
     }
-    list = [...list].sort((a, b) => {
-      const av = sortKey === 'name' ? a.name : a[sortKey];
-      const bv = sortKey === 'name' ? b.name : b[sortKey];
-      if (typeof av === 'string' && typeof bv === 'string') {
-        return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
-      }
-      return sortAsc ? (av as number) - (bv as number) : (bv as number) - (av as number);
-    });
-    return list;
-  }, [statusFilter, sortKey, sortAsc, search]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, debouncedSearch, statusFilter, sortKey, sortAsc, page]);
 
-  const selected = selectedId != null ? MOCK_CANDIDATES.find((c) => c.id === selectedId) ?? null : null;
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- standard data-fetching pattern
+    load();
+  }, [load]);
+
+  const selected = useMemo(
+    () => (selectedId != null ? items.find((c) => c.id === selectedId) ?? null : null),
+    [items, selectedId],
+  );
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) setSortAsc((a) => !a);
-    else { setSortKey(key); setSortAsc(false); }
+    else {
+      setSortKey(key);
+      setSortAsc(false);
+    }
+    setPage(0);
   };
 
   const thLabel = (key: SortKey, label: string) => (
@@ -109,12 +163,14 @@ export function RecruiterPage() {
       className={sortKey === key ? 'sorted' : ''}
       onClick={() => handleSort(key)}
       aria-sort={sortKey === key ? (sortAsc ? 'ascending' : 'descending') : 'none'}
+      style={{ cursor: 'pointer' }}
     >
       {label} {sortKey === key ? (sortAsc ? '↑' : '↓') : ''}
     </th>
   );
 
   const pipelineStage = selected ? getPipelineStage(selected.status) : -1;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
     <motion.div
@@ -126,9 +182,9 @@ export function RecruiterPage() {
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
-          <h1 style={{ margin: '0 0 0.3rem', fontSize: '1.5rem', fontWeight: 800 }}>Recruiter Dashboard</h1>
-          <p style={{ margin: 0, color: 'var(--muted)', fontSize: '0.9rem' }}>
-            {MOCK_CANDIDATES.length} candidates · {MOCK_CANDIDATES.filter((c) => c.status === 'shortlisted').length} shortlisted
+          <h1 style={{ margin: 0, fontSize: '1.35rem' }}>Recruiter Dashboard</h1>
+          <p style={{ margin: '0.2rem 0 0', color: 'var(--muted)', fontSize: '0.875rem' }}>
+            {total} candidate{total === 1 ? '' : 's'} · {summary?.shortlisted_count ?? 0} shortlisted
           </p>
         </div>
         <input
@@ -136,9 +192,29 @@ export function RecruiterPage() {
           placeholder="Search candidates…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          style={{ padding: '0.45rem 0.875rem', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text)', fontSize: '0.875rem', minWidth: '220px' }}
+          style={{ padding: '0.45rem 0.875rem', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text)', fontSize: '0.875rem', minWidth: '220px', width: '100%', maxWidth: '280px' }}
           aria-label="Search candidates"
         />
+      </div>
+
+      {/* Summary stats */}
+      <div className="stat-grid">
+        <div className="stat-card">
+          <div className="stat-value">{total}</div>
+          <div className="stat-label">Total Candidates</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-value">{summary?.shortlisted_count ?? 0}</div>
+          <div className="stat-label">Shortlisted</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-value">{summary?.avg_resume_score ?? '—'}</div>
+          <div className="stat-label">Avg Resume Score</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-value">{summary?.avg_interview_score ?? '—'}</div>
+          <div className="stat-label">Avg Interview Score</div>
+        </div>
       </div>
 
       {/* Filters */}
@@ -148,7 +224,10 @@ export function RecruiterPage() {
             key={f.value}
             type="button"
             className={`recruiter-filter-chip${statusFilter === f.value ? ' active' : ''}`}
-            onClick={() => setStatusFilter(f.value)}
+            onClick={() => {
+              setStatusFilter(f.value);
+              setPage(0);
+            }}
             aria-pressed={statusFilter === f.value}
           >
             {f.label}
@@ -157,59 +236,101 @@ export function RecruiterPage() {
       </div>
 
       {/* Main layout: table + detail panel */}
-      <div style={{ display: 'grid', gridTemplateColumns: selected ? '1fr 380px' : '1fr', gap: '1.25rem', alignItems: 'start' }}>
+      <div className={`recruiter-layout${selected ? ' has-detail' : ''}`}>
         {/* Table */}
         <div className="section-panel" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
-          <div className="recruiter-table-wrap">
-            <table className="recruiter-table" aria-label="Candidate rankings">
-              <thead>
-                <tr>
-                  {thLabel('name', 'Candidate')}
-                  {thLabel('resumeScore', 'Resume')}
-                  {thLabel('interviewScore', 'Interview')}
-                  {thLabel('communication', 'Comm.')}
-                  {thLabel('technical', 'Technical')}
-                  {thLabel('experience', 'Exp.')}
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((c) => (
-                  <tr
-                    key={c.id}
-                    onClick={() => setSelectedId(c.id === selectedId ? null : c.id)}
-                    aria-selected={c.id === selectedId}
-                    style={c.id === selectedId ? { background: 'var(--primary-dim)' } : {}}
+          {loading ? (
+            <TableSkeleton />
+          ) : error ? (
+            <div style={{ padding: '2rem' }}>
+              <ErrorState message={error} onRetry={load} />
+            </div>
+          ) : items.length === 0 ? (
+            <div style={{ padding: '2rem' }}>
+              <EmptyState
+                title="No candidates found"
+                description={
+                  total === 0 && !debouncedSearch && statusFilter === 'all'
+                    ? 'Candidates appear here once users complete an interview session.'
+                    : 'No candidates match the current filters.'
+                }
+              />
+            </div>
+          ) : (
+            <>
+              <div className="recruiter-table-wrap">
+                <table className="recruiter-table" aria-label="Candidate rankings">
+                  <thead>
+                    <tr>
+                      {thLabel('name', 'Candidate')}
+                      {thLabel('resumeScore', 'Resume')}
+                      {thLabel('interviewScore', 'Interview')}
+                      {thLabel('communication', 'Comm.')}
+                      {thLabel('technical', 'Technical')}
+                      {thLabel('appliedDays', 'Applied')}
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.map((c) => {
+                      const color = avatarColorFor(c.name);
+                      return (
+                        <tr
+                          key={c.id}
+                          onClick={() => setSelectedId(c.id === selectedId ? null : c.id)}
+                          aria-selected={c.id === selectedId}
+                          style={c.id === selectedId ? { background: 'var(--primary-dim)' } : {}}
+                        >
+                          <td>
+                            <div className="cand-name-cell">
+                              <div className="cand-avatar" style={{ background: color + '22', color }}>
+                                {initialsFor(c.name)}
+                              </div>
+                              <div>
+                                <div>{c.name}</div>
+                                <div className="cand-sub">{c.role}</div>
+                              </div>
+                            </div>
+                          </td>
+                          <td><ScoreBar value={c.resume_score} /></td>
+                          <td><ScoreBar value={c.interview_score} /></td>
+                          <td><ScoreBar value={c.communication} /></td>
+                          <td><ScoreBar value={c.technical} /></td>
+                          <td style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>
+                            {c.applied_days === 0 ? 'Today' : `${c.applied_days}d ago`}
+                          </td>
+                          <td><StatusBadge status={c.status} /></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.875rem 1.25rem', borderTop: '1px solid var(--border)' }}>
+                <span style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>
+                  Page {page + 1} of {totalPages}
+                </span>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    disabled={page === 0}
+                    onClick={() => setPage((p) => Math.max(0, p - 1))}
                   >
-                    <td>
-                      <div className="cand-name-cell">
-                        <div className="cand-avatar" style={{ background: c.avatarColor + '22', color: c.avatarColor }}>
-                          {c.initials}
-                        </div>
-                        <div>
-                          <div>{c.name}</div>
-                          <div className="cand-sub">{c.role}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td><ScoreBar value={c.resumeScore} /></td>
-                    <td><ScoreBar value={c.interviewScore} /></td>
-                    <td><ScoreBar value={c.communication} /></td>
-                    <td><ScoreBar value={c.technical} /></td>
-                    <td style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{c.experience}y</td>
-                    <td><StatusBadge status={c.status} /></td>
-                  </tr>
-                ))}
-                {filtered.length === 0 && (
-                  <tr>
-                    <td colSpan={7} style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--muted)' }}>
-                      No candidates match the current filters.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+                    Previous
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    disabled={page + 1 >= totalPages}
+                    onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
         {/* Candidate detail panel */}
@@ -224,8 +345,8 @@ export function RecruiterPage() {
               transition={{ duration: 0.25, ease }}
             >
               <div className="cand-detail-hd">
-                <div className="cand-detail-avatar" style={{ background: selected.avatarColor + '22', color: selected.avatarColor }}>
-                  {selected.initials}
+                <div className="cand-detail-avatar" style={{ background: avatarColorFor(selected.name) + '22', color: avatarColorFor(selected.name) }}>
+                  {initialsFor(selected.name)}
                 </div>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 800, fontSize: '1rem' }}>{selected.name}</div>
@@ -245,16 +366,16 @@ export function RecruiterPage() {
 
               <div className="cand-detail-scores">
                 {[
-                  { label: 'Resume Score', value: selected.resumeScore },
-                  { label: 'Interview Score', value: selected.interviewScore },
+                  { label: 'Resume Score', value: selected.resume_score },
+                  { label: 'Interview Score', value: selected.interview_score },
                   { label: 'Communication', value: selected.communication },
                   { label: 'Technical', value: selected.technical },
                 ].map((m) => {
-                  const color = m.value >= 85 ? '#10b981' : m.value >= 70 ? '#3b82f6' : '#f59e0b';
+                  const color = m.value == null ? 'var(--muted)' : m.value >= 85 ? '#10b981' : m.value >= 70 ? '#3b82f6' : '#f59e0b';
                   return (
                     <div key={m.label} className="cand-metric">
                       <div className="cand-metric-label">{m.label}</div>
-                      <div className="cand-metric-val" style={{ color }}>{m.value}</div>
+                      <div className="cand-metric-val" style={{ color }}>{m.value ?? '—'}</div>
                     </div>
                   );
                 })}
@@ -278,6 +399,9 @@ export function RecruiterPage() {
                       </div>
                     );
                   })}
+                </div>
+                <div style={{ marginTop: '0.6rem', fontSize: '0.75rem', color: 'var(--muted)' }}>
+                  {selected.sessions_completed} interview{selected.sessions_completed === 1 ? '' : 's'} completed
                 </div>
               </div>
 

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowLeft, Award, BookOpen, Calendar, RefreshCw, TrendingUp } from 'lucide-react';
+import { ArrowLeft, Award, BookOpen, Calendar, Download, RefreshCw, TrendingUp } from 'lucide-react';
 import {
   ApiError,
   generateCoachingPlan,
@@ -235,6 +235,10 @@ export function InterviewReportPage() {
     }
   }
 
+  function handleExportPdf() {
+    window.print();
+  }
+
   async function handleGenerateCoaching() {
     if (!token || !sessionId) return;
     setGeneratingCoaching(true);
@@ -279,18 +283,31 @@ export function InterviewReportPage() {
     <div className="page-container">
       {/* Header */}
       <FadeUp delay={0}>
-        <div style={{ marginBottom: '1.5rem' }}>
-          <BackLink sessionId={sessionId} />
-          <h1 style={{ margin: '0.75rem 0 0.2rem', fontSize: '1.4rem' }}>
-            {session?.title ?? 'Interview Report'}
-          </h1>
-          <p style={{ margin: 0, color: 'var(--muted)', fontSize: '0.875rem' }}>
-            {session?.job_role} · {session ? new Date(session.created_at).toLocaleDateString() : ''}
-          </p>
-          {readiness && (
-            <div style={{ marginTop: '0.75rem' }}>
-              <ReadinessBadge level={readiness.readiness_level} score={readiness.readiness_score} />
-            </div>
+        <div style={{ marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
+          <div>
+            <BackLink sessionId={sessionId} />
+            <h1 style={{ margin: '0.75rem 0 0.2rem', fontSize: '1.4rem' }}>
+              {session?.title ?? 'Interview Report'}
+            </h1>
+            <p style={{ margin: 0, color: 'var(--muted)', fontSize: '0.875rem' }}>
+              {session?.job_role} · {session ? new Date(session.created_at).toLocaleDateString() : ''}
+            </p>
+            {readiness && (
+              <div style={{ marginTop: '0.75rem' }}>
+                <ReadinessBadge level={readiness.readiness_level} score={readiness.readiness_score} />
+              </div>
+            )}
+          </div>
+          {report && (
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm no-print"
+              onClick={handleExportPdf}
+              style={{ flexShrink: 0 }}
+            >
+              <Download size={14} aria-hidden="true" />
+              Export to PDF
+            </button>
           )}
         </div>
       </FadeUp>
@@ -306,7 +323,7 @@ export function InterviewReportPage() {
               </div>
               <button
                 type="button"
-                className="btn btn-ghost btn-sm"
+                className="btn btn-ghost btn-sm no-print"
                 onClick={handleGenerateReport}
                 disabled={generatingReport}
                 aria-label="Regenerate report"
@@ -320,14 +337,18 @@ export function InterviewReportPage() {
               <ScoreCircle label="Communication" value={report.communication_score} color={scoreColors.Communication} />
               <ScoreCircle label="Technical" value={report.technical_score} color={scoreColors.Technical} />
               <ScoreCircle label="Problem Solving" value={report.problem_solving_score} color={scoreColors['Problem Solving']} />
-              <ScoreCircle label="Confidence" value={report.confidence_score} color={scoreColors.Confidence} />
+              <ScoreCircle
+                label="Confidence"
+                value={report.confidence_score != null ? report.confidence_score / 10 : null}
+                color={scoreColors.Confidence}
+              />
             </div>
           </div>
         ) : (
           <div className="section-panel" style={{ marginBottom: '1.25rem', textAlign: 'center', padding: '2.5rem' }}>
             <BookOpen size={32} style={{ color: 'var(--muted)', marginBottom: '0.75rem' }} aria-hidden="true" />
             <p style={{ margin: '0 0 1rem', color: 'var(--muted)' }}>No report yet. Generate a comprehensive AI report for this session.</p>
-            <button type="button" className="btn btn-primary" onClick={handleGenerateReport} disabled={generatingReport}>
+            <button type="button" className="btn btn-primary no-print" onClick={handleGenerateReport} disabled={generatingReport}>
               {generatingReport ? 'Generating…' : 'Generate Report'}
             </button>
           </div>
@@ -408,7 +429,7 @@ export function InterviewReportPage() {
                 </div>
                 <button
                   type="button"
-                  className="btn btn-ghost btn-sm"
+                  className="btn btn-ghost btn-sm no-print"
                   onClick={handleGenerateReadiness}
                   disabled={generatingReadiness}
                   aria-label="Refresh readiness assessment"
@@ -439,7 +460,7 @@ export function InterviewReportPage() {
           ) : (
             <div className="section-panel" style={{ textAlign: 'center', padding: '1.5rem' }}>
               <p style={{ margin: '0 0 0.75rem', color: 'var(--muted)', fontSize: '0.875rem' }}>No readiness assessment yet.</p>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={handleGenerateReadiness} disabled={generatingReadiness}>
+              <button type="button" className="btn btn-ghost btn-sm no-print" onClick={handleGenerateReadiness} disabled={generatingReadiness}>
                 {generatingReadiness ? 'Generating…' : 'Generate Readiness Assessment'}
               </button>
             </div>
@@ -454,7 +475,7 @@ export function InterviewReportPage() {
         ) : (
           <div className="section-panel" style={{ textAlign: 'center', padding: '1.5rem' }}>
             <p style={{ margin: '0 0 0.75rem', color: 'var(--muted)', fontSize: '0.875rem' }}>No coaching plan yet.</p>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={handleGenerateCoaching} disabled={generatingCoaching}>
+            <button type="button" className="btn btn-ghost btn-sm no-print" onClick={handleGenerateCoaching} disabled={generatingCoaching}>
               {generatingCoaching ? 'Generating…' : 'Generate Coaching Plan'}
             </button>
           </div>

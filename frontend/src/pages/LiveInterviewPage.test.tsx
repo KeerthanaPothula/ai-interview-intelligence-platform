@@ -69,13 +69,13 @@ describe('LiveInterviewPage', () => {
   it('renders the setup form by default', () => {
     renderPage();
     expect(screen.getByText('Live AI Interview')).toBeTruthy();
-    expect(screen.getByLabelText('Target Job Role')).toBeTruthy();
+    expect(screen.getByLabelText('Target Role')).toBeTruthy();
     expect(screen.getByText('Start Interview')).toBeTruthy();
   });
 
   it('shows validation error if job description is too short', async () => {
     renderPage();
-    await userEvent.type(screen.getByLabelText('Target Job Role'), 'Engineer');
+    await userEvent.type(screen.getByLabelText('Target Role'), 'Engineer');
     await userEvent.type(screen.getByLabelText('Job Description'), 'short');
     await userEvent.click(screen.getByText('Start Interview'));
     expect(screen.getByText(/at least 20 characters/i)).toBeTruthy();
@@ -85,7 +85,7 @@ describe('LiveInterviewPage', () => {
     vi.spyOn(client, 'startLiveInterview').mockResolvedValue(MOCK_SESSION);
 
     renderPage();
-    await userEvent.type(screen.getByLabelText('Target Job Role'), 'Software Engineer');
+    await userEvent.type(screen.getByLabelText('Target Role'), 'Software Engineer');
     await userEvent.type(
       screen.getByLabelText('Job Description'),
       'A Python backend engineering role with FastAPI.',
@@ -102,7 +102,7 @@ describe('LiveInterviewPage', () => {
     vi.spyOn(client, 'startLiveInterview').mockResolvedValue(MOCK_SESSION);
 
     renderPage();
-    await userEvent.type(screen.getByLabelText('Target Job Role'), 'Engineer');
+    await userEvent.type(screen.getByLabelText('Target Role'), 'Engineer');
     await userEvent.type(
       screen.getByLabelText('Job Description'),
       'A Python backend engineering role with FastAPI.',
@@ -118,7 +118,7 @@ describe('LiveInterviewPage', () => {
     vi.spyOn(client, 'startLiveInterview').mockResolvedValue(MOCK_SESSION);
 
     renderPage();
-    await userEvent.type(screen.getByLabelText('Target Job Role'), 'Engineer');
+    await userEvent.type(screen.getByLabelText('Target Role'), 'Engineer');
     await userEvent.type(
       screen.getByLabelText('Job Description'),
       'A Python backend engineering role with FastAPI.',
@@ -141,7 +141,7 @@ describe('LiveInterviewPage', () => {
     });
 
     renderPage();
-    await userEvent.type(screen.getByLabelText('Target Job Role'), 'Engineer');
+    await userEvent.type(screen.getByLabelText('Target Role'), 'Engineer');
     await userEvent.type(
       screen.getByLabelText('Job Description'),
       'A Python backend engineering role with FastAPI.',
@@ -164,7 +164,7 @@ describe('LiveInterviewPage', () => {
     vi.spyOn(client, 'startLiveInterview').mockRejectedValue(new Error('Network error'));
 
     renderPage();
-    await userEvent.type(screen.getByLabelText('Target Job Role'), 'Engineer');
+    await userEvent.type(screen.getByLabelText('Target Role'), 'Engineer');
     await userEvent.type(
       screen.getByLabelText('Job Description'),
       'A Python backend engineering role with FastAPI.',

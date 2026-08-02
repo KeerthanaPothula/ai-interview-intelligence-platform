@@ -9,13 +9,25 @@ career coaching.**
 
 [![CI](https://github.com/KeerthanaPothula/ai-interview-intelligence-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/KeerthanaPothula/ai-interview-intelligence-platform/actions/workflows/ci.yml)
 [![Security](https://github.com/KeerthanaPothula/ai-interview-intelligence-platform/actions/workflows/security.yml/badge.svg)](https://github.com/KeerthanaPothula/ai-interview-intelligence-platform/actions/workflows/security.yml)
-![Coverage](https://img.shields.io/badge/coverage-backend%2081%25%20%7C%20frontend%2025%25-yellow)
+![Coverage](https://img.shields.io/badge/coverage-backend%2080%25%20%7C%20frontend%2010%25-yellow)
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Last commit](https://img.shields.io/github/last-commit/KeerthanaPothula/ai-interview-intelligence-platform)
 
+**[Live demo](#screenshots)** · **[Architecture](#architecture)** · **[API docs](docs/API.md)**
+
 </div>
+
+---
+
+### Demo
+
+> An animated walkthrough (resume upload → live interview → readiness report)
+> is not recorded yet — see the [Roadmap](#roadmap). In the meantime, the
+> [Screenshots](#screenshots) section below shows every major screen from a
+> real running instance, and the landing page (`/`) includes a captured
+> screenshot carousel of the same views.
 
 ---
 
@@ -24,18 +36,24 @@ career coaching.**
 - [Overview](#overview)
 - [Features](#features)
 - [Architecture](#architecture)
+- [AI pipeline](#ai-pipeline)
 - [Tech stack](#tech-stack)
+- [Folder structure](#folder-structure)
 - [Database](#database)
 - [API](#api)
 - [Local setup](#local-setup)
+- [Environment variables](#environment-variables)
 - [Deployment](#deployment)
 - [Testing](#testing)
 - [CI/CD](#cicd)
 - [Monitoring & observability](#monitoring--observability)
+- [Performance](#performance)
 - [Security](#security)
 - [Screenshots](#screenshots)
 - [Documentation](#documentation)
+- [Contributing](#contributing)
 - [Roadmap](#roadmap)
+- [Acknowledgements](#acknowledgements)
 - [License](#license)
 
 ---
@@ -147,6 +165,28 @@ step-by-step AI pipelines (Whisper, Gemini evaluation, voice analytics,
 RAG, live interviews, readiness scoring, coaching) are in
 **[docs/AI_PIPELINE.md](docs/AI_PIPELINE.md)**.
 
+## AI pipeline
+
+Seven stages, from upload to the recruiter-facing dashboard:
+
+```mermaid
+flowchart LR
+    A["Resume Upload"] --> B["Resume Analysis\n(sentence-transformers RAG)"]
+    B --> C["Question Generation\n(Gemini)"]
+    C --> D["Live AI Interview\n(adaptive follow-ups)"]
+    D --> E["Voice Analytics\n(Whisper + librosa)"]
+    E --> F["Performance Report\n(readiness score + coaching plan)"]
+    F --> G["Recruiter Dashboard"]
+```
+
+1. **Resume Upload** — PDF/DOCX parsed and chunked into 200-word overlapping windows.
+2. **Resume Analysis** — chunks embedded with `sentence-transformers` (`all-MiniLM-L6-v2`); cosine-similarity retrieval grounds question generation in the candidate's actual experience (RAG).
+3. **Question Generation** — Gemini generates categorized (behavioral/technical/situational) questions from the resume + target job description.
+4. **Live AI Interview** — a multi-turn conversational session where each follow-up question is generated from the candidate's prior answer.
+5. **Voice Analytics** — Whisper transcribes recorded answers; `librosa` derives speaking rate, pauses, filler words, and energy consistency.
+6. **Performance Report** — Gemini produces a holistic report; a transparent, documented weighted formula computes the Interview Readiness Score (not a trained outcome-prediction model — see [docs/AI_PIPELINE.md §9](docs/AI_PIPELINE.md#9-interview-readiness-scoring--benchmarking-prediction_servicepy-benchmark_servicepy)).
+7. **Recruiter Dashboard** — every candidate's latest completed interview aggregated into a searchable, sortable, paginated ranking.
+
 ## Tech stack
 
 ### Backend
@@ -208,9 +248,40 @@ RAG, live interviews, readiness scoring, coaching) are in
 
 | Technology | Purpose |
 |---|---|
-| pytest + httpx | Backend (251 tests) |
+| pytest + httpx | Backend (267 tests) |
 | Vitest + React Testing Library | Frontend (31 tests) |
 | Playwright | End-to-end (1 full-flow spec, local only — requires real Gemini key) |
+
+## Folder structure
+
+```
+ai-interview-intelligence-platform/
+├── backend/
+│   ├── app/
+│   │   ├── main.py            # FastAPI app, middleware, health/ready/metrics
+│   │   ├── config.py          # Typed, validated settings (pydantic-settings)
+│   │   ├── database.py        # SQLAlchemy engine/session
+│   │   ├── models/            # ORM models (user, interview, analysis, documents, features, prediction, ...)
+│   │   ├── schemas/           # Pydantic request/response schemas, one file per domain
+│   │   ├── routers/           # FastAPI routers — one file per resource (auth, interviews, admin, recruiter, ...)
+│   │   ├── services/          # Business logic: Gemini/Whisper/RAG calls, aggregation, scoring
+│   │   └── core/              # Cross-cutting: security, rate limiting, middleware, observability
+│   ├── alembic/                # Database migrations
+│   ├── tests/                  # pytest suite (267 tests)
+│   └── requirements.txt
+├── frontend/
+│   ├── src/
+│   │   ├── pages/              # One component per route (Dashboard, Resume, Recruiter, Admin, ...)
+│   │   ├── components/         # Shared UI (Sidebar, TopBar, cards, skeletons, carousel, ...)
+│   │   ├── api/                 # Typed fetch client + response types (client.ts, types.ts)
+│   │   ├── context/             # React context providers (Auth, Theme, Toast, Features)
+│   │   └── index.css            # Design-token system + every component's styles
+│   └── package.json
+├── docs/                        # Architecture, API, database, deployment, security, testing docs
+├── docker-compose.yml            # Local dev stack (backend + PostgreSQL)
+├── render.yaml                   # Render Blueprint (production backend)
+└── .env.example                  # Every environment variable, documented inline
+```
 
 ## Database
 
@@ -236,9 +307,10 @@ lists, cascade behavior, and the 7-revision migration history) is in
 
 ## API
 
-27 endpoints across health/observability, auth, interview sessions,
+53 endpoints across health/observability, auth, interview sessions,
 audio responses, processing, follow-ups, session reports, live
-conversational interviews, resume/RAG, and readiness scoring/coaching.
+conversational interviews, resume/RAG, readiness scoring/coaching,
+recruiter aggregation, and the admin dashboard.
 All routes except `/health`, `/ready`, `/metrics`, and the auth
 register/login/refresh endpoints require `Authorization: Bearer <token>`.
 Interactive docs (`/docs`, `/redoc`) are available whenever `DEBUG=true`.
@@ -262,6 +334,9 @@ Interactive docs (`/docs`, `/redoc`) are available whenever `DEBUG=true`.
 | `POST` | `/api/v1/documents/resume/upload` | Upload a resume for RAG |
 | `POST` | `/api/v1/interviews/{id}/readiness` | Compute the interview readiness score |
 | `POST` | `/api/v1/interviews/{id}/coaching-plan` | Generate a career coaching plan |
+| `GET` | `/api/v1/recruiter/candidates` | Paginated, searchable, sortable candidate ranking |
+| `GET` | `/api/v1/admin/overview` | Platform-wide usage, AI activity, and storage stats |
+| `GET` | `/api/v1/admin/users` | Every registered user with session activity |
 
 Every endpoint — including full request/response JSON examples and error
 codes — is documented in **[docs/API.md](docs/API.md)**.
@@ -296,9 +371,33 @@ cp .env.example .env   # VITE_API_BASE_URL=http://localhost:8000
 npm run dev
 ```
 
-Frontend at `http://localhost:5173`. Full setup, every environment
-variable, common commands, a debugging guide, and the migration workflow
-are in **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**.
+Frontend at `http://localhost:5173`. Full setup, common commands, a
+debugging guide, and the migration workflow are in
+**[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**.
+
+## Environment variables
+
+All variables live in **[.env.example](.env.example)**, documented inline
+at the point of use. The ones you actually need to set for local dev:
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `DATABASE_URL` | Yes | SQLAlchemy connection string (PostgreSQL in Docker/prod) |
+| `JWT_SECRET_KEY` | Yes | Signs/verifies access & refresh tokens — generate with `openssl rand -hex 32` |
+| `GEMINI_API_KEY` | Yes | Google AI Studio key — questions, evaluation, RAG, live interviews, coaching |
+| `CORS_ORIGINS` | Yes | Comma-separated allow-list; empty disables credentialed CORS entirely |
+| `ENVIRONMENT` | No (default `development`) | `development` \| `production` — gates traceback detail and `/docs` |
+| `DEBUG` | No (default `true`) | Must be `false` in production |
+| `WHISPER_MODEL` | No (default `base`) | Whisper model size — bigger = more accurate, slower, more RAM |
+| `ENABLE_AUDIO_PROCESSING` | No (default `true`) | Kill switch for the Whisper/voice pipeline |
+| `MAX_UPLOAD_SIZE_MB` | No (default `50`) | Audio/resume upload ceiling |
+| `ENABLE_METRICS` | No (default `true`) | Toggles the `/metrics` Prometheus endpoint |
+| `ENABLE_TRACING` | No (default `false`) | Opt-in OpenTelemetry tracing |
+| `VITE_API_BASE_URL` | Yes (frontend) | Backend origin the SPA calls — set in `frontend/.env` |
+
+The full list (29 variables total, including JWT expiry, transcription
+limits, rate-limit tuning, and OpenTelemetry exporter config) is in
+`.env.example` and **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**.
 
 ## Deployment
 
@@ -330,14 +429,16 @@ platform-specific notes (Railway alternative) are in
 ## Testing
 
 ```bash
-cd backend && pytest --cov=app --cov-report=term-missing   # 251 tests, 81% coverage
-cd frontend && npm run coverage                             # 31 tests, ~25% coverage
+cd backend && pytest --cov=app --cov-report=term-missing   # 267 tests
+cd frontend && npm run coverage                             # 31 tests
 cd frontend && npx playwright test                          # E2E — requires real GEMINI_API_KEY + running stack
 ```
 
-Backend coverage is healthy (81%) across auth, session CRUD, the
+Backend coverage is healthy (80%) across auth, session CRUD, the
 processing pipeline state machine, and security controls. Frontend
-coverage is low (~25%) and concentrated on a few components built
+coverage is low (~10%, and dropped from ~25% as new pages shipped without
+tests alongside them — see [docs/TESTING.md](docs/TESTING.md)) and
+concentrated on a few components built
 test-first — several pages currently have zero coverage. This gap is
 documented honestly, not hidden, in
 **[docs/TESTING.md](docs/TESTING.md)**, along with what's well-tested and
@@ -349,8 +450,10 @@ Two GitHub Actions workflows run on every push to `main` and every pull
 request:
 
 - **`ci.yml`** — backend lint (`ruff` + `black`), frontend lint
-  (`eslint`), backend tests + coverage, frontend tests + coverage,
-  frontend build verification, and a Docker build validation.
+  (`eslint`), backend tests + coverage (gated at 75%), frontend tests +
+  coverage (gated at a low 7-8% tripwire, not a quality bar — see
+  [Testing](#testing)), frontend build verification, and a Docker build
+  validation.
 - **`security.yml`** — `pip-audit`, `npm audit`, and GitHub CodeQL static
   analysis.
 
@@ -372,6 +475,34 @@ Full job-by-job breakdown in **[docs/INFRASTRUCTURE.md](docs/INFRASTRUCTURE.md)*
 
 Full detail in **[docs/INFRASTRUCTURE.md](docs/INFRASTRUCTURE.md)**.
 
+## Performance
+
+**Backend**
+- Indexed foreign keys and status/timestamp columns on every high-traffic
+  table; `joinedload`/`selectinload` used at the known N+1 sites
+  (responses, processing, live interview) instead of lazy per-row queries.
+- Route-level pagination (`skip`/`limit`, capped at 100) on session,
+  recruiter, and admin list endpoints.
+- Background tasks for audio processing so upload requests return
+  immediately instead of blocking on Whisper/Gemini.
+
+**Frontend**
+- Route-based code splitting (`React.lazy` + `Suspense`) — every
+  authenticated page ships as its own chunk, confirmed in the production
+  build output (`AdminPage`, `RecruiterPage`, `AnalyticsPage`, etc. are all
+  separate `dist/assets/*.js` files, not bundled into one).
+- `useMemo`/`useCallback` on derived chart data and expensive filtering
+  (recruiter/admin tables, analytics trend filtering).
+- Skeleton loading states everywhere data is fetched, so the UI never
+  blocks on a blank screen.
+
+**Known gap, documented honestly, not hidden:** there's no Redis (or
+other) response cache — every request hits PostgreSQL directly. At this
+project's scale that's the right trade-off (a cache adds an invalidation
+problem for very little payoff at low request volume); see
+[docs/AI_PIPELINE.md](docs/AI_PIPELINE.md) and the [Roadmap](#roadmap)
+for what a horizontally-scaled deployment would need instead.
+
 ## Security
 
 - JWT access tokens with an instantly-revocable `token_version` claim;
@@ -392,21 +523,24 @@ root **[SECURITY.md](SECURITY.md)** (with a short pointer at
 
 ## Screenshots
 
-Four screenshots were captured automatically from a real running stack.
-Seven more require a completed interview session with Gemini-generated
-questions and Whisper transcription — see
-[docs/screenshots.md](docs/screenshots.md) for the full capture checklist.
+The landing page (`/`) embeds a live, auto-advancing carousel of the
+screenshots below — all captured from a real running instance (seeded
+data, not mockups). The same files live in
+`frontend/public/screenshots/`.
 
 | View | File |
 |---|---|
-| Landing page | see [docs/screenshots.md](docs/screenshots.md) |
-| Login | [docs/screenshots/01-login.png](docs/screenshots/01-login.png) |
-| Register | [docs/screenshots/02-register.png](docs/screenshots/02-register.png) |
-| Sessions list (with resume upload) | [docs/screenshots/03-session-list.png](docs/screenshots/03-session-list.png) |
-| Session detail | [docs/screenshots/04-session-detail.png](docs/screenshots/04-session-detail.png) |
-| Question list (after generation) | requires Gemini key — see [docs/screenshots.md](docs/screenshots.md) |
-| Processing status / Transcript / Analysis | requires Gemini key — see [docs/screenshots.md](docs/screenshots.md) |
-| Session report / Dashboard | requires Gemini key — see [docs/screenshots.md](docs/screenshots.md) |
+| Landing page | [frontend/public/screenshots/landing.png](frontend/public/screenshots/landing.png) |
+| Dashboard | [frontend/public/screenshots/dashboard.png](frontend/public/screenshots/dashboard.png) |
+| Resume analysis | [frontend/public/screenshots/resume.png](frontend/public/screenshots/resume.png) |
+| Live AI interview | [frontend/public/screenshots/interview.png](frontend/public/screenshots/interview.png) |
+| Analytics center | [frontend/public/screenshots/analytics.png](frontend/public/screenshots/analytics.png) |
+| Recruiter dashboard | [frontend/public/screenshots/recruiter.png](frontend/public/screenshots/recruiter.png) |
+| Admin dashboard | [frontend/public/screenshots/admin.png](frontend/public/screenshots/admin.png) |
+
+An earlier, separate set of auth-flow screenshots (login, register, an
+empty session list/detail) lives in `docs/screenshots/` — see
+[docs/screenshots.md](docs/screenshots.md).
 
 ## Documentation
 
@@ -414,6 +548,7 @@ questions and Whisper transcription — see
 |---|---|
 | [docs/PRODUCTION_DEPLOYMENT.md](docs/PRODUCTION_DEPLOYMENT.md) | **Production deploy: Neon + Render + Vercel (start here)** |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System, request-flow, auth-flow, deployment diagrams |
+| [docs/FOLDER_STRUCTURE.md](docs/FOLDER_STRUCTURE.md) | File-by-file map of both codebases |
 | [docs/DATABASE.md](docs/DATABASE.md) | Full ER diagram, table reference, migrations |
 | [docs/API.md](docs/API.md) | Every endpoint, with request/response examples |
 | [docs/AI_PIPELINE.md](docs/AI_PIPELINE.md) | Step-by-step AI processing pipelines |
@@ -427,6 +562,21 @@ questions and Whisper transcription — see
 | [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | PR workflow, GitHub project setup |
 | [docs/CHANGELOG.md](docs/CHANGELOG.md) | Project history by date |
 | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | Community standards |
+
+## Contributing
+
+Issues, bug reports, and pull requests are welcome.
+
+1. For anything beyond a small fix, open an issue first so the approach
+   can be discussed before you invest time in an implementation.
+2. Fork the repo, branch off `main`, keep the change focused.
+3. Before opening a PR: backend `ruff check .`, `black --check .`,
+   `pytest`; frontend `npm run lint`, `npm run test`, `npm run build`.
+4. Open a PR against `main`; CI must pass.
+
+Full workflow, commit-message conventions, and review expectations are in
+**[docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)**. Participation means
+agreeing to the **[Code of Conduct](CODE_OF_CONDUCT.md)**.
 
 ## Roadmap
 
@@ -446,6 +596,14 @@ questions and Whisper transcription — see
 - ✅ Frontend polish: toasts, skeleton loaders, empty/error states, a11y, resume upload UI, session report UI
 - ✅ End-to-end Playwright test suite (full Register→Dashboard flow)
 - ✅ First production release: v1.0.0 (see [RELEASE.md](RELEASE.md))
+- ✅ Recruiter dashboard on live backend data (search, sort, pagination)
+- ✅ Admin dashboard — users, interviews, AI usage, storage, platform
+  health, all real queries, no mock data
+- ✅ PDF export for AI interview reports
+- ✅ Dark/light theme system (centralized tokens, persisted, no flash of
+  wrong theme, WCAG-AA contrast in both themes)
+- ✅ Landing page redesign — AI pipeline timeline, architecture diagram,
+  live screenshot carousel, animated stats
 
 ### Future enhancements
 
@@ -457,12 +615,28 @@ questions and Whisper transcription — see
   in-process background tasks
 - 🔲 Redis-backed rate limiting for multi-worker/multi-instance deployments
 - 🔲 A real malware-scanning backend behind the current stub hook
+- 🔲 A role/organisation model (`User.role`) so the recruiter and admin
+  dashboards can be gated instead of open to any authenticated user — an
+  explicit, documented trade-off for this single-tenant-schema MVP, not
+  an oversight (see `app/services/admin_service.py` docstring)
 - ✅ Tagged releases with semantic versioning — first tag: `v1.0.0`
 - 🔲 A genuinely ML-based readiness/outcome model trained on real, labeled
   interview outcomes (the current readiness score is an intentionally
   transparent weighted formula, not a trained model — see
   [docs/AI_PIPELINE.md §9](docs/AI_PIPELINE.md#9-interview-readiness-scoring--benchmarking-prediction_servicepy-benchmark_servicepy));
   this would require a real labeled dataset, which doesn't exist yet
+
+## Acknowledgements
+
+Built on top of these open-source projects and APIs:
+
+- [FastAPI](https://fastapi.tiangolo.com/), [SQLAlchemy](https://www.sqlalchemy.org/), [Alembic](https://alembic.sqlalchemy.org/), [Pydantic](https://docs.pydantic.dev/)
+- [React](https://react.dev/), [Vite](https://vitejs.dev/), [React Router](https://reactrouter.com/), [Recharts](https://recharts.org/), [Framer Motion](https://www.framer.com/motion/), [lucide-react](https://lucide.dev/)
+- [Google Gemini](https://ai.google.dev/) for question generation, evaluation, live interviews, and coaching
+- [OpenAI Whisper](https://github.com/openai/whisper) for audio transcription
+- [sentence-transformers](https://www.sbert.net/) (`all-MiniLM-L6-v2`) for resume/RAG embeddings
+- [librosa](https://librosa.org/) for voice/acoustic analysis
+- [PostgreSQL](https://www.postgresql.org/), [Docker](https://www.docker.com/)
 
 ## License
 

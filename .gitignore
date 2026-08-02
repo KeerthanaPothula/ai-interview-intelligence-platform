@@ -7,6 +7,14 @@ frontend/playwright-report/
 # Uploaded audio files (runtime data, not source)
 backend/uploads/
 
+# Local SQLite databases (e.g. smoke-test DBs created against
+# DATABASE_URL=sqlite:///... for manual verification) — never real data,
+# never committed
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

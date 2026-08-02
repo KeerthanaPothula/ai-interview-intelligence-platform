@@ -29,6 +29,7 @@ import {
   getBenchmarks,
   getInsights,
 } from '../api/client';
+import { ChartTooltip } from '../components/ChartTooltip';
 import { StatGridSkeleton } from '../components/Skeleton';
 import { ErrorState } from '../components/StateMessage';
 import type {
@@ -90,38 +91,6 @@ function StatCard({ label, value, icon, accent = 'var(--primary)', sub }: StatCa
   );
 }
 
-// ─── Recharts tooltip ─────────────────────────────────────────────────────────
-
-function ChartTooltip({
-  active,
-  payload,
-  label,
-}: {
-  active?: boolean;
-  payload?: { name: string; value: number; color: string }[];
-  label?: string;
-}) {
-  if (!active || !payload?.length) return null;
-  return (
-    <div
-      style={{
-        background: 'var(--surface-2)',
-        border: '1px solid var(--border-strong)',
-        borderRadius: 8,
-        padding: '0.6rem 0.9rem',
-        fontSize: '0.82rem',
-        boxShadow: 'var(--shadow)',
-      }}
-    >
-      <p style={{ margin: '0 0 0.4rem', color: 'var(--muted)', fontWeight: 600 }}>{label}</p>
-      {payload.map((p) => (
-        <p key={p.name} style={{ margin: '0.15rem 0', color: p.color }}>
-          {p.name}: <strong>{p.value?.toFixed(1)}</strong>
-        </p>
-      ))}
-    </div>
-  );
-}
 
 // ─── Readiness gauge ──────────────────────────────────────────────────────────
 
@@ -529,33 +498,37 @@ export function DashboardPage() {
             {chartData.length > 1 && (
               <div className="chart-card">
                 <h2>Per-Session Scores</h2>
-                <ResponsiveContainer width="100%" height={280}>
-                  <LineChart data={chartData} margin={{ top: 8, right: 16, left: -16, bottom: 8 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                    <XAxis dataKey="name" tick={{ fontSize: 11, fill: 'var(--muted)' }} />
-                    <YAxis domain={[0, 10]} tick={{ fontSize: 11, fill: 'var(--muted)' }} />
-                    <Tooltip content={<ChartTooltip />} />
-                    <Legend wrapperStyle={{ fontSize: '0.8rem' }} />
-                    <Line type="monotone" dataKey="Overall" stroke="#3D7EFF" strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="Communication" stroke="#22C55E" strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="Technical" stroke="#F59E0B" strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="Problem Solving" stroke="#EF4444" strokeWidth={2} dot={false} />
-                  </LineChart>
-                </ResponsiveContainer>
+                <div role="img" aria-label="Line chart of overall, communication, technical, and problem-solving scores across sessions">
+                  <ResponsiveContainer width="100%" height={280}>
+                    <LineChart data={chartData} margin={{ top: 8, right: 16, left: -16, bottom: 8 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                      <XAxis dataKey="name" tick={{ fontSize: 11, fill: 'var(--muted)' }} />
+                      <YAxis domain={[0, 10]} tick={{ fontSize: 11, fill: 'var(--muted)' }} />
+                      <Tooltip content={<ChartTooltip decimals={1} />} />
+                      <Legend wrapperStyle={{ fontSize: '0.8rem' }} />
+                      <Line type="monotone" dataKey="Overall" stroke="#3D7EFF" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="Communication" stroke="#22C55E" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="Technical" stroke="#F59E0B" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="Problem Solving" stroke="#EF4444" strokeWidth={2} dot={false} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
               </div>
             )}
 
             {radarData && (
               <div className="chart-card radar-chart-card">
                 <h2>Skill Breakdown</h2>
-                <ResponsiveContainer width="100%" height={280}>
-                  <RadarChart data={radarData}>
-                    <PolarGrid stroke="var(--border)" />
-                    <PolarAngleAxis dataKey="skill" tick={{ fontSize: 11, fill: 'var(--muted)' }} />
-                    <Radar name="Latest Session" dataKey="score" stroke="#3D7EFF" fill="#3D7EFF" fillOpacity={0.2} />
-                    <Tooltip content={<ChartTooltip />} />
-                  </RadarChart>
-                </ResponsiveContainer>
+                <div role="img" aria-label="Radar chart of skill scores for the latest session">
+                  <ResponsiveContainer width="100%" height={280}>
+                    <RadarChart data={radarData}>
+                      <PolarGrid stroke="var(--border)" />
+                      <PolarAngleAxis dataKey="skill" tick={{ fontSize: 11, fill: 'var(--muted)' }} />
+                      <Radar name="Latest Session" dataKey="score" stroke="#3D7EFF" fill="#3D7EFF" fillOpacity={0.2} />
+                      <Tooltip content={<ChartTooltip decimals={1} />} />
+                    </RadarChart>
+                  </ResponsiveContainer>
+                </div>
               </div>
             )}
           </div>

@@ -1,6 +1,7 @@
 import { Search } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { NotificationBell } from './NotificationBell';
+import { ThemeToggle } from './ThemeToggle';
 
 interface TopBarProps {
   title?: string;
@@ -38,6 +39,7 @@ export function TopBar({ title }: TopBarProps) {
       </div>
 
       <div className="sb-topbar-actions">
+        <ThemeToggle />
         <NotificationBell />
 
         <div className="sb-avatar" role="button" aria-label="Profile menu" tabIndex={0}>

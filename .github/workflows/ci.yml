@@ -83,7 +83,12 @@ jobs:
       # JWT_SECRET_KEY, and GEMINI_API_KEY via os.environ.setdefault, so no
       # secrets are required to run the suite in CI.
       - name: Run tests with coverage
-        run: pytest --cov=app --cov-report=term-missing --cov-report=xml
+        # --cov-fail-under=75: measured coverage is ~80% as of 2026-08-02
+        # (see docs/TESTING.md); 75% leaves headroom for normal fluctuation
+        # while still failing CI on a real regression. Only applied here
+        # (not in pytest.ini) so a local `pytest --cov` on a filtered subset
+        # of tests doesn't spuriously fail against the whole app's threshold.
+        run: pytest --cov=app --cov-report=term-missing --cov-report=xml --cov-fail-under=75
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4

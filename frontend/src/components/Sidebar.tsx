@@ -6,6 +6,7 @@ import {
   LogOut,
   Mic,
   Settings,
+  ShieldCheck,
   Upload,
   Users,
 } from 'lucide-react';
@@ -18,6 +19,7 @@ const NAV = [
   { to: '/analytics', icon: BarChart2, label: 'Analytics' },
   { to: '/resume', icon: Upload, label: 'Resume' },
   { to: '/recruiter', icon: Users, label: 'Recruiter' },
+  { to: '/admin', icon: ShieldCheck, label: 'Admin' },
 ];
 
 export function Sidebar() {

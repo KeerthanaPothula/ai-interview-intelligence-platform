@@ -3,8 +3,9 @@
 ## Backend
 
 **Stack**: pytest + httpx (`TestClient`), in-memory SQLite (no PostgreSQL
-needed to run the suite), 250 tests across 24 files under `backend/tests/`
-(248 passed, 2 skipped as of the last local run).
+needed to run the suite), 267 tests across 26 files under `backend/tests/`
+(all passing as of the last local run — includes `test_recruiter.py` and
+`test_admin.py`, added alongside the recruiter and admin dashboards).
 
 ```bash
 cd backend
@@ -24,10 +25,10 @@ trigger a real Whisper/Gemini call from a background task; tests that need
 the pipeline call `processing_service` functions directly and mock the
 Whisper/Gemini boundary.
 
-### Coverage (measured locally, 2026-06-29)
+### Coverage (measured locally, 2026-08-02)
 
 ```
-TOTAL    2841 statements   528 missed   81%
+TOTAL    3347 statements   673 missed   80%
 ```
 
 | Area | Coverage | Notes |
@@ -62,14 +63,22 @@ npm run test        # run everything
 npm run coverage     # with a coverage report
 ```
 
-### Coverage (measured locally, 2026-06-29)
+### Coverage (measured locally, 2026-08-02)
 
 ```
-Statements   24.93%  (100/401)
-Branches     30.76%  (84/273)
-Functions    22.40%  (28/125)
-Lines        25.60%  (96/375)
+Statements   10.17%  (161/1582)
+Branches     11.06%  (132/1193)
+Functions     8.10%  (39/481)
+Lines        10.80%  (151/1398)
 ```
+
+The percentage dropped substantially since the 2026-06-29 measurement —
+not because tests were removed, but because the codebase grew a lot
+(Recruiter, Admin, and Landing pages, the theme system, the screenshot
+carousel) without new tests alongside them. Same 31 tests, much larger
+denominator. `frontend/vite.config.ts` gates CI on a low floor (7-8%) —
+not a quality target, just a tripwire for a catastrophic regression like
+tests being deleted outright.
 
 ### Known gap — this is the honest state, not a target
 
@@ -77,7 +86,8 @@ Frontend coverage is low and concentrated on a handful of components
 (`AnalysisCard`, `VoiceAnalyticsCard`, `useProcessingStatus`,
 `LiveInterviewPage`) that were built with tests alongside them. Pages built
 later (`LoginPage`, `RegisterPage`, `SessionsListPage`,
-`SessionDetailPage`, `DashboardPage`) and `AuthContext`/`client.ts` have
+`SessionDetailPage`, `DashboardPage`, `RecruiterPage`, `AdminPage`,
+`LandingPage`) and `AuthContext`/`ThemeContext`/`client.ts` have
 **no test coverage at all**. This is a real gap, not an oversight to paper
 over — if you're picking up a "good first issue" from this repo, writing
 tests for any of the zero-coverage files above is a high-value, well-scoped
@@ -88,10 +98,15 @@ contribution (see [CONTRIBUTING.md](./CONTRIBUTING.md)).
 Both suites run on every push/PR via `backend-test` and `frontend-test` in
 `.github/workflows/ci.yml`; coverage reports are uploaded as workflow
 artifacts (`backend/coverage.xml`, `frontend/coverage/`) rather than pushed
-to an external coverage service. Neither job currently enforces a minimum
-coverage percentage — a regression in coverage doesn't fail the build today
-(see [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) if you're investigating a
-CI failure on either job).
+to an external coverage service. Both jobs now gate on a coverage floor:
+backend fails under 75% (`pytest --cov-fail-under=75`, ~5 points below the
+measured 80%); frontend fails under 7-8% per metric
+(`vite.config.ts` → `test.coverage.thresholds`) — deliberately not a
+quality bar given the documented gap above, just a tripwire for a
+catastrophic regression. `tests/test_ci_config.py` asserts the backend gate
+stays wired in `ci.yml` so a future edit can't silently remove it (see
+[TROUBLESHOOTING.md](./TROUBLESHOOTING.md) if you're investigating a CI
+failure on either job).
 
 ## End-to-end (Playwright)
 
