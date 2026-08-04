@@ -28,7 +28,9 @@ def _get_client() -> genai.Client:
         settings = get_settings()
         _client = genai.Client(
             api_key=settings.GEMINI_API_KEY,
-            http_options={"timeout": settings.GEMINI_TIMEOUT_SECONDS},
+            # google-genai's HttpOptions.timeout is in milliseconds, but
+            # GEMINI_TIMEOUT_SECONDS is (as its name says) seconds — convert here.
+            http_options={"timeout": settings.GEMINI_TIMEOUT_SECONDS * 1000},
         )
     return _client
 
