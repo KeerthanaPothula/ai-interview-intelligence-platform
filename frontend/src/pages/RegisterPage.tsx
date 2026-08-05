@@ -18,11 +18,13 @@ const STRENGTH_LABEL = ['', 'Weak', 'Fair', 'Good', 'Strong'];
 
 export function RegisterPage() {
   const { register, isAuthenticated } = useAuth();
-  const [fullName, setFullName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPw, setConfirmPw] = useState('');
   const [showPw, setShowPw] = useState(false);
+  const [acceptTerms, setAcceptTerms] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -30,7 +32,7 @@ export function RegisterPage() {
   const strength = passwordStrength(password);
 
   if (isAuthenticated) {
-    return <Navigate to="/sessions" replace />;
+    return <Navigate to="/dashboard" replace />;
   }
 
   async function handleSubmit(event: FormEvent) {
@@ -45,10 +47,20 @@ export function RegisterPage() {
       setError('Password must be at least 8 characters.');
       return;
     }
+    if (!acceptTerms) {
+      setError('You must accept the Terms of Service to create an account.');
+      return;
+    }
 
     setSubmitting(true);
     try {
+      const fullName = `${firstName.trim()} ${lastName.trim()}`.trim();
       await register({ email, password, full_name: fullName });
+      // register() auto-logs-in on success — if that worked, isAuthenticated
+      // is now true and the guard above redirects to /dashboard on the next
+      // render. Reaching this line without isAuthenticated flipping means
+      // auto-login didn't happen (rare — see AuthContext.register), so fall
+      // back to the manual "sign in" success screen below.
       setSuccess(true);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Unable to register. Please try again.');
@@ -105,21 +117,42 @@ export function RegisterPage() {
         <h1>Create an account</h1>
         <p className="auth-subtitle">Start your interview preparation journey</p>
 
-        <label htmlFor="reg-name" style={{ marginBottom: '0.3rem' }}>
-          Full name
-        </label>
-        <div className="auth-input-wrap" style={{ marginBottom: '1rem' }}>
-          <User className="auth-input-icon" size={16} aria-hidden="true" />
-          <input
-            id="reg-name"
-            type="text"
-            value={fullName}
-            onChange={(e) => setFullName(e.target.value)}
-            autoComplete="name"
-            placeholder="Jane Smith"
-            required
-            style={{ paddingLeft: '2.25rem' }}
-          />
+        <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem' }}>
+          <div style={{ flex: 1 }}>
+            <label htmlFor="reg-first-name" style={{ marginBottom: '0.3rem' }}>
+              First name
+            </label>
+            <div className="auth-input-wrap">
+              <User className="auth-input-icon" size={16} aria-hidden="true" />
+              <input
+                id="reg-first-name"
+                type="text"
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
+                autoComplete="given-name"
+                placeholder="Jane"
+                required
+                style={{ paddingLeft: '2.25rem' }}
+              />
+            </div>
+          </div>
+          <div style={{ flex: 1 }}>
+            <label htmlFor="reg-last-name" style={{ marginBottom: '0.3rem' }}>
+              Last name
+            </label>
+            <div className="auth-input-wrap">
+              <input
+                id="reg-last-name"
+                type="text"
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
+                autoComplete="family-name"
+                placeholder="Smith"
+                required
+                style={{ paddingLeft: '0.75rem' }}
+              />
+            </div>
+          </div>
         </div>
 
         <label htmlFor="reg-email" style={{ marginBottom: '0.3rem' }}>
@@ -204,6 +237,19 @@ export function RegisterPage() {
             required
             style={{ paddingLeft: '2.25rem' }}
           />
+        </div>
+
+        <div className="auth-options" style={{ justifyContent: 'flex-start' }}>
+          <label className="auth-checkbox-label" htmlFor="reg-accept-terms">
+            <input
+              id="reg-accept-terms"
+              type="checkbox"
+              checked={acceptTerms}
+              onChange={(e) => setAcceptTerms(e.target.checked)}
+              required
+            />
+            I agree to the Terms of Service and Privacy Policy
+          </label>
         </div>
 
         {error && (

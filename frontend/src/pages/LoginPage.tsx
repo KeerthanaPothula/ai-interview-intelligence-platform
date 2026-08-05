@@ -9,11 +9,12 @@ export function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
+  const [rememberMe, setRememberMe] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   if (isAuthenticated) {
-    return <Navigate to="/sessions" replace />;
+    return <Navigate to="/dashboard" replace />;
   }
 
   async function handleSubmit(event: FormEvent) {
@@ -21,13 +22,14 @@ export function LoginPage() {
     setError(null);
     setSubmitting(true);
     try {
-      await login(email, password);
+      await login(email, password, rememberMe);
     } catch (err) {
-      if (err instanceof ApiError && err.status === 423) {
-        setError('Account temporarily locked due to multiple failed attempts. Try again later.');
-      } else {
-        setError(err instanceof ApiError ? err.message : 'Unable to sign in. Please try again.');
-      }
+      // ApiError's message is the backend's own detail text for 4xx errors
+      // (see client.ts's extractErrorMessage) — e.g. "Incorrect email or
+      // password." for a bad login, "Account temporarily locked..." for a
+      // 423 — already specific and safe to show verbatim, no per-status
+      // special-casing needed here.
+      setError(err instanceof ApiError ? err.message : 'Unable to sign in. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -87,7 +89,14 @@ export function LoginPage() {
         </div>
 
         <div className="auth-options" style={{ marginBottom: '1.25rem' }}>
-          <span />
+          <label className="auth-checkbox-label">
+            <input
+              type="checkbox"
+              checked={rememberMe}
+              onChange={(e) => setRememberMe(e.target.checked)}
+            />
+            Remember me
+          </label>
           <Link to="/forgot-password" className="auth-link">
             Forgot password?
           </Link>

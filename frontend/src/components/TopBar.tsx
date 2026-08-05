@@ -1,16 +1,13 @@
 import { Search } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
 import { NotificationBell } from './NotificationBell';
 import { ThemeToggle } from './ThemeToggle';
+import { UserMenu } from './UserMenu';
 
 interface TopBarProps {
   title?: string;
 }
 
 export function TopBar({ title }: TopBarProps) {
-  const { token } = useAuth();
-  const initials = token ? 'U' : '?';
-
   return (
     <header className="sb-topbar" role="banner">
       {title && (
@@ -41,10 +38,7 @@ export function TopBar({ title }: TopBarProps) {
       <div className="sb-topbar-actions">
         <ThemeToggle />
         <NotificationBell />
-
-        <div className="sb-avatar" role="button" aria-label="Profile menu" tabIndex={0}>
-          {initials}
-        </div>
+        <UserMenu />
       </div>
     </header>
   );

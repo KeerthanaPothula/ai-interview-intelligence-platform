@@ -25,6 +25,7 @@ import type {
   QuestionResponse,
   RAGQuestionsResponse,
   ReadinessResponse,
+  RefreshRequest,
   ResetPasswordRequest,
   ResumeAnalysisResponse,
   ResumeDocumentResponse,
@@ -56,6 +57,89 @@ export class ApiError extends Error {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Token storage — supports "remember me": persisted in localStorage when
+// checked (survives closing the browser), sessionStorage (cleared when the
+// tab closes) when not. Only one of the two ever holds a token pair at a
+// time; storeTokens() always clears the other so a stale copy can't be read
+// back after switching modes across logins.
+// ---------------------------------------------------------------------------
+
+const ACCESS_TOKEN_KEY = 'aiip_access_token';
+const REFRESH_TOKEN_KEY = 'aiip_refresh_token';
+
+function getActiveStorage(): Storage | null {
+  if (localStorage.getItem(ACCESS_TOKEN_KEY)) return localStorage;
+  if (sessionStorage.getItem(ACCESS_TOKEN_KEY)) return sessionStorage;
+  return null;
+}
+
+export function storeTokens(tokens: Token, rememberMe: boolean): void {
+  const target = rememberMe ? localStorage : sessionStorage;
+  const other = rememberMe ? sessionStorage : localStorage;
+  target.setItem(ACCESS_TOKEN_KEY, tokens.access_token);
+  if (tokens.refresh_token) {
+    target.setItem(REFRESH_TOKEN_KEY, tokens.refresh_token);
+  }
+  other.removeItem(ACCESS_TOKEN_KEY);
+  other.removeItem(REFRESH_TOKEN_KEY);
+}
+
+export function readStoredAccessToken(): string | null {
+  return getActiveStorage()?.getItem(ACCESS_TOKEN_KEY) ?? null;
+}
+
+function readStoredRefreshToken(): string | null {
+  return getActiveStorage()?.getItem(REFRESH_TOKEN_KEY) ?? null;
+}
+
+export function clearStoredTokens(): void {
+  localStorage.removeItem(ACCESS_TOKEN_KEY);
+  localStorage.removeItem(REFRESH_TOKEN_KEY);
+  sessionStorage.removeItem(ACCESS_TOKEN_KEY);
+  sessionStorage.removeItem(REFRESH_TOKEN_KEY);
+}
+
+// ---------------------------------------------------------------------------
+// Global auth event hooks. AuthContext registers these once on mount so a
+// 401 (expired/invalid/revoked access token) or a successful silent refresh
+// can update React state and redirect — without every page component that
+// calls the API needing its own token-lifecycle handling.
+// ---------------------------------------------------------------------------
+
+let onUnauthorized: (() => void) | null = null;
+let onTokenRefreshed: ((tokens: Token) => void) | null = null;
+
+export function registerUnauthorizedHandler(handler: (() => void) | null): void {
+  onUnauthorized = handler;
+}
+
+export function registerTokenRefreshedHandler(
+  handler: ((tokens: Token) => void) | null,
+): void {
+  onTokenRefreshed = handler;
+}
+
+// Exchanges the stored refresh token for a new access/refresh pair. Returns
+// the new access token on success, or null if there is no refresh token, it
+// has expired, or the network call fails — any of which means the caller
+// should fall back to treating the request as unauthorized.
+async function performSilentRefresh(): Promise<string | null> {
+  const refreshTokenValue = readStoredRefreshToken();
+  if (!refreshTokenValue) {
+    return null;
+  }
+  try {
+    const tokens = await refreshAccessToken(refreshTokenValue);
+    const rememberMe = localStorage.getItem(ACCESS_TOKEN_KEY) !== null;
+    storeTokens(tokens, rememberMe);
+    onTokenRefreshed?.(tokens);
+    return tokens.access_token;
+  } catch {
+    return null;
+  }
+}
+
 function friendlyMessage(status: number): string {
   switch (status) {
     case 401:
@@ -80,6 +164,47 @@ function friendlyMessage(status: number): string {
   }
 }
 
+// Client errors (4xx) carry a `detail` string the backend has already
+// written to be safe and specific to show verbatim — e.g. "An account with
+// this email already exists.", "Incorrect email or password.", "This reset
+// link is invalid or has expired." (see the auth router's own docstrings:
+// "intentionally vague", "deliberately generic to avoid leaking token
+// validity" — the backend already decided what's safe to say). Preferring
+// it over a blanket per-status message is what actually fixes a 409 duplicate
+// -email registration showing "This action is not allowed in the current
+// state." instead of the real reason.
+//
+// Server errors (5xx) and anything that isn't parseable JSON with a string
+// `detail` fall back to the generic per-status message — those are never
+// written with an end user in mind (stack traces, "Internal Server Error",
+// upstream gateway text) and must not be surfaced verbatim.
+async function extractErrorMessage(response: Response): Promise<string> {
+  if (response.status >= 400 && response.status < 500) {
+    try {
+      const body: unknown = await response.json();
+      const detail = (body as { detail?: unknown } | null)?.detail;
+      if (typeof detail === 'string' && detail.trim()) {
+        return detail;
+      }
+    } catch {
+      // Not JSON (or no body) — fall through to the generic message.
+    }
+  }
+  return friendlyMessage(response.status);
+}
+
+async function doFetch(path: string, options: RequestInit, headers: Headers): Promise<Response> {
+  try {
+    return await fetch(`${BASE_URL}${path}`, { ...options, headers });
+  } catch {
+    throw new ApiError(
+      0,
+      `Cannot connect to the backend at ${BASE_URL}. ` +
+        'Make sure the backend server is running (see README → Quick Start) and try again.',
+    );
+  }
+}
+
 async function request<T>(
   path: string,
   options: RequestInit = {},
@@ -97,19 +222,27 @@ async function request<T>(
     headers.set('Content-Type', 'application/json');
   }
 
-  let response: Response;
-  try {
-    response = await fetch(`${BASE_URL}${path}`, { ...options, headers });
-  } catch {
-    throw new ApiError(
-      0,
-      `Cannot connect to the backend at ${BASE_URL}. ` +
-        'Make sure the backend server is running (see README → Quick Start) and try again.',
-    );
+  let response = await doFetch(path, options, headers);
+
+  // A 401 on an authenticated request may just mean the access token
+  // expired — silently exchange the refresh token for a new pair and retry
+  // once before giving up. Never attempted for anonymous requests (no
+  // token was supplied, so there is no session to refresh) and never
+  // retried more than once, to avoid looping against a genuinely invalid
+  // session (e.g. a revoked refresh token).
+  if (response.status === 401 && token) {
+    const newAccessToken = await performSilentRefresh();
+    if (newAccessToken) {
+      headers.set('Authorization', `Bearer ${newAccessToken}`);
+      response = await doFetch(path, options, headers);
+    }
   }
 
   if (!response.ok) {
-    throw new ApiError(response.status, friendlyMessage(response.status));
+    if (response.status === 401) {
+      onUnauthorized?.();
+    }
+    throw new ApiError(response.status, await extractErrorMessage(response));
   }
 
   if (response.status === 204) {
@@ -169,6 +302,38 @@ export function resetPassword(data: ResetPasswordRequest): Promise<DetailRespons
     method: 'POST',
     body: JSON.stringify(data),
   });
+}
+
+// Not called directly by page components — used internally by
+// performSilentRefresh() above. Exported so tests can exercise it in
+// isolation without going through a full 401-triggered retry.
+export function refreshAccessToken(refreshTokenValue: string): Promise<Token> {
+  return request<Token>('/api/v1/auth/refresh', {
+    method: 'POST',
+    body: JSON.stringify({ refresh_token: refreshTokenValue } satisfies RefreshRequest),
+  });
+}
+
+export function logoutRequest(refreshTokenValue: string): Promise<DetailResponse> {
+  return request<DetailResponse>('/api/v1/auth/logout', {
+    method: 'POST',
+    body: JSON.stringify({ refresh_token: refreshTokenValue } satisfies RefreshRequest),
+  });
+}
+
+// Clears the local session immediately (synchronous — the caller's UI
+// reflects logout right away regardless of network state), then
+// best-effort notifies the backend to revoke the refresh token so it can't
+// be redeemed later. A failed/unreachable revocation call never blocks or
+// reverts the local logout — the token is already gone from storage.
+export function logoutAndClearTokens(): void {
+  const refreshTokenValue = readStoredRefreshToken();
+  clearStoredTokens();
+  if (refreshTokenValue) {
+    logoutRequest(refreshTokenValue).catch(() => {
+      // See comment above.
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
