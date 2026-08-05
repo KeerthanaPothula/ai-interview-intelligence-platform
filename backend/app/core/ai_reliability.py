@@ -45,6 +45,20 @@ _FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
 T = TypeVar("T")
 
 
+# Exact, user-facing message for a Gemini rate-limit (429) that persists
+# through all retries. Kept as a module-level constant so every caller and
+# every test asserts against the same string rather than a copy of it.
+RATE_LIMIT_MESSAGE = (
+    "The AI service is temporarily rate limited. Please try again in a few minutes."
+)
+
+# Auth-related API error codes. These indicate a broken/invalid API key or
+# an unauthorized project, not a transient condition — retrying cannot help
+# and only burns additional quota against an already-failing key, so these
+# are never retried.
+_AUTH_ERROR_CODES = frozenset({401, 403})
+
+
 def call_gemini_with_retry(
     fn: Callable[[], T],
     *,
@@ -53,15 +67,21 @@ def call_gemini_with_retry(
     """Call a zero-argument Gemini SDK invocation with retry + backoff.
 
     Retries on timeout and on retryable API errors (429 rate limit, 5xx
-    server errors) using exponential backoff. Does not retry on other
-    APIError codes (e.g. 400 bad request) since retrying an invalid request
-    will not help.
+    server errors) using exponential backoff. Does not retry:
+      - Authentication errors (401/403 — invalid/revoked API key). Retrying
+        a bad key cannot succeed and only wastes quota, so these fail fast.
+      - Other non-retryable APIError codes (e.g. 400 bad request), since
+        retrying an invalid request will not help either.
 
     Raises:
         AIServiceError: after all retries are exhausted, or immediately on a
             non-retryable API error. The underlying exception is always
-            logged with full detail; the raised AIServiceError carries only
-            a generic, user-safe message.
+            logged with the full traceback (exc_info) for debugging, even
+            though the raised AIServiceError carries only a generic,
+            user-safe message. A persistent 429 (rate limit still exceeded
+            after all retries) is raised as AIServiceError with
+            status_code=429 and RATE_LIMIT_MESSAGE — every other failure
+            keeps the previous generic 502 "currently unavailable" message.
     """
     settings = get_settings()
     max_retries = settings.GEMINI_MAX_RETRIES
@@ -82,6 +102,7 @@ def call_gemini_with_retry(
         span.set_attribute("gemini.max_retries", max_retries)
 
         last_exc: Exception | None = None
+        last_was_rate_limit = False
         for attempt in range(1, max_retries + 1):
             try:
                 result = fn()
@@ -89,20 +110,38 @@ def call_gemini_with_retry(
                 return result
             except httpx.TimeoutException as exc:
                 last_exc = exc
+                last_was_rate_limit = False
                 logger.warning(
                     "%s timed out (attempt %d/%d)", operation, attempt, max_retries
                 )
             except genai_errors.APIError as exc:
                 last_exc = exc
+
+                if exc.code in _AUTH_ERROR_CODES:
+                    logger.error(
+                        "%s failed with authentication error %s — not retrying "
+                        "(invalid or revoked API key)",
+                        operation,
+                        exc.code,
+                        exc_info=exc,
+                    )
+                    _record("auth_error")
+                    raise AIServiceError(
+                        f"{operation} could not be completed because the AI service "
+                        "rejected the request."
+                    ) from exc
+
                 retryable = exc.code == 429 or (
                     exc.code is not None and exc.code >= 500
                 )
+                last_was_rate_limit = exc.code == 429
                 if not retryable:
                     logger.error(
                         "%s failed with non-retryable API error %s: %s",
                         operation,
                         exc.code,
                         exc,
+                        exc_info=exc,
                     )
                     _record("error")
                     raise AIServiceError(
@@ -127,6 +166,14 @@ def call_gemini_with_retry(
             last_exc,
             exc_info=last_exc,
         )
+
+        if last_was_rate_limit:
+            _record("rate_limited")
+            raise AIServiceError(
+                RATE_LIMIT_MESSAGE,
+                status_code=429,
+            ) from last_exc
+
         _record("error")
         raise AIServiceError(
             f"{operation} is currently unavailable. Please try again shortly."

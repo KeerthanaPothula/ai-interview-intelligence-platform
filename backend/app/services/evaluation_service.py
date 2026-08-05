@@ -4,13 +4,11 @@ import json
 import logging
 import threading
 
-import httpx
-from fastapi import HTTPException
 from google import genai
-from google.genai import errors as genai_errors
 
 from app.config import get_settings
-from app.core.ai_reliability import strip_fences
+from app.core.ai_reliability import call_gemini_with_retry, parse_json_response
+from app.core.exceptions import AIServiceError
 
 logger = logging.getLogger(__name__)
 
@@ -123,8 +121,8 @@ def _normalize_score(key: str, raw: object) -> float:
     be written to the NUMERIC(4,1) column, not the raw float from Gemini.
 
     Raises:
-        HTTPException 502: raw is not numeric, or rounded value is outside
-                           [0.0, 10.0].
+        AIServiceError 502: raw is not numeric, or rounded value is outside
+                            [0.0, 10.0].
     """
     try:
         score = round(float(raw), 1)  # type: ignore[arg-type]
@@ -132,16 +130,12 @@ def _normalize_score(key: str, raw: object) -> float:
         logger.error(
             "Score field '%s' is not numeric: type=%s", key, type(raw).__name__
         )
-        raise HTTPException(
-            status_code=502,
-            detail=f"Evaluation returned a non-numeric value for '{key}'.",
-        )
+        raise AIServiceError(f"Evaluation returned a non-numeric value for '{key}'.")
 
     if not (0.0 <= score <= 10.0):
         logger.error("Score field '%s' out of range after rounding: %s", key, score)
-        raise HTTPException(
-            status_code=502,
-            detail=f"Evaluation score '{key}' is out of the valid range [0.0, 10.0].",
+        raise AIServiceError(
+            f"Evaluation score '{key}' is out of the valid range [0.0, 10.0]."
         )
 
     return score
@@ -177,10 +171,11 @@ def generate_evaluation(
         }
 
     Raises:
-        HTTPException 502: Gemini timeout, unreachable, returns invalid JSON,
-                           is missing required fields, returns non-numeric
-                           scores, or returns out-of-range scores.
-        HTTPException 503: Gemini rate limit exceeded.
+        AIServiceError 502: Gemini timeout, unreachable, returns invalid
+                            JSON, is missing required fields, returns
+                            non-numeric scores, or returns out-of-range
+                            scores.
+        AIServiceError 429: Gemini rate limit still exceeded after retries.
     """
     logger.info(
         "Evaluation started: role=%s, transcript_length=%d chars",
@@ -190,66 +185,24 @@ def generate_evaluation(
 
     prompt = _build_prompt(transcript_text, question, job_role, job_description)
     model = get_settings().GEMINI_MODEL
+    client = _get_client()
 
     # ------------------------------------------------------------------
-    # Gemini call — same error handling pattern as gemini_service
+    # Gemini call — same retry/backoff and error-mapping helper used by
+    # every other Gemini-backed service (app.core.ai_reliability).
     # ------------------------------------------------------------------
-    try:
-        response = _get_client().models.generate_content(
-            model=model,
-            contents=prompt,
-        )
-        raw_text: str = response.text
-    except httpx.TimeoutException as exc:
-        logger.error("Gemini evaluation timed out: role=%s", job_role)
-        raise HTTPException(
-            status_code=502,
-            detail="Interview evaluation timed out. Please try again.",
-        ) from exc
-    except genai_errors.APIError as exc:
-        if exc.code == 429:
-            logger.warning("Gemini rate limit exceeded: role=%s", job_role)
-            raise HTTPException(
-                status_code=503,
-                detail=(
-                    "Interview evaluation is temporarily unavailable due to "
-                    "rate limiting. Please try again shortly."
-                ),
-            ) from exc
-        logger.error(
-            "Gemini API error during evaluation: %s (role=%s)",
-            type(exc).__name__,
-            job_role,
-        )
-        raise HTTPException(
-            status_code=502,
-            detail="Interview evaluation service is currently unavailable.",
-        ) from exc
+    response = call_gemini_with_retry(
+        lambda: client.models.generate_content(model=model, contents=prompt),
+        operation="Interview evaluation",
+    )
+    raw_text: str = response.text
 
     # ------------------------------------------------------------------
     # JSON parsing
     # ------------------------------------------------------------------
-    stripped = strip_fences(raw_text)
-
-    try:
-        parsed = json.loads(stripped)
-    except json.JSONDecodeError:
-        logger.error("Gemini evaluation returned non-JSON response: role=%s", job_role)
-        raise HTTPException(
-            status_code=502,
-            detail="Interview evaluation returned an invalid response. Please try again.",
-        )
-
-    if not isinstance(parsed, dict):
-        logger.error(
-            "Gemini evaluation returned JSON but not an object: type=%s (role=%s)",
-            type(parsed).__name__,
-            job_role,
-        )
-        raise HTTPException(
-            status_code=502,
-            detail="Interview evaluation returned an unexpected response format.",
-        )
+    parsed = parse_json_response(
+        raw_text, operation="Interview evaluation", expect=dict
+    )
 
     # ------------------------------------------------------------------
     # Required-key presence check
@@ -259,9 +212,8 @@ def generate_evaluation(
         logger.error(
             "Gemini evaluation response missing keys %s (role=%s)", missing, job_role
         )
-        raise HTTPException(
-            status_code=502,
-            detail="Interview evaluation returned an incomplete response. Please try again.",
+        raise AIServiceError(
+            "Interview evaluation returned an incomplete response. Please try again."
         )
 
     # ------------------------------------------------------------------
@@ -284,9 +236,8 @@ def generate_evaluation(
             "Gemini evaluation: 'strengths' is not a list of strings (role=%s)",
             job_role,
         )
-        raise HTTPException(
-            status_code=502,
-            detail="Interview evaluation returned an invalid 'strengths' field.",
+        raise AIServiceError(
+            "Interview evaluation returned an invalid 'strengths' field."
         )
 
     if not isinstance(weaknesses_raw, list) or not all(
@@ -296,9 +247,8 @@ def generate_evaluation(
             "Gemini evaluation: 'weaknesses' is not a list of strings (role=%s)",
             job_role,
         )
-        raise HTTPException(
-            status_code=502,
-            detail="Interview evaluation returned an invalid 'weaknesses' field.",
+        raise AIServiceError(
+            "Interview evaluation returned an invalid 'weaknesses' field."
         )
 
     detailed_feedback_raw = parsed["detailed_feedback"]
@@ -308,9 +258,8 @@ def generate_evaluation(
             "Gemini evaluation: 'detailed_feedback' is not a string (role=%s)",
             job_role,
         )
-        raise HTTPException(
-            status_code=502,
-            detail="Interview evaluation returned an invalid 'detailed_feedback' field.",
+        raise AIServiceError(
+            "Interview evaluation returned an invalid 'detailed_feedback' field."
         )
 
     detailed_feedback = detailed_feedback_raw

@@ -81,6 +81,100 @@ def test_call_gemini_with_retry_does_not_retry_non_retryable_error():
 
 
 # ---------------------------------------------------------------------------
+# Rate limiting (429) — status code, message, and retry behavior
+# ---------------------------------------------------------------------------
+
+
+def test_call_gemini_with_retry_raises_429_after_persistent_rate_limit():
+    attempts = {"n": 0}
+
+    def always_rate_limited():
+        attempts["n"] += 1
+        raise genai_errors.APIError(429, {"error": {"message": "rate limited"}})
+
+    with pytest.raises(AIServiceError) as exc_info:
+        ai_reliability.call_gemini_with_retry(always_rate_limited, operation="test op")
+
+    assert exc_info.value.status_code == 429
+    assert exc_info.value.detail == ai_reliability.RATE_LIMIT_MESSAGE
+    # Retried up to the configured max (3 attempts total from _FastSettings).
+    assert attempts["n"] == 3
+
+
+def test_call_gemini_with_retry_transient_rate_limit_does_not_surface_429():
+    """A rate limit that clears within the retry budget is invisible to the
+    caller — no exception at all, let alone a 429 with the rate-limit
+    message. Only a *persistent* rate limit should surface as 429."""
+    attempts = {"n": 0}
+
+    def flaky():
+        attempts["n"] += 1
+        if attempts["n"] < 2:
+            raise genai_errors.APIError(429, {"error": {"message": "rate limited"}})
+        return "recovered"
+
+    result = ai_reliability.call_gemini_with_retry(flaky, operation="test op")
+    assert result == "recovered"
+
+
+# ---------------------------------------------------------------------------
+# Authentication failures (401/403) — never retried
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("auth_code", [401, 403])
+def test_call_gemini_with_retry_does_not_retry_auth_errors(auth_code):
+    attempts = {"n": 0}
+
+    def invalid_key():
+        attempts["n"] += 1
+        raise genai_errors.APIError(auth_code, {"error": {"message": "invalid key"}})
+
+    with pytest.raises(AIServiceError) as exc_info:
+        ai_reliability.call_gemini_with_retry(invalid_key, operation="test op")
+
+    # Fails on the very first attempt — no retries wasted against a key
+    # that cannot possibly succeed.
+    assert attempts["n"] == 1
+    # Auth failures are a generic service-unavailable error, not the
+    # rate-limit message/status — the two failure modes must stay distinct.
+    assert exc_info.value.status_code != 429
+    assert exc_info.value.detail != ai_reliability.RATE_LIMIT_MESSAGE
+
+
+# ---------------------------------------------------------------------------
+# Stack traces are preserved for debugging, not just a bare message
+# ---------------------------------------------------------------------------
+
+
+def test_call_gemini_with_retry_logs_traceback_on_persistent_rate_limit(caplog):
+    def always_rate_limited():
+        raise genai_errors.APIError(429, {"error": {"message": "rate limited"}})
+
+    with caplog.at_level("ERROR"):
+        with pytest.raises(AIServiceError):
+            ai_reliability.call_gemini_with_retry(
+                always_rate_limited, operation="test op"
+            )
+
+    error_records = [r for r in caplog.records if r.levelname == "ERROR"]
+    assert any(r.exc_info is not None for r in error_records)
+
+
+def test_call_gemini_with_retry_logs_traceback_on_auth_error(caplog):
+    def invalid_key():
+        raise genai_errors.APIError(401, {"error": {"message": "invalid key"}})
+
+    with caplog.at_level("ERROR"):
+        with pytest.raises(AIServiceError):
+            ai_reliability.call_gemini_with_retry(invalid_key, operation="test op")
+
+    error_records = [r for r in caplog.records if r.levelname == "ERROR"]
+    assert len(error_records) == 1
+    assert error_records[0].exc_info is not None
+
+
+# ---------------------------------------------------------------------------
 # parse_json_response
 # ---------------------------------------------------------------------------
 

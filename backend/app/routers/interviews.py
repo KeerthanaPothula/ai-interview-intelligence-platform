@@ -194,7 +194,7 @@ def generate_questions(
     Authentication: Bearer token required.
     Ownership: HTTP 404 if not found or owned by another user.
     Status gate: HTTP 409 if session.status != 'draft'.
-    Gemini errors: HTTP 502 (unavailable/invalid) or 503 (rate limited).
+    Gemini errors: HTTP 502 (unavailable/invalid) or 429 (rate limited).
     """
     session = interview_service.get_session_or_404(db, session_id, current_user.id)
 

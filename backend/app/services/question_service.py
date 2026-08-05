@@ -62,8 +62,8 @@ def generate_and_save(
 
     Raises:
         HTTPException 409 — session is not in draft status.
-        HTTPException 502 — Gemini is unavailable or returned invalid JSON.
-        HTTPException 503 — Gemini rate limit exceeded.
+        AIServiceError 502 — Gemini is unavailable or returned invalid JSON.
+        AIServiceError 429 — Gemini rate limit still exceeded after retries.
     """
     if session.status != SESSION_STATUS_DRAFT:
         raise HTTPException(
@@ -73,7 +73,7 @@ def generate_and_save(
 
     settings = get_settings()
 
-    # Step 2: Call Gemini. Any failure raises HTTPException before any DB write.
+    # Step 2: Call Gemini. Any failure raises AIServiceError before any DB write.
     question_dicts = generate_questions(
         job_role=session.job_role,
         job_description=session.job_description,
