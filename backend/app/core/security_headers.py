@@ -16,6 +16,26 @@ from starlette.responses import Response
 from app.config import Settings
 
 
+def apply_security_headers(response: Response, settings: Settings) -> None:
+    """Set the OWASP hardening headers on `response` in place.
+
+    Factored out of SecurityHeadersMiddleware.dispatch() so the same logic
+    can be applied by app.core.exceptions' catch-all handler, whose
+    responses never pass through this (or any) app.add_middleware() layer
+    — see that module's docstring for why.
+    """
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Content-Security-Policy"] = settings.CSP_POLICY
+    response.headers["Permissions-Policy"] = settings.PERMISSIONS_POLICY
+
+    if settings.ENVIRONMENT == "production":
+        response.headers["Strict-Transport-Security"] = (
+            f"max-age={settings.HSTS_MAX_AGE_SECONDS}; includeSubDomains"
+        )
+
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, settings: Settings) -> None:
         super().__init__(app)
@@ -23,17 +43,5 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next) -> Response:
         response = await call_next(request)
-
-        settings = self._settings
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Content-Security-Policy"] = settings.CSP_POLICY
-        response.headers["Permissions-Policy"] = settings.PERMISSIONS_POLICY
-
-        if settings.ENVIRONMENT == "production":
-            response.headers["Strict-Transport-Security"] = (
-                f"max-age={settings.HSTS_MAX_AGE_SECONDS}; includeSubDomains"
-            )
-
+        apply_security_headers(response, self._settings)
         return response

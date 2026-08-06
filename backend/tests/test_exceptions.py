@@ -156,6 +156,35 @@ def test_handler_returns_generic_500_for_unexpected_exception(client):
     assert "something broke internally" not in response.text
 
 
+def test_handler_returns_500_with_cors_header_for_allowed_origin(client):
+    """Regression test for a production bug: Starlette routes the base
+    ``Exception`` handler through ServerErrorMiddleware, which sits
+    *outside* every app.add_middleware() layer including CORSMiddleware.
+    Without register_exception_handlers hand-applying CORS headers, a
+    real backend bug (e.g. a DB error) would produce a 500 with no
+    Access-Control-Allow-Origin header — the browser blocks reading it,
+    fetch() throws a generic network error, and the frontend reports
+    "cannot connect to the backend" instead of surfacing the real 500.
+    """
+    response = client.get("/boom", headers={"Origin": "http://localhost:5173"})
+    assert response.status_code == 500
+    assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
+    assert response.headers["access-control-allow-credentials"] == "true"
+
+
+def test_handler_omits_cors_header_for_disallowed_origin(client):
+    response = client.get("/boom", headers={"Origin": "https://not-allowed.example.com"})
+    assert response.status_code == 500
+    assert "access-control-allow-origin" not in response.headers
+
+
+def test_handler_applies_security_headers_to_500_response(client):
+    response = client.get("/boom")
+    assert response.status_code == 500
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["x-frame-options"] == "DENY"
+
+
 def test_handler_serializes_validation_error_with_value_error_in_ctx(client):
     """Regression test: RequestValidationError.errors() embeds a raw
     ValueError instance in the 'ctx' field for field_validator failures.

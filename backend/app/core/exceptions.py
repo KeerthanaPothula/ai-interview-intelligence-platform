@@ -16,6 +16,9 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from app.config import get_settings
+from app.core.security_headers import apply_security_headers
+
 logger = logging.getLogger(__name__)
 
 
@@ -108,7 +111,36 @@ def register_exception_handlers(app: FastAPI) -> None:
             request.url.path,
             exc_info=exc,
         )
-        return JSONResponse(
+        response = JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"detail": "Internal server error."},
         )
+        _apply_bypassed_middleware_headers(request, response)
+        return response
+
+
+def _apply_bypassed_middleware_headers(request: Request, response: JSONResponse) -> None:
+    """Hand-apply what CORSMiddleware and SecurityHeadersMiddleware would
+    normally add, because neither runs for this response.
+
+    Starlette routes a handler registered for the base ``Exception`` class
+    through ``ServerErrorMiddleware``, which — unlike handlers registered
+    for ``HTTPException``/``AppException``/``RequestValidationError``, which
+    go through ``ExceptionMiddleware`` — wraps the *entire* app, including
+    every layer added via ``app.add_middleware()`` (see Starlette's
+    ``Router.build_middleware_stack``). A response built here never passes
+    back through CORSMiddleware, so a genuine backend bug (e.g. a query
+    against a column missing from the database) produces a 500 with no
+    ``Access-Control-Allow-Origin`` header. The browser's CORS check then
+    fails, and `fetch()` raises a generic network-level error instead of
+    ever exposing the 500 — the frontend's fetch wrapper reports this as
+    "cannot connect to the backend", masking the real error entirely.
+    """
+    settings = get_settings()
+    origin = request.headers.get("origin")
+    if origin and origin in settings.CORS_ORIGINS:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Vary"] = "Origin"
+
+    apply_security_headers(response, settings)
