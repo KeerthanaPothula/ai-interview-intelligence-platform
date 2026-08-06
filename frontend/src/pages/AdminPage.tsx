@@ -14,30 +14,51 @@ import {
 } from 'recharts';
 import {
   Activity,
+  Building2,
   Database,
   FileBarChart2,
   HardDrive,
   ServerCog,
+  UserPlus,
   Users,
 } from 'lucide-react';
 import {
+  activateOrganization,
+  activateUser,
+  createOrganization,
+  createRecruiter,
+  deactivateOrganization,
+  deactivateUser,
   getAdminOverview,
   getSystemReadiness,
   listAdminActivity,
   listAdminJobRoles,
   listAdminUsers,
+  listOrganizations,
+  updateUserRole,
 } from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import { useRole } from '../context/RoleContext';
 import type {
   AdminActivityEvent,
   AdminOverviewResponse,
   AdminUserResponse,
   JobRoleCount,
+  OrganizationResponse,
   ReadinessResponse,
+  Role as RoleType,
 } from '../api/types';
 import { ChartTooltip } from '../components/ChartTooltip';
 import { EmptyState, ErrorState } from '../components/StateMessage';
 import { StatGridSkeleton } from '../components/Skeleton';
+
+const ROLE_LABELS: Record<RoleType, string> = {
+  super_admin: 'Super Admin',
+  admin: 'Admin',
+  recruiter: 'Recruiter',
+  candidate: 'Candidate',
+};
+const ASSIGNABLE_ROLES: RoleType[] = ['candidate', 'recruiter', 'admin', 'super_admin'];
 
 const ease = [0.4, 0, 0.2, 1] as [number, number, number, number];
 const PAGE_SIZE = 8;
@@ -82,6 +103,7 @@ function HealthBadge({ ok, label }: { ok: boolean; label: string }) {
 
 export function AdminPage() {
   const { token } = useAuth();
+  const { isSuperAdmin } = useRole();
 
   const [overview, setOverview] = useState<AdminOverviewResponse | null>(null);
   const [readiness, setReadiness] = useState<ReadinessResponse | null>(null);
@@ -96,6 +118,20 @@ export function AdminPage() {
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [page, setPage] = useState(0);
+  const [userActionError, setUserActionError] = useState<string | null>(null);
+
+  const [organizations, setOrganizations] = useState<OrganizationResponse[]>([]);
+  const [orgsLoading, setOrgsLoading] = useState(true);
+  const [newOrgName, setNewOrgName] = useState('');
+  const [orgActionError, setOrgActionError] = useState<string | null>(null);
+  const [orgSubmitting, setOrgSubmitting] = useState(false);
+
+  const [recruiterForm, setRecruiterForm] = useState({
+    email: '', password: '', full_name: '', organization_id: '',
+  });
+  const [recruiterSubmitting, setRecruiterSubmitting] = useState(false);
+  const [recruiterError, setRecruiterError] = useState<string | null>(null);
+  const [recruiterSuccess, setRecruiterSuccess] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -154,6 +190,93 @@ export function AdminPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- standard data-fetching pattern
     loadUsers();
   }, [loadUsers]);
+
+  const loadOrganizations = useCallback(async () => {
+    if (!token) return;
+    setOrgsLoading(true);
+    try {
+      const res = await listOrganizations(token);
+      setOrganizations(res.items);
+    } catch {
+      // Non-fatal — the rest of the dashboard still renders.
+    } finally {
+      setOrgsLoading(false);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- standard data-fetching pattern
+    loadOrganizations();
+  }, [loadOrganizations]);
+
+  async function handleCreateOrganization(e: React.FormEvent) {
+    e.preventDefault();
+    if (!token || !newOrgName.trim()) return;
+    setOrgSubmitting(true);
+    setOrgActionError(null);
+    try {
+      await createOrganization({ name: newOrgName.trim() }, token);
+      setNewOrgName('');
+      await loadOrganizations();
+    } catch {
+      setOrgActionError('Could not create organization. It may already exist.');
+    } finally {
+      setOrgSubmitting(false);
+    }
+  }
+
+  async function handleToggleOrganization(org: OrganizationResponse) {
+    if (!token) return;
+    setOrgActionError(null);
+    try {
+      if (org.is_active) await deactivateOrganization(org.id, token);
+      else await activateOrganization(org.id, token);
+      await loadOrganizations();
+    } catch {
+      setOrgActionError('Could not update organization status.');
+    }
+  }
+
+  async function handleCreateRecruiter(e: React.FormEvent) {
+    e.preventDefault();
+    if (!token) return;
+    setRecruiterSubmitting(true);
+    setRecruiterError(null);
+    setRecruiterSuccess(null);
+    try {
+      const created = await createRecruiter(recruiterForm, token);
+      setRecruiterSuccess(`${created.full_name} was created and assigned to ${created.organization_name}.`);
+      setRecruiterForm({ email: '', password: '', full_name: '', organization_id: '' });
+      await Promise.all([loadOrganizations(), loadUsers()]);
+    } catch {
+      setRecruiterError('Could not create recruiter. Check the email is unique and try again.');
+    } finally {
+      setRecruiterSubmitting(false);
+    }
+  }
+
+  async function handleToggleUserActive(u: AdminUserResponse) {
+    if (!token) return;
+    setUserActionError(null);
+    try {
+      if (u.is_active) await deactivateUser(u.id, token);
+      else await activateUser(u.id, token);
+      await loadUsers();
+    } catch {
+      setUserActionError('Could not update account status.');
+    }
+  }
+
+  async function handleChangeRole(u: AdminUserResponse, role: RoleType) {
+    if (!token || role === u.role) return;
+    setUserActionError(null);
+    try {
+      await updateUserRole(u.id, { role }, token);
+      await loadUsers();
+    } catch {
+      setUserActionError("Could not change this user's role.");
+    }
+  }
 
   // Memoized above the loading/error early returns (Rules of Hooks — hooks
   // must run unconditionally on every render) so typing in the user search
@@ -392,6 +515,11 @@ export function AdminPage() {
               aria-label="Search users"
             />
           </div>
+          {userActionError && (
+            <p role="alert" style={{ color: 'var(--error-text)', fontSize: '0.8rem', margin: '0 0 0.75rem' }}>
+              {userActionError}
+            </p>
+          )}
           {usersLoading ? (
             <div style={{ padding: '1rem 0' }}>
               {Array.from({ length: 4 }).map((_, i) => (
@@ -408,9 +536,11 @@ export function AdminPage() {
                     <tr>
                       <th>Name</th>
                       <th>Email</th>
-                      <th>Joined</th>
+                      <th>Role</th>
+                      <th>Organization</th>
+                      <th>Status</th>
                       <th>Sessions</th>
-                      <th>Last active</th>
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -418,9 +548,44 @@ export function AdminPage() {
                       <tr key={u.id}>
                         <td style={{ fontWeight: 600 }}>{u.full_name}</td>
                         <td style={{ color: 'var(--muted)' }}>{u.email}</td>
-                        <td>{new Date(u.created_at).toLocaleDateString()}</td>
+                        <td>
+                          {isSuperAdmin ? (
+                            <select
+                              value={u.role}
+                              aria-label={`Change role for ${u.full_name}`}
+                              onChange={(e) => handleChangeRole(u, e.target.value as RoleType)}
+                              style={{ padding: '0.25rem 0.4rem', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text)', fontSize: '0.78rem' }}
+                            >
+                              {ASSIGNABLE_ROLES.map((r) => (
+                                <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+                              ))}
+                            </select>
+                          ) : (
+                            ROLE_LABELS[u.role]
+                          )}
+                        </td>
+                        <td style={{ color: 'var(--muted)' }}>{u.organization_name ?? '—'}</td>
+                        <td>
+                          <span
+                            style={{
+                              fontSize: '0.72rem', fontWeight: 700, padding: '0.15rem 0.55rem', borderRadius: 999,
+                              color: u.is_active ? 'var(--success-text)' : 'var(--error-text)',
+                              background: u.is_active ? 'var(--success-bg)' : 'var(--error-bg)',
+                            }}
+                          >
+                            {u.is_active ? 'Active' : 'Deactivated'}
+                          </span>
+                        </td>
                         <td style={{ fontVariantNumeric: 'tabular-nums' }}>{u.sessions_completed}</td>
-                        <td style={{ color: 'var(--muted)' }}>{timeAgo(u.latest_session_at)}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => handleToggleUserActive(u)}
+                          >
+                            {u.is_active ? 'Deactivate' : 'Activate'}
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -458,6 +623,155 @@ export function AdminPage() {
               ))}
             </div>
           )}
+        </div>
+      </div>
+
+      <div className="admin-content-grid">
+        {/* Organizations */}
+        <div className="section-panel">
+          <div className="card-header-row" style={{ marginBottom: '1rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Building2 size={16} style={{ color: 'var(--primary)' }} aria-hidden="true" />
+              <h2 className="card-header-title">Organizations</h2>
+            </div>
+          </div>
+
+          <form onSubmit={handleCreateOrganization} style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+            <input
+              type="text"
+              placeholder="New organization name…"
+              value={newOrgName}
+              onChange={(e) => setNewOrgName(e.target.value)}
+              required
+              style={{ flex: 1, padding: '0.4rem 0.75rem', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text)', fontSize: '0.82rem' }}
+              aria-label="New organization name"
+            />
+            <button type="submit" className="btn btn-primary btn-sm" disabled={orgSubmitting || !newOrgName.trim()}>
+              {orgSubmitting ? 'Creating…' : 'Create'}
+            </button>
+          </form>
+          {orgActionError && (
+            <p role="alert" style={{ color: 'var(--error-text)', fontSize: '0.8rem', margin: '0 0 0.75rem' }}>
+              {orgActionError}
+            </p>
+          )}
+
+          {orgsLoading ? (
+            <div style={{ padding: '1rem 0' }}>
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} style={{ height: '2.5rem', background: 'var(--surface-2)', borderRadius: 6, marginBottom: '0.5rem' }} className="skeleton" />
+              ))}
+            </div>
+          ) : organizations.length === 0 ? (
+            <EmptyState title="No organizations yet" description="Create one above to start assigning recruiters." />
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table className="recruiter-table" aria-label="Organizations">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Recruiters</th>
+                    <th>Candidates</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {organizations.map((org) => (
+                    <tr key={org.id}>
+                      <td style={{ fontWeight: 600 }}>{org.name}</td>
+                      <td style={{ fontVariantNumeric: 'tabular-nums' }}>{org.recruiter_count}</td>
+                      <td style={{ fontVariantNumeric: 'tabular-nums' }}>{org.candidate_count}</td>
+                      <td>
+                        <span
+                          style={{
+                            fontSize: '0.72rem', fontWeight: 700, padding: '0.15rem 0.55rem', borderRadius: 999,
+                            color: org.is_active ? 'var(--success-text)' : 'var(--error-text)',
+                            background: org.is_active ? 'var(--success-bg)' : 'var(--error-bg)',
+                          }}
+                        >
+                          {org.is_active ? 'Active' : 'Deactivated'}
+                        </span>
+                      </td>
+                      <td>
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleToggleOrganization(org)}>
+                          {org.is_active ? 'Deactivate' : 'Activate'}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* Create recruiter */}
+        <div className="section-panel">
+          <div className="card-header-row" style={{ marginBottom: '1rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <UserPlus size={16} style={{ color: 'var(--primary)' }} aria-hidden="true" />
+              <h2 className="card-header-title">Create Recruiter</h2>
+            </div>
+          </div>
+          <form onSubmit={handleCreateRecruiter} style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+            <input
+              type="text"
+              placeholder="Full name"
+              value={recruiterForm.full_name}
+              onChange={(e) => setRecruiterForm((f) => ({ ...f, full_name: e.target.value }))}
+              required
+              style={{ padding: '0.5rem 0.75rem', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text)', fontSize: '0.85rem' }}
+            />
+            <input
+              type="email"
+              placeholder="Email"
+              value={recruiterForm.email}
+              onChange={(e) => setRecruiterForm((f) => ({ ...f, email: e.target.value }))}
+              required
+              style={{ padding: '0.5rem 0.75rem', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text)', fontSize: '0.85rem' }}
+            />
+            <input
+              type="password"
+              placeholder="Temporary password (min 8 characters)"
+              value={recruiterForm.password}
+              onChange={(e) => setRecruiterForm((f) => ({ ...f, password: e.target.value }))}
+              required
+              minLength={8}
+              style={{ padding: '0.5rem 0.75rem', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text)', fontSize: '0.85rem' }}
+            />
+            <select
+              value={recruiterForm.organization_id}
+              onChange={(e) => setRecruiterForm((f) => ({ ...f, organization_id: e.target.value }))}
+              required
+              aria-label="Organization"
+              style={{ padding: '0.5rem 0.75rem', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text)', fontSize: '0.85rem' }}
+            >
+              <option value="" disabled>Select organization…</option>
+              {organizations.map((org) => (
+                <option key={org.id} value={org.id}>{org.name}</option>
+              ))}
+            </select>
+            {recruiterError && (
+              <p role="alert" style={{ color: 'var(--error-text)', fontSize: '0.8rem', margin: 0 }}>{recruiterError}</p>
+            )}
+            {recruiterSuccess && (
+              <p style={{ color: 'var(--success-text)', fontSize: '0.8rem', margin: 0 }}>{recruiterSuccess}</p>
+            )}
+            <button
+              type="submit"
+              className="btn btn-primary btn-sm"
+              disabled={recruiterSubmitting || organizations.length === 0}
+              style={{ alignSelf: 'flex-start' }}
+            >
+              {recruiterSubmitting ? 'Creating…' : 'Create Recruiter'}
+            </button>
+            {organizations.length === 0 && (
+              <p style={{ color: 'var(--muted)', fontSize: '0.78rem', margin: 0 }}>
+                Create an organization first.
+              </p>
+            )}
+          </form>
         </div>
       </div>
     </motion.div>

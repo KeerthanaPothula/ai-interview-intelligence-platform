@@ -1,8 +1,10 @@
 import { lazy, Suspense } from 'react';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { Layout } from './components/Layout';
+import { RequireRole } from './components/RequireRole';
 import { AuthProvider } from './context/AuthContext';
 import { FeaturesProvider } from './context/FeaturesContext';
+import { RoleProvider } from './context/RoleContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { ToastProvider } from './context/ToastContext';
 
@@ -12,6 +14,7 @@ import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
 import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
+import { UnauthorizedPage } from './pages/UnauthorizedPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 
 // Lazy-load authenticated feature pages (Phase 12 — route-based code splitting)
@@ -54,65 +57,122 @@ function PageFallback() {
   );
 }
 
+// Role gates, matching Phase 4's page-visibility spec exactly: Candidate
+// pages are also reachable by Super Admin ("Super Admin: Everything");
+// Recruiter's and Admin's own dashboards are not reachable by each other,
+// or by Super Admin's peers — only by Super Admin itself. Settings
+// (/profile) is common to every role.
+const CANDIDATE_ROLES = ['candidate', 'super_admin'] as const;
+const RECRUITER_ROLES = ['recruiter', 'super_admin'] as const;
+const ADMIN_ROLES = ['admin', 'super_admin'] as const;
+const ANY_ROLE = ['candidate', 'recruiter', 'admin', 'super_admin'] as const;
+
 export default function App() {
   return (
     <ThemeProvider>
       <ToastProvider>
         <AuthProvider>
-          <FeaturesProvider>
-            <BrowserRouter>
-              <Routes>
-                <Route path="/" element={<LandingPage />} />
-                <Route path="/login" element={<LoginPage />} />
-                <Route path="/register" element={<RegisterPage />} />
-                <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-                <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
-                <Route element={<Layout />}>
-                  <Route
-                    path="/sessions"
-                    element={<Suspense fallback={<PageFallback />}><SessionsListPage /></Suspense>}
-                  />
-                  <Route
-                    path="/sessions/:sessionId"
-                    element={<Suspense fallback={<PageFallback />}><SessionDetailPage /></Suspense>}
-                  />
-                  <Route
-                    path="/sessions/:sessionId/report"
-                    element={<Suspense fallback={<PageFallback />}><InterviewReportPage /></Suspense>}
-                  />
-                  <Route
-                    path="/dashboard"
-                    element={<Suspense fallback={<PageFallback />}><DashboardPage /></Suspense>}
-                  />
-                  <Route
-                    path="/live-interview"
-                    element={<Suspense fallback={<PageFallback />}><LiveInterviewPage /></Suspense>}
-                  />
-                  <Route
-                    path="/analytics"
-                    element={<Suspense fallback={<PageFallback />}><AnalyticsPage /></Suspense>}
-                  />
-                  <Route
-                    path="/resume"
-                    element={<Suspense fallback={<PageFallback />}><ResumePage /></Suspense>}
-                  />
-                  <Route
-                    path="/profile"
-                    element={<Suspense fallback={<PageFallback />}><ProfilePage /></Suspense>}
-                  />
-                  <Route
-                    path="/recruiter"
-                    element={<Suspense fallback={<PageFallback />}><RecruiterPage /></Suspense>}
-                  />
-                  <Route
-                    path="/admin"
-                    element={<Suspense fallback={<PageFallback />}><AdminPage /></Suspense>}
-                  />
-                </Route>
-                <Route path="*" element={<NotFoundPage />} />
-              </Routes>
-            </BrowserRouter>
-          </FeaturesProvider>
+          <RoleProvider>
+            <FeaturesProvider>
+              <BrowserRouter>
+                <Routes>
+                  <Route path="/" element={<LandingPage />} />
+                  <Route path="/login" element={<LoginPage />} />
+                  <Route path="/register" element={<RegisterPage />} />
+                  <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+                  <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
+                  <Route element={<Layout />}>
+                    <Route path="/unauthorized" element={<UnauthorizedPage />} />
+                    <Route
+                      path="/sessions"
+                      element={
+                        <RequireRole roles={[...CANDIDATE_ROLES]}>
+                          <Suspense fallback={<PageFallback />}><SessionsListPage /></Suspense>
+                        </RequireRole>
+                      }
+                    />
+                    <Route
+                      path="/sessions/:sessionId"
+                      element={
+                        <RequireRole roles={[...CANDIDATE_ROLES]}>
+                          <Suspense fallback={<PageFallback />}><SessionDetailPage /></Suspense>
+                        </RequireRole>
+                      }
+                    />
+                    <Route
+                      path="/sessions/:sessionId/report"
+                      element={
+                        // Reachable by Recruiter too — this is the "Open
+                        // report" link from the Recruiter dashboard's
+                        // candidate detail panel (Phase 8), not just a
+                        // candidate reviewing their own report.
+                        <RequireRole roles={[...CANDIDATE_ROLES, 'recruiter']}>
+                          <Suspense fallback={<PageFallback />}><InterviewReportPage /></Suspense>
+                        </RequireRole>
+                      }
+                    />
+                    <Route
+                      path="/dashboard"
+                      element={
+                        <RequireRole roles={[...CANDIDATE_ROLES]}>
+                          <Suspense fallback={<PageFallback />}><DashboardPage /></Suspense>
+                        </RequireRole>
+                      }
+                    />
+                    <Route
+                      path="/live-interview"
+                      element={
+                        <RequireRole roles={[...CANDIDATE_ROLES]}>
+                          <Suspense fallback={<PageFallback />}><LiveInterviewPage /></Suspense>
+                        </RequireRole>
+                      }
+                    />
+                    <Route
+                      path="/analytics"
+                      element={
+                        <RequireRole roles={[...CANDIDATE_ROLES]}>
+                          <Suspense fallback={<PageFallback />}><AnalyticsPage /></Suspense>
+                        </RequireRole>
+                      }
+                    />
+                    <Route
+                      path="/resume"
+                      element={
+                        <RequireRole roles={[...CANDIDATE_ROLES]}>
+                          <Suspense fallback={<PageFallback />}><ResumePage /></Suspense>
+                        </RequireRole>
+                      }
+                    />
+                    <Route
+                      path="/profile"
+                      element={
+                        <RequireRole roles={[...ANY_ROLE]}>
+                          <Suspense fallback={<PageFallback />}><ProfilePage /></Suspense>
+                        </RequireRole>
+                      }
+                    />
+                    <Route
+                      path="/recruiter"
+                      element={
+                        <RequireRole roles={[...RECRUITER_ROLES]}>
+                          <Suspense fallback={<PageFallback />}><RecruiterPage /></Suspense>
+                        </RequireRole>
+                      }
+                    />
+                    <Route
+                      path="/admin"
+                      element={
+                        <RequireRole roles={[...ADMIN_ROLES]}>
+                          <Suspense fallback={<PageFallback />}><AdminPage /></Suspense>
+                        </RequireRole>
+                      }
+                    />
+                  </Route>
+                  <Route path="*" element={<NotFoundPage />} />
+                </Routes>
+              </BrowserRouter>
+            </FeaturesProvider>
+          </RoleProvider>
         </AuthProvider>
       </ToastProvider>
     </ThemeProvider>

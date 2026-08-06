@@ -3,9 +3,12 @@ import { Eye, EyeOff, Lock, Mail } from 'lucide-react';
 import { Link, Navigate } from 'react-router-dom';
 import { ApiError } from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import { useRole } from '../context/RoleContext';
+import { homeRouteForRole } from '../utils/roleRoutes';
 
 export function LoginPage() {
   const { login, isAuthenticated } = useAuth();
+  const { role, roleLoading } = useRole();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
@@ -13,8 +16,21 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  if (isAuthenticated && roleLoading) {
+    // Role isn't known yet — wait rather than redirecting to a guessed
+    // default, since Phase 10 requires each role to land on its own
+    // dashboard (Recruiter -> /recruiter, Admin -> /admin), not a
+    // one-size-fits-all /dashboard that RequireRole would then bounce a
+    // Recruiter/Admin straight back out of.
+    return (
+      <div className="auth-page">
+        <span className="spinner" style={{ width: 32, height: 32, borderWidth: 3 }} aria-label="Loading" />
+      </div>
+    );
+  }
+
   if (isAuthenticated) {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to={homeRouteForRole(role)} replace />;
   }
 
   async function handleSubmit(event: FormEvent) {

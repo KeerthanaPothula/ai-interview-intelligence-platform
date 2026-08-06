@@ -42,6 +42,34 @@ VALID_SESSION_STATUSES = {
 }
 
 # ---------------------------------------------------------------------------
+# Recruiter pipeline status constants — InterviewSession.recruiter_status
+#
+# Distinct from `status` above (which tracks the *candidate's* progress
+# through the interview itself). This tracks a *recruiter's* review of an
+# already-completed, already-reported session — set only by
+# app.services.recruiter_service, never by the candidate-facing interview
+# flow. Only sessions with status == SESSION_STATUS_COMPLETED and a
+# SessionReport are ever surfaced to a recruiter in the first place (see
+# recruiter_service.list_candidates), so this field is meaningless/unset
+# for draft, in_progress, or processing sessions.
+# ---------------------------------------------------------------------------
+RECRUITER_STATUS_APPLIED = "applied"
+RECRUITER_STATUS_REVIEWING = "reviewing"
+RECRUITER_STATUS_INTERVIEWED = "interviewed"
+RECRUITER_STATUS_SHORTLISTED = "shortlisted"
+RECRUITER_STATUS_REJECTED = "rejected"
+RECRUITER_STATUS_HIRED = "hired"
+
+VALID_RECRUITER_STATUSES = {
+    RECRUITER_STATUS_APPLIED,
+    RECRUITER_STATUS_REVIEWING,
+    RECRUITER_STATUS_INTERVIEWED,
+    RECRUITER_STATUS_SHORTLISTED,
+    RECRUITER_STATUS_REJECTED,
+    RECRUITER_STATUS_HIRED,
+}
+
+# ---------------------------------------------------------------------------
 # Source and category constants — Question
 # ---------------------------------------------------------------------------
 QUESTION_SOURCE_AI_GENERATED = "ai_generated"
@@ -100,6 +128,18 @@ class InterviewSession(Base):
     # since all inserts go through the ORM.
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default=SESSION_STATUS_DRAFT
+    )
+
+    # Nullable rather than defaulted to "applied" at the DB level: a session
+    # that never reaches SESSION_STATUS_COMPLETED (and therefore never gets
+    # a SessionReport) never enters the recruiter pipeline at all, so NULL
+    # correctly means "not a recruiter-visible candidate yet" rather than
+    # implying every draft session is silently "applied" to some recruiter.
+    # recruiter_service assigns RECRUITER_STATUS_APPLIED explicitly the
+    # first time a completed+reported session appears in a recruiter's
+    # candidate list.
+    recruiter_status: Mapped[str | None] = mapped_column(
+        String(20), nullable=True, default=None
     )
 
     created_at: Mapped[datetime] = mapped_column(

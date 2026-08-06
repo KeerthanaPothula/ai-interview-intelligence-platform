@@ -4,15 +4,26 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Integer, String, Uuid, func
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Uuid,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+from app.models.role import DEFAULT_ROLE, ROLE_VALUES
 
 if TYPE_CHECKING:
     from app.models.conversation import LiveInterviewSession
     from app.models.documents import DocumentChunk, ResumeDocument
     from app.models.interview import InterviewSession
+    from app.models.organization import Organization
     from app.models.password_reset_token import PasswordResetToken
     from app.models.refresh_token import RefreshToken
 
@@ -22,10 +33,24 @@ class User(Base):
     ORM model for the `users` table.
 
     Stores credentials and identity for every registered account.
-    One row per user — no organisation or role concept in the MVP.
+
+    RBAC / multi-tenancy: every user has exactly one `role` (see
+    app.models.role.Role) and an optional `organization_id`. Registration
+    always assigns Role.CANDIDATE server-side (app.services.auth_service);
+    only a Super Admin can change a user's role afterward
+    (app.core.permissions.can_assign_roles). Organization membership is
+    required for RECRUITER/ADMIN and optional for CANDIDATE — a candidate's
+    organization_id is NULL until an Admin/Super Admin invites them into
+    one; it is never set at self-registration.
     """
 
     __tablename__ = "users"
+    __table_args__ = (
+        CheckConstraint(
+            f"role IN ({', '.join(repr(v) for v in sorted(ROLE_VALUES))})",
+            name="ck_users_role",
+        ),
+    )
 
     # ------------------------------------------------------------------
     # Primary key
@@ -188,6 +213,59 @@ class User(Base):
         default=0,
         server_default="0",
         comment="Incremented to invalidate all previously issued access tokens.",
+    )
+
+    # ------------------------------------------------------------------
+    # RBAC / multi-tenancy
+    #
+    # role: plain string, not a native DB ENUM — see Role's docstring for
+    # why (matches InterviewSession.status's existing convention). Guarded
+    # at the DB level by ck_users_role above, and validated again in
+    # Python via app.models.role.ROLE_VALUES anywhere a role is assigned
+    # outside the ORM's own CHECK-constraint enforcement (e.g. before a
+    # commit, so the error surfaces as a clean 422/400 instead of an
+    # IntegrityError from the database driver).
+    #
+    # organization_id: nullable — required in practice for RECRUITER/ADMIN
+    # (enforced in app.services.auth_service / admin recruiter-creation,
+    # not by a DB constraint, since a CANDIDATE legitimately has NULL
+    # here). ON DELETE SET NULL: deactivating/deleting an organization
+    # must never cascade-delete the people who were in it.
+    #
+    # is_active: sits on User (not just Organization) so an Admin can
+    # deactivate a single recruiter without touching their organization.
+    # Checked in get_current_user-adjacent authorization, not baked into
+    # get_current_user itself — see app.core.deps.require_active_user.
+    # ------------------------------------------------------------------
+    role: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default=DEFAULT_ROLE,
+        server_default=DEFAULT_ROLE,
+        comment="One of Role's values. Assigned CANDIDATE at registration; "
+        "changed only by a Super Admin thereafter.",
+    )
+
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid,
+        ForeignKey("organizations.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="NULL for an unaffiliated candidate. Required in practice for "
+        "RECRUITER/ADMIN accounts, which are always created already assigned "
+        "to an organization.",
+    )
+
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default="true",
+        comment="Deactivated accounts (e.g. an offboarded recruiter) fail "
+        "authorization even with a valid, unexpired JWT.",
+    )
+
+    organization: Mapped["Organization | None"] = relationship(
+        "Organization", back_populates="members"
     )
 
     sessions: Mapped[list["InterviewSession"]] = relationship(

@@ -42,6 +42,17 @@ export interface RefreshRequest {
   refresh_token: string;
 }
 
+// ---------------------------------------------------------------------------
+// RBAC / multi-tenancy (backend/app/models/role.py, app/models/organization.py)
+// ---------------------------------------------------------------------------
+
+export type Role = 'super_admin' | 'admin' | 'recruiter' | 'candidate';
+
+export interface OrganizationBrief {
+  id: string;
+  name: string;
+}
+
 export interface UserCreate {
   email: string;
   password: string;
@@ -52,6 +63,8 @@ export interface UserResponse {
   id: string;
   email: string;
   full_name: string;
+  role: Role;
+  organization: OrganizationBrief | null;
   created_at: string;
 }
 
@@ -396,7 +409,15 @@ export interface ChangePasswordRequest {
 // Recruiter Dashboard (backend/app/schemas/recruiter.py)
 // ---------------------------------------------------------------------------
 
-export type CandidateStatus = 'shortlisted' | 'reviewing' | 'pending' | 'rejected';
+// Persisted recruiter-pipeline status (InterviewSession.recruiter_status) —
+// distinct from `Role`, which is the RBAC role of a User.
+export type CandidateStatus =
+  | 'applied'
+  | 'reviewing'
+  | 'interviewed'
+  | 'shortlisted'
+  | 'rejected'
+  | 'hired';
 
 export interface CandidateResponse {
   id: string;
@@ -411,6 +432,10 @@ export interface CandidateResponse {
   sessions_completed: number;
   status: CandidateStatus;
   applied_days: number;
+}
+
+export interface UpdateCandidateStatusRequest {
+  status: CandidateStatus;
 }
 
 export interface CandidateSummary {
@@ -434,6 +459,10 @@ export interface AdminUserResponse {
   id: string;
   full_name: string;
   email: string;
+  role: Role;
+  organization_id: string | null;
+  organization_name: string | null;
+  is_active: boolean;
   created_at: string;
   sessions_completed: number;
   latest_session_at: string | null;
@@ -488,4 +517,37 @@ export interface AdminActivityEvent {
   title: string;
   subtitle: string | null;
   created_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Organization management (backend/app/schemas/admin.py) — Phase 9
+// ---------------------------------------------------------------------------
+
+export interface OrganizationResponse {
+  id: string;
+  name: string;
+  is_active: boolean;
+  created_at: string;
+  recruiter_count: number;
+  candidate_count: number;
+}
+
+export interface OrganizationListResponse {
+  items: OrganizationResponse[];
+  total: number;
+}
+
+export interface CreateOrganizationRequest {
+  name: string;
+}
+
+export interface CreateRecruiterRequest {
+  email: string;
+  password: string;
+  full_name: string;
+  organization_id: string;
+}
+
+export interface UpdateUserRoleRequest {
+  role: Role;
 }

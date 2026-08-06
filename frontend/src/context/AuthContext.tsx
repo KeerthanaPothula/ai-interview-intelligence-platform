@@ -13,6 +13,15 @@ import type { UserCreate, UserResponse } from '../api/types';
 interface AuthContextValue {
   token: string | null;
   user: UserResponse | null;
+  // True whenever the current `token` hasn't been resolved to a `user`
+  // object yet (fetch in flight, hasn't started, or failed) — see the
+  // `fetchedForToken` comment below for why this needs to be a token
+  // *identity* comparison rather than a plain boolean. Role-gated UI
+  // (RequireRole, Sidebar) must wait for this to go false before deciding
+  // "this role can't see this page" — otherwise every login/page load
+  // flashes an unauthorized redirect during the gap between the token
+  // being set and `user` (and therefore `user.role`) being known.
+  userLoading: boolean;
   isAuthenticated: boolean;
   login: (email: string, password: string, rememberMe?: boolean) => Promise<void>;
   register: (data: UserCreate) => Promise<void>;
@@ -24,6 +33,19 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(() => api.readStoredAccessToken());
   const [user, setUser] = useState<UserResponse | null>(null);
+  // Which token the most recent completed (success-or-failure) /auth/me
+  // fetch was for. Compared by *identity* against the current token,
+  // rather than a plain "isLoading" boolean set from inside the effect
+  // below: a boolean set from an effect necessarily lags one render behind
+  // the token change that triggered it (effects run after commit), so
+  // right after login() calls setToken(), the very first re-render would
+  // read a stale "not loading" flag left over from the previous session —
+  // exactly the window RequireRole must never see a wrong role in. Since
+  // `fetchedForToken` only ever changes to match a token once that
+  // token's fetch has genuinely settled, comparing it against the live
+  // `token` value is correct in that same first render, with no lag.
+  const [fetchedForToken, setFetchedForToken] = useState<string | null>(null);
+  const userLoading = token !== null && fetchedForToken !== token;
 
   const login = useCallback(async (email: string, password: string, rememberMe = true) => {
     const result = await api.login(email, password);
@@ -91,6 +113,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       })
       .catch(() => {
         // See comment above.
+      })
+      .finally(() => {
+        // Marks this token's fetch as settled regardless of outcome —
+        // without this, a non-401 failure (e.g. a network blip; a 401 is
+        // already handled by clearing the token entirely via the
+        // onUnauthorized handler above) would leave userLoading stuck
+        // true forever, since `user` would never end up populated.
+        if (!cancelled) setFetchedForToken(token);
       });
     return () => {
       cancelled = true;
@@ -98,8 +128,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [token]);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ token, user, isAuthenticated: token !== null, login, register, logout }),
-    [token, user, login, register, logout],
+    () => ({ token, user, userLoading, isAuthenticated: token !== null, login, register, logout }),
+    [token, user, userLoading, login, register, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

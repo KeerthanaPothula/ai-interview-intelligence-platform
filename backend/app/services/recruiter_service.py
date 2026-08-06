@@ -1,21 +1,27 @@
 """Aggregation service for the recruiter dashboard.
 
-The User model has no role/organisation concept (see its docstring) — this
-is a single-tenant MVP schema. Rather than bolt on a role system, the
-recruiter dashboard treats every user's latest *completed* interview as a
-"candidate" row and is reachable by any authenticated user, matching the
-route's existing (pre-this-change) access model. That is an acceptable
-trade-off for a demo/portfolio app seeded with fake accounts; a real
-multi-tenant deployment would need a recruiter role gate before this
-became appropriate.
+Multi-tenant scoping: a Recruiter only ever sees candidates whose
+User.organization_id matches their own organization — see
+_scope_organization_id and its use in _all_candidates. Admin/Super Admin
+pass organization_id=None and see every organization's candidates
+unscoped. The router's role gate (can_view_candidates in
+app.core.permissions) guarantees only these three roles reach this module
+at all — a Candidate can never call list_candidates.
+
+Lifecycle: a session becomes a "candidate" row only once it has reached
+SESSION_STATUS_COMPLETED *and* has a SessionReport (see the INNER JOIN on
+SessionReport in _all_candidates) — an in-progress or draft interview never
+appears here, satisfying the
+"Creates Interview -> Completes -> Evaluation -> Report -> Recruiter can
+view" lifecycle by construction, not by an extra filter bolted on top.
 
 Sorting and filtering happen in Python after two small aggregate queries
 rather than one large SQL query with computed ORDER BY, because the score
 columns are themselves aggregates (AVG across a session's responses) and
 per-candidate resume scores are a heuristic computed from resume text that
-isn't stored anywhere. At this app's scale (one row per registered user)
-that's a non-issue; it would need to move into SQL if the user base grew
-into the tens of thousands.
+isn't stored anywhere. At this app's scale (one row per organization member)
+that's a non-issue; it would need to move into SQL if any single
+organization's headcount grew into the tens of thousands.
 """
 
 from __future__ import annotations
@@ -24,12 +30,19 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.documents import ResumeDocument
 from app.models.features import SessionReport
-from app.models.interview import SESSION_STATUS_COMPLETED, InterviewSession
+from app.models.interview import (
+    RECRUITER_STATUS_APPLIED,
+    SESSION_STATUS_COMPLETED,
+    VALID_RECRUITER_STATUSES,
+    InterviewSession,
+)
+from app.models.role import Role
 from app.models.user import User
 from app.services.resume_scoring import estimate_ats_score
 
@@ -41,7 +54,7 @@ VALID_SORT_KEYS = {
     "technical",
     "appliedDays",
 }
-VALID_STATUSES = {"shortlisted", "reviewing", "pending", "rejected"}
+VALID_STATUSES = VALID_RECRUITER_STATUSES
 
 
 @dataclass(frozen=True)
@@ -65,17 +78,23 @@ def _as_aware_utc(dt: datetime) -> datetime:
     return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
 
 
-def _status_for_score(score: int) -> str:
-    if score >= 85:
-        return "shortlisted"
-    if score >= 70:
-        return "reviewing"
-    if score >= 55:
-        return "pending"
-    return "rejected"
+def scope_organization_id(current_user: User) -> uuid.UUID | None:
+    """Return the organization_id to scope candidate queries to, or None
+    for "no scoping" (platform-wide — Admin/Super Admin only).
+
+    A Recruiter with organization_id=None (should never happen in practice
+    — Admin-created recruiter accounts always assign one — but defensively
+    handled) sees zero candidates rather than the whole platform: falling
+    open on a misconfigured account would be the actual security bug here.
+    """
+    if current_user.role in (Role.ADMIN.value, Role.SUPER_ADMIN.value):
+        return None
+    return current_user.organization_id
 
 
-def _all_candidates(db: Session) -> list[Candidate]:
+def _all_candidates(
+    db: Session, *, organization_id: uuid.UUID | None
+) -> list[Candidate]:
     # ROW_NUMBER() rather than a self-join on MAX(created_at): sessions
     # created within the same wall-clock second (SQLite's DateTime
     # resolution, exercised by tests that create two sessions back-to-back)
@@ -105,7 +124,7 @@ def _all_candidates(db: Session) -> list[Candidate]:
         .subquery()
     )
 
-    rows = db.execute(
+    query = (
         select(
             InterviewSession,
             SessionReport,
@@ -123,7 +142,11 @@ def _all_candidates(db: Session) -> list[Candidate]:
             sessions_completed_subq,
             sessions_completed_subq.c.user_id == InterviewSession.user_id,
         )
-    ).all()
+    )
+    if organization_id is not None:
+        query = query.where(User.organization_id == organization_id)
+
+    rows = db.execute(query).all()
 
     if not rows:
         return []
@@ -149,7 +172,9 @@ def _all_candidates(db: Session) -> list[Candidate]:
     for session, report, user, sessions_completed in rows:
         interview_score = round(float(report.final_score or 0) * 10)
         resume_text = latest_resume_text.get(user.id)
-        resume_score = estimate_ats_score(len(resume_text.split())) if resume_text else None
+        resume_score = (
+            estimate_ats_score(len(resume_text.split())) if resume_text else None
+        )
         applied_days = max(0, (now - _as_aware_utc(session.created_at)).days)
         candidates.append(
             Candidate(
@@ -163,7 +188,7 @@ def _all_candidates(db: Session) -> list[Candidate]:
                 communication=round(float(report.communication_score or 0) * 10),
                 technical=round(float(report.technical_score or 0) * 10),
                 sessions_completed=sessions_completed,
-                status=_status_for_score(interview_score),
+                status=session.recruiter_status or RECRUITER_STATUS_APPLIED,
                 applied_days=applied_days,
             )
         )
@@ -173,6 +198,7 @@ def _all_candidates(db: Session) -> list[Candidate]:
 def list_candidates(
     db: Session,
     *,
+    current_user: User,
     search: str | None = None,
     status: str | None = None,
     sort_by: str = "interviewScore",
@@ -183,9 +209,13 @@ def list_candidates(
     """Return a page of candidates, the total match count, and summary stats.
 
     Summary stats (avg scores, shortlisted count) are computed over the
-    full filtered set, not just the returned page.
+    full filtered set, not just the returned page. Scoped to
+    current_user's organization unless they're Admin/Super Admin — see
+    scope_organization_id.
     """
-    candidates = _all_candidates(db)
+    candidates = _all_candidates(
+        db, organization_id=scope_organization_id(current_user)
+    )
 
     if search:
         needle = search.strip().lower()
@@ -206,9 +236,13 @@ def list_candidates(
     summary: dict[str, float | int | None] = {
         "total_candidates": total,
         "shortlisted_count": sum(1 for c in candidates if c.status == "shortlisted"),
-        "avg_resume_score": round(sum(resume_scores) / len(resume_scores), 1) if resume_scores else None,
+        "avg_resume_score": round(sum(resume_scores) / len(resume_scores), 1)
+        if resume_scores
+        else None,
         "avg_interview_score": (
-            round(sum(c.interview_score for c in candidates) / total, 1) if total else None
+            round(sum(c.interview_score for c in candidates) / total, 1)
+            if total
+            else None
         ),
     }
 
@@ -225,3 +259,61 @@ def list_candidates(
 
     page = candidates[skip : skip + limit]
     return page, total, summary
+
+
+def update_candidate_status(
+    db: Session,
+    *,
+    session_id: uuid.UUID,
+    new_status: str,
+    current_user: User,
+) -> Candidate:
+    """Persist a recruiter-pipeline status change for one candidate's
+    latest completed session.
+
+    Raises 422 for an invalid status value, 404 if the session doesn't
+    exist, isn't a completed+reported candidate row, or (for a Recruiter)
+    belongs to a different organization — 404 rather than 403 for the
+    org-mismatch case specifically, so a Recruiter probing session IDs
+    outside their organization cannot distinguish "wrong org" from
+    "doesn't exist" (the same enumeration-avoidance reasoning already used
+    elsewhere in this codebase, e.g. login's "incorrect email or password").
+    """
+    if new_status not in VALID_RECRUITER_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid status. Must be one of: {', '.join(sorted(VALID_RECRUITER_STATUSES))}.",
+        )
+
+    row = db.execute(
+        select(InterviewSession, User)
+        .join(SessionReport, SessionReport.session_id == InterviewSession.id)
+        .join(User, User.id == InterviewSession.user_id)
+        .where(
+            InterviewSession.id == session_id,
+            InterviewSession.status == SESSION_STATUS_COMPLETED,
+        )
+    ).first()
+
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Candidate not found.")
+
+    session, candidate_user = row
+    org_scope = scope_organization_id(current_user)
+    if org_scope is not None and candidate_user.organization_id != org_scope:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Candidate not found.")
+
+    session.recruiter_status = new_status
+    db.commit()
+    db.refresh(session)
+
+    updated = [
+        c
+        for c in _all_candidates(db, organization_id=org_scope)
+        if c.session_id == session_id
+    ]
+    if not updated:
+        # Defensive — the row we just updated should always still match
+        # the same query that found it above.
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Candidate not found.")
+    return updated[0]

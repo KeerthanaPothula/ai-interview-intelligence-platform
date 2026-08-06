@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.constants import API_V1_PREFIX
 from app.core.deps import get_current_user
 from app.core.pagination import PaginationParams, pagination_params
+from app.core.permissions import can_create_interview, can_generate_questions
 from app.database import get_db
 from app.models.interview import SESSION_STATUS_DRAFT
 from app.models.user import User
@@ -40,14 +41,14 @@ router = APIRouter(
 def create_session(
     data: SessionCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(can_create_interview()),
 ) -> SessionDetailResponse:
     """Create an interview session owned by the authenticated user.
 
     The session is created in 'draft' status. Questions are generated in a
     separate call to POST /{session_id}/questions/generate.
 
-    Authentication: Bearer token required.
+    Authorization: Candidate (or Super Admin). Never Recruiter or Admin.
     """
     session = interview_service.create_session(db, current_user.id, data)
     return SessionDetailResponse.model_validate(session).model_copy(
@@ -173,7 +174,7 @@ def delete_session(
 def generate_questions(
     session_id: uuid.UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(can_generate_questions()),
 ) -> list[QuestionResponse]:
     """Generate interview questions for a draft session using Gemini.
 

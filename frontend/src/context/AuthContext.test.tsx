@@ -7,6 +7,8 @@ const MOCK_USER = {
   id: 'user-1',
   email: 'jane@example.com',
   full_name: 'Jane Smith',
+  role: 'candidate' as const,
+  organization: null,
   created_at: '2026-01-01T00:00:00Z',
 };
 
@@ -47,6 +49,54 @@ describe('AuthContext', () => {
     expect(result.current.token).toBe('stored-token');
 
     await waitFor(() => expect(result.current.user).toEqual(MOCK_USER));
+  });
+
+  it('userLoading is true in the same update where isAuthenticated first becomes true after login()', async () => {
+    // Regression test: userLoading must never be a plain useState flag
+    // set from inside the getMe() effect, because that necessarily lags
+    // one render behind the token change — RequireRole would briefly see
+    // isAuthenticated=true with userLoading=false and role=null right
+    // after login, and (wrongly) redirect to /unauthorized before the
+    // real role was ever known. See AuthContext.tsx's userLoading comment.
+    let resolveGetMe: (user: typeof MOCK_USER) => void = () => {};
+    vi.spyOn(api, 'getMe').mockReturnValue(
+      new Promise((resolve) => {
+        resolveGetMe = resolve;
+      }),
+    );
+    vi.spyOn(api, 'login').mockResolvedValue(MOCK_TOKEN);
+    const { result } = renderHook(() => useAuth(), { wrapper });
+
+    await act(async () => {
+      await result.current.login('jane@example.com', 'password123', true);
+    });
+
+    // getMe() has not resolved yet — isAuthenticated is already true, and
+    // userLoading must already be true too, in this same state update.
+    expect(result.current.isAuthenticated).toBe(true);
+    expect(result.current.user).toBeNull();
+    expect(result.current.userLoading).toBe(true);
+
+    await act(async () => {
+      resolveGetMe(MOCK_USER);
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(result.current.userLoading).toBe(false));
+    expect(result.current.user).toEqual(MOCK_USER);
+  });
+
+  it('userLoading becomes false even if getMe() fails for a non-401 reason (no stuck spinner)', async () => {
+    vi.spyOn(api, 'getMe').mockRejectedValue(new Error('network blip'));
+    vi.spyOn(api, 'login').mockResolvedValue(MOCK_TOKEN);
+    const { result } = renderHook(() => useAuth(), { wrapper });
+
+    await act(async () => {
+      await result.current.login('jane@example.com', 'password123', true);
+    });
+
+    await waitFor(() => expect(result.current.userLoading).toBe(false));
+    expect(result.current.isAuthenticated).toBe(true);
+    expect(result.current.user).toBeNull();
   });
 
   it('login() stores tokens and flips isAuthenticated', async () => {

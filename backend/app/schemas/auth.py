@@ -22,16 +22,30 @@ class UserCreate(BaseModel):
         return stripped
 
 
+class OrganizationBrief(BaseModel):
+    """Minimal organization info embedded in UserResponse — the full
+    OrganizationResponse (with member counts) lives in app.schemas.admin
+    and is only returned by the admin organization-management endpoints."""
+
+    id: uuid.UUID
+    name: str
+
+    model_config = {"from_attributes": True}
+
+
 class UserResponse(BaseModel):
     """Returned by register and /me endpoints. Never includes the password."""
 
     id: uuid.UUID
     email: EmailStr
     full_name: str
+    role: str
+    organization: OrganizationBrief | None = None
     created_at: datetime
 
     # from_attributes=True allows Pydantic to read values from SQLAlchemy
-    # ORM instances (attribute access) rather than only from dicts.
+    # ORM instances (attribute access) rather than only from dicts — reads
+    # user.organization (the relationship) straight into OrganizationBrief.
     model_config = {"from_attributes": True}
 
 

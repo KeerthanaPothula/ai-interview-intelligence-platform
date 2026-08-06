@@ -71,6 +71,9 @@ from app.models.interview import (
     Question,
     QUESTION_SOURCE_AI_GENERATED,
 )
+from app.models.organization import Organization
+from app.models.role import Role
+from app.models.user import User
 
 # ---------------------------------------------------------------------------
 # Test engine — SQLite in memory, shared across connections within a test
@@ -245,6 +248,195 @@ def auth_token(client, registered_user):
 def auth_headers(auth_token):
     """Return Authorization headers dict for authenticated requests."""
     return {"Authorization": f"Bearer {auth_token}"}
+
+
+# ---------------------------------------------------------------------------
+# RBAC / multi-tenant fixtures
+#
+# Every non-candidate role is created the same way real role assignment
+# happens in production: register (always CANDIDATE — see
+# auth_service.register_user) then promote directly via the `db` fixture,
+# never through a public self-service endpoint (none exists for anything
+# but CANDIDATE). Logging in afterward mints a token reflecting whatever
+# role is in the database *at login time* — get_current_user re-reads the
+# DB on every request regardless, so this matches production behavior
+# exactly rather than being a testing shortcut.
+# ---------------------------------------------------------------------------
+
+OTHER_USER = {
+    "email": "bob@example.com",
+    "password": "securepassword2",
+    "full_name": "Bob Example",
+}
+
+RECRUITER_USER = {
+    "email": "recruiter@example.com",
+    "password": "securepassword3",
+    "full_name": "Rita Recruiter",
+}
+
+OTHER_ORG_RECRUITER_USER = {
+    "email": "other-org-recruiter@example.com",
+    "password": "securepassword3b",
+    "full_name": "Rex Recruiter",
+}
+
+ADMIN_USER = {
+    "email": "admin@example.com",
+    "password": "securepassword4",
+    "full_name": "Adam Admin",
+}
+
+SUPER_ADMIN_USER = {
+    "email": "superadmin@example.com",
+    "password": "securepassword5",
+    "full_name": "Sam SuperAdmin",
+}
+
+ORG_CANDIDATE_USER = {
+    "email": "org-candidate@example.com",
+    "password": "securepassword6",
+    "full_name": "Cara Candidate",
+}
+
+
+def _login(client, user_data: dict) -> str:
+    response = client.post(
+        "/api/v1/auth/login",
+        data={"username": user_data["email"], "password": user_data["password"]},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["access_token"]
+
+
+def _register_with_role(
+    client,
+    db,
+    user_data: dict,
+    *,
+    role: str = Role.CANDIDATE.value,
+    organization_id: uuid.UUID | None = None,
+) -> dict:
+    response = client.post("/api/v1/auth/register", json=user_data)
+    assert response.status_code == 201, response.text
+    user_json = response.json()
+
+    if role != Role.CANDIDATE.value or organization_id is not None:
+        user = db.get(User, uuid.UUID(user_json["id"]))
+        user.role = role
+        user.organization_id = organization_id
+        db.commit()
+        db.refresh(user)
+
+    return user_json
+
+
+@pytest.fixture
+def organization(db):
+    """A tenant organization, e.g. for a recruiter/candidate pair."""
+    org = Organization(name="Acme Corp")
+    db.add(org)
+    db.commit()
+    db.refresh(org)
+    return org
+
+
+@pytest.fixture
+def other_organization(db):
+    """A second, distinct organization — for cross-org isolation tests."""
+    org = Organization(name="Globex Corp")
+    db.add(org)
+    db.commit()
+    db.refresh(org)
+    return org
+
+
+@pytest.fixture
+def recruiter_user(client, db, organization):
+    """A RECRUITER account belonging to `organization`."""
+    return _register_with_role(
+        client,
+        db,
+        RECRUITER_USER,
+        role=Role.RECRUITER.value,
+        organization_id=organization.id,
+    )
+
+
+@pytest.fixture
+def recruiter_token(client, recruiter_user):
+    return _login(client, RECRUITER_USER)
+
+
+@pytest.fixture
+def recruiter_headers(recruiter_token):
+    return {"Authorization": f"Bearer {recruiter_token}"}
+
+
+@pytest.fixture
+def other_org_recruiter_user(client, db, other_organization):
+    """A RECRUITER account belonging to `other_organization` — used to
+    prove a recruiter cannot see or act on another organization's
+    candidates."""
+    return _register_with_role(
+        client,
+        db,
+        OTHER_ORG_RECRUITER_USER,
+        role=Role.RECRUITER.value,
+        organization_id=other_organization.id,
+    )
+
+
+@pytest.fixture
+def other_org_recruiter_headers(client, other_org_recruiter_user):
+    token = _login(client, OTHER_ORG_RECRUITER_USER)
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+def org_candidate(client, db, organization):
+    """A CANDIDATE account belonging to `organization` — an "invited"
+    candidate, as opposed to VALID_USER/registered_user, who is always
+    unaffiliated (organization_id=None)."""
+    return _register_with_role(
+        client,
+        db,
+        ORG_CANDIDATE_USER,
+        role=Role.CANDIDATE.value,
+        organization_id=organization.id,
+    )
+
+
+@pytest.fixture
+def admin_user(client, db):
+    return _register_with_role(client, db, ADMIN_USER, role=Role.ADMIN.value)
+
+
+@pytest.fixture
+def admin_token(client, admin_user):
+    return _login(client, ADMIN_USER)
+
+
+@pytest.fixture
+def admin_headers(admin_token):
+    return {"Authorization": f"Bearer {admin_token}"}
+
+
+@pytest.fixture
+def super_admin_user(client, db):
+    return _register_with_role(
+        client, db, SUPER_ADMIN_USER, role=Role.SUPER_ADMIN.value
+    )
+
+
+@pytest.fixture
+def super_admin_token(client, super_admin_user):
+    return _login(client, SUPER_ADMIN_USER)
+
+
+@pytest.fixture
+def super_admin_headers(super_admin_token):
+    return {"Authorization": f"Bearer {super_admin_token}"}
 
 
 # ---------------------------------------------------------------------------

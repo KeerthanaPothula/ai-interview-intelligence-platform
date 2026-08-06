@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { listCandidates } from '../api/client';
+import { Link } from 'react-router-dom';
+import { listCandidates, updateCandidateStatus } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import type { CandidateResponse, CandidateStatus, CandidateSummary } from '../api/types';
 import { EmptyState, ErrorState } from '../components/StateMessage';
@@ -9,13 +10,23 @@ import { Skeleton } from '../components/Skeleton';
 const ease = [0.4, 0, 0.2, 1] as [number, number, number, number];
 
 const PAGE_SIZE = 10;
-const PIPELINE_STAGES = ['Applied', 'Screened', 'Technical', 'Final Round', 'Offer'];
+const PIPELINE_STAGES = ['Applied', 'Reviewing', 'Interviewed', 'Shortlisted', 'Hired'];
 const STATUS_FILTERS: { label: string; value: CandidateStatus | 'all' }[] = [
   { label: 'All', value: 'all' },
-  { label: 'Shortlisted', value: 'shortlisted' },
+  { label: 'Applied', value: 'applied' },
   { label: 'Reviewing', value: 'reviewing' },
-  { label: 'Pending', value: 'pending' },
+  { label: 'Interviewed', value: 'interviewed' },
+  { label: 'Shortlisted', value: 'shortlisted' },
   { label: 'Rejected', value: 'rejected' },
+  { label: 'Hired', value: 'hired' },
+];
+const STATUS_OPTIONS: CandidateStatus[] = [
+  'applied',
+  'reviewing',
+  'interviewed',
+  'shortlisted',
+  'rejected',
+  'hired',
 ];
 
 type SortKey = 'name' | 'resumeScore' | 'interviewScore' | 'communication' | 'technical' | 'appliedDays';
@@ -48,22 +59,34 @@ function ScoreBar({ value }: { value: number | null }) {
   );
 }
 
+const STATUS_LABELS: Record<CandidateStatus, string> = {
+  applied: 'Applied',
+  reviewing: 'Reviewing',
+  interviewed: 'Interviewed',
+  shortlisted: 'Shortlisted',
+  rejected: 'Rejected',
+  hired: 'Hired',
+};
+
 function StatusBadge({ status }: { status: CandidateStatus }) {
-  const labels: Record<CandidateStatus, string> = {
-    shortlisted: 'Shortlisted',
-    reviewing: 'Reviewing',
-    rejected: 'Rejected',
-    pending: 'Pending',
-  };
-  return <span className={`cand-status ${status}`}>{labels[status]}</span>;
+  return <span className={`cand-status ${status}`}>{STATUS_LABELS[status]}</span>;
 }
 
 function getPipelineStage(status: CandidateStatus): number {
-  if (status === 'rejected') return -1;
-  if (status === 'pending') return 0;
-  if (status === 'reviewing') return 2;
-  if (status === 'shortlisted') return 4;
-  return 0;
+  switch (status) {
+    case 'rejected':
+      return -1;
+    case 'applied':
+      return 0;
+    case 'reviewing':
+      return 1;
+    case 'interviewed':
+      return 2;
+    case 'shortlisted':
+      return 3;
+    case 'hired':
+      return 4;
+  }
 }
 
 function TableSkeleton() {
@@ -97,6 +120,8 @@ export function RecruiterPage() {
   const [summary, setSummary] = useState<CandidateSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [statusUpdating, setStatusUpdating] = useState(false);
+  const [statusUpdateError, setStatusUpdateError] = useState<string | null>(null);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -156,6 +181,20 @@ export function RecruiterPage() {
       setSortAsc(false);
     }
     setPage(0);
+  };
+
+  const handleStatusChange = async (candidate: CandidateResponse, newStatus: CandidateStatus) => {
+    if (!token || newStatus === candidate.status) return;
+    setStatusUpdating(true);
+    setStatusUpdateError(null);
+    try {
+      const updated = await updateCandidateStatus(candidate.session_id, { status: newStatus }, token);
+      setItems((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+    } catch {
+      setStatusUpdateError('Could not update status. Please try again.');
+    } finally {
+      setStatusUpdating(false);
+    }
   };
 
   const thLabel = (key: SortKey, label: string) => (
@@ -388,7 +427,7 @@ export function RecruiterPage() {
                 <div className="pipeline-bar">
                   {PIPELINE_STAGES.map((stage, i) => {
                     const isDone = pipelineStage > i;
-                    const isActive = pipelineStage === i + 1;
+                    const isActive = pipelineStage === i;
                     return (
                       <div
                         key={stage}
@@ -406,9 +445,32 @@ export function RecruiterPage() {
               </div>
 
               <div className="cand-detail-notes">
+                <label htmlFor="cand-status-select" style={{ display: 'block', fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--muted)', marginBottom: '0.4rem' }}>
+                  Change Status
+                </label>
+                <select
+                  id="cand-status-select"
+                  value={selected.status}
+                  disabled={statusUpdating}
+                  onChange={(e) => handleStatusChange(selected, e.target.value as CandidateStatus)}
+                  style={{ width: '100%', padding: '0.5rem 0.65rem', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text)', fontSize: '0.85rem', marginBottom: '0.75rem' }}
+                >
+                  {STATUS_OPTIONS.map((s) => (
+                    <option key={s} value={s}>{STATUS_LABELS[s]}</option>
+                  ))}
+                </select>
+                {statusUpdateError && (
+                  <p role="alert" style={{ color: 'var(--error-text)', fontSize: '0.78rem', margin: '0 0 0.75rem' }}>
+                    {statusUpdateError}
+                  </p>
+                )}
                 <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  <button type="button" className="btn btn-primary btn-sm">Schedule Interview</button>
-                  <button type="button" className="btn btn-ghost btn-sm">Download Report</button>
+                  <Link
+                    to={`/sessions/${selected.session_id}/report`}
+                    className="btn btn-primary btn-sm"
+                  >
+                    View Report
+                  </Link>
                 </div>
               </div>
             </motion.div>

@@ -10,6 +10,7 @@ from app.config import get_settings
 from app.core.security import get_password_hash, hash_refresh_token, verify_password
 from app.models.password_reset_token import PasswordResetToken
 from app.models.refresh_token import RefreshToken
+from app.models.role import Role
 from app.models.user import User
 from app.schemas.auth import UserCreate
 
@@ -39,6 +40,17 @@ def register_user(db: Session, user_data: UserCreate) -> User:
     Raises HTTP 409 if the email is already registered.
     The plaintext password is hashed before storage — it is never written
     to the database.
+
+    Always assigns Role.CANDIDATE, explicitly — never taken from
+    user_data, because UserCreate has no `role` field at all (see its
+    docstring/schema). This is the *only* way a role is ever assigned at
+    account-creation time from a client-facing endpoint; RECRUITER
+    accounts are only ever created by an Admin/Super Admin via
+    app.services.admin_service.create_recruiter, and ADMIN/SUPER_ADMIN
+    roles are only ever assigned after the fact via
+    app.services.admin_service.set_user_role (Super Admin only). A new
+    organization_id is never set here either — a self-registered candidate
+    is always unaffiliated until explicitly invited.
     """
     if get_user_by_email(db, user_data.email):
         raise HTTPException(
@@ -50,6 +62,7 @@ def register_user(db: Session, user_data: UserCreate) -> User:
         email=user_data.email,
         hashed_password=get_password_hash(user_data.password),
         full_name=user_data.full_name,
+        role=Role.CANDIDATE.value,
     )
     db.add(user)
     db.commit()

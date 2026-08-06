@@ -1,11 +1,13 @@
 """Aggregation service for the admin dashboard.
 
-Same access-model note as recruiter_service.py: the User model has no
-role/organisation concept (see its docstring), so — consistent with the
-precedent already set for /api/v1/recruiter — this is reachable by any
-authenticated user rather than gated behind a role that doesn't exist in
-the schema. Every number here is a real query against the existing tables;
-nothing is mocked or hardcoded.
+Gated behind app.core.permissions.can_view_platform /
+can_manage_users / can_manage_organizations (Admin, Super Admin — never
+Recruiter or Candidate). Every read here is platform-wide (every
+organization) by design for these two roles — see app.core.permissions'
+docstrings for why that's intentional rather than an oversight; contrast
+with recruiter_service, which *is* org-scoped for the Recruiter role.
+Every number here is a real query against the existing tables; nothing is
+mocked or hardcoded.
 """
 
 from __future__ import annotations
@@ -15,22 +17,28 @@ import uuid
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
+from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.security import get_password_hash
 from app.models.analysis import AudioResponse, InterviewAnalysis, Transcript
 from app.models.documents import ResumeDocument
 from app.models.features import SessionReport
 from app.models.interview import InterviewSession, Question, VALID_SESSION_STATUSES
+from app.models.organization import Organization
 from app.models.prediction import CoachingPlan, InterviewPrediction
+from app.models.role import ROLE_VALUES, Role
 from app.models.user import User
 from app.schemas.admin import (
     AdminActivityEvent,
     AdminOverviewResponse,
     AdminUserResponse,
     AiUsageStats,
+    CreateRecruiterRequest,
     DailyCount,
     JobRoleCount,
+    OrganizationResponse,
     StorageStats,
 )
 
@@ -92,8 +100,12 @@ def get_overview(db: Session) -> AdminOverviewResponse:
         sessions_by_status[status] = count
 
     total_reports = db.query(SessionReport).count()
-    avg_score_row = db.execute(select(func.avg(SessionReport.final_score))).scalar_one_or_none()
-    avg_platform_score = round(float(avg_score_row), 2) if avg_score_row is not None else None
+    avg_score_row = db.execute(
+        select(func.avg(SessionReport.final_score))
+    ).scalar_one_or_none()
+    avg_platform_score = (
+        round(float(avg_score_row), 2) if avg_score_row is not None else None
+    )
 
     total_resumes = db.query(ResumeDocument).count()
 
@@ -124,12 +136,20 @@ def get_overview(db: Session) -> AdminOverviewResponse:
     )
 
     thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
-    recent_signups = db.execute(
-        select(User.created_at).where(User.created_at >= thirty_days_ago)
-    ).scalars().all()
-    recent_sessions = db.execute(
-        select(InterviewSession.created_at).where(InterviewSession.created_at >= thirty_days_ago)
-    ).scalars().all()
+    recent_signups = (
+        db.execute(select(User.created_at).where(User.created_at >= thirty_days_ago))
+        .scalars()
+        .all()
+    )
+    recent_sessions = (
+        db.execute(
+            select(InterviewSession.created_at).where(
+                InterviewSession.created_at >= thirty_days_ago
+            )
+        )
+        .scalars()
+        .all()
+    )
 
     return AdminOverviewResponse(
         total_users=total_users,
@@ -156,13 +176,18 @@ def list_users(
     if search:
         needle = f"%{search.strip().lower()}%"
         base_query = base_query.where(
-            func.lower(User.full_name).like(needle) | func.lower(User.email).like(needle)
+            func.lower(User.full_name).like(needle)
+            | func.lower(User.email).like(needle)
         )
 
-    total = db.execute(select(func.count()).select_from(base_query.subquery())).scalar_one()
+    total = db.execute(
+        select(func.count()).select_from(base_query.subquery())
+    ).scalar_one()
 
     page = (
-        db.execute(base_query.order_by(User.created_at.desc()).offset(skip).limit(limit))
+        db.execute(
+            base_query.order_by(User.created_at.desc()).offset(skip).limit(limit)
+        )
         .scalars()
         .all()
     )
@@ -184,11 +209,27 @@ def list_users(
         row[0]: (row[1], row[2]) for row in session_rows
     }
 
+    org_ids = {u.organization_id for u in page if u.organization_id is not None}
+    org_names: dict[uuid.UUID, str] = {}
+    if org_ids:
+        org_rows = db.execute(
+            select(Organization.id, Organization.name).where(
+                Organization.id.in_(org_ids)
+            )
+        ).all()
+        org_names = dict(org_rows)
+
     items = [
         AdminUserResponse(
             id=u.id,
             full_name=u.full_name,
             email=u.email,
+            role=u.role,
+            organization_id=u.organization_id,
+            organization_name=org_names.get(u.organization_id)
+            if u.organization_id
+            else None,
+            is_active=u.is_active,
             created_at=u.created_at,
             sessions_completed=sessions_by_user.get(u.id, (0, None))[0],
             latest_session_at=sessions_by_user.get(u.id, (0, None))[1],
@@ -266,3 +307,161 @@ def list_activity(db: Session, *, limit: int = 20) -> list[AdminActivityEvent]:
 
     events.sort(key=lambda e: _as_aware_utc(e.created_at), reverse=True)
     return events[:limit]
+
+
+# ---------------------------------------------------------------------------
+# Organization management (Phase 9)
+# ---------------------------------------------------------------------------
+
+
+def list_organizations(db: Session) -> tuple[list[OrganizationResponse], int]:
+    orgs = db.execute(select(Organization).order_by(Organization.name)).scalars().all()
+    if not orgs:
+        return [], 0
+
+    org_ids = [o.id for o in orgs]
+    member_rows = db.execute(
+        select(User.organization_id, User.role, func.count(User.id))
+        .where(User.organization_id.in_(org_ids))
+        .group_by(User.organization_id, User.role)
+    ).all()
+    recruiter_counts: dict[uuid.UUID, int] = {}
+    candidate_counts: dict[uuid.UUID, int] = {}
+    for org_id, role, count in member_rows:
+        if role == Role.RECRUITER.value:
+            recruiter_counts[org_id] = count
+        elif role == Role.CANDIDATE.value:
+            candidate_counts[org_id] = count
+
+    items = [
+        OrganizationResponse(
+            id=o.id,
+            name=o.name,
+            is_active=o.is_active,
+            created_at=o.created_at,
+            recruiter_count=recruiter_counts.get(o.id, 0),
+            candidate_count=candidate_counts.get(o.id, 0),
+        )
+        for o in orgs
+    ]
+    return items, len(items)
+
+
+def create_organization(db: Session, *, name: str) -> Organization:
+    stripped = name.strip()
+    existing = db.execute(
+        select(Organization).where(func.lower(Organization.name) == stripped.lower())
+    ).scalar_one_or_none()
+    if existing is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An organization with this name already exists.",
+        )
+    org = Organization(name=stripped)
+    db.add(org)
+    db.commit()
+    db.refresh(org)
+    return org
+
+
+def set_organization_active(
+    db: Session, *, org_id: uuid.UUID, is_active: bool
+) -> Organization:
+    org = db.get(Organization, org_id)
+    if org is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Organization not found.")
+    org.is_active = is_active
+    db.commit()
+    db.refresh(org)
+    return org
+
+
+# ---------------------------------------------------------------------------
+# Recruiter provisioning (Phase 9)
+# ---------------------------------------------------------------------------
+
+
+def create_recruiter(db: Session, data: CreateRecruiterRequest) -> User:
+    """Admin-provisioned recruiter account — the only way a RECRUITER role
+    is ever assigned at creation time (self-registration always assigns
+    CANDIDATE; see app.services.auth_service.register_user)."""
+    org = db.get(Organization, data.organization_id)
+    if org is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Organization not found.")
+
+    existing = db.execute(
+        select(User).where(func.lower(User.email) == data.email.lower())
+    ).scalar_one_or_none()
+    if existing is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An account with this email already exists.",
+        )
+
+    recruiter = User(
+        email=data.email,
+        hashed_password=get_password_hash(data.password),
+        full_name=data.full_name,
+        role=Role.RECRUITER.value,
+        organization_id=data.organization_id,
+    )
+    db.add(recruiter)
+    db.commit()
+    db.refresh(recruiter)
+    return recruiter
+
+
+# ---------------------------------------------------------------------------
+# User activation and role assignment (Phase 2 / Phase 9)
+# ---------------------------------------------------------------------------
+
+
+def set_user_active(
+    db: Session, *, user_id: uuid.UUID, is_active: bool, acting_user: User
+) -> User:
+    if user_id == acting_user.id and not is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot deactivate your own account.",
+        )
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="User not found.")
+    user.is_active = is_active
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def set_user_role(
+    db: Session, *, user_id: uuid.UUID, new_role: str, acting_user: User
+) -> User:
+    """Super-Admin-only (enforced by the router's can_assign_roles gate,
+    not re-checked here — this function trusts its caller like every other
+    service function in this codebase)."""
+    if new_role not in ROLE_VALUES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid role. Must be one of: {', '.join(sorted(ROLE_VALUES))}.",
+        )
+    if user_id == acting_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot change your own role.",
+        )
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="User not found.")
+
+    user.role = new_role
+    # Force re-login: any access token already issued for this user still
+    # carries the *old* role in its (informational-only, never-trusted)
+    # claim, and — more importantly — get_current_user re-checks the DB
+    # row on every request anyway, so this isn't required for the
+    # authorization decision itself. It's still bumped for the same
+    # belt-and-suspenders reason password changes bump it: a stale token
+    # should stop working the moment a security-relevant attribute changes.
+    user.token_version = (user.token_version or 0) + 1
+    db.commit()
+    db.refresh(user)
+    return user

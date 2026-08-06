@@ -18,6 +18,7 @@ from app.models.conversation import (
     ConversationTurn,
     LiveInterviewSession,
 )
+from app.core.permissions import can_create_interview
 from app.routers.auth import get_current_user
 from app.schemas.conversation import (
     EndInterviewResponse,
@@ -52,7 +53,7 @@ def _get_session_or_404(
 def start_live_interview(
     body: StartLiveInterviewRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(can_create_interview()),
 ):
     """Start a new live interview session and receive the first question."""
     first_question = interview_conversation_service.generate_opening_question(

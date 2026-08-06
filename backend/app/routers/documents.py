@@ -17,6 +17,7 @@ from app.core.file_validation import (
     sanitize_filename,
     scan_for_malware,
 )
+from app.core.permissions import can_generate_questions, can_upload_resume
 from app.core.security_logging import log_upload_rejected
 from app.database import get_db
 from app.models.documents import DocumentChunk, ResumeDocument
@@ -53,7 +54,7 @@ async def upload_resume(
     request: Request,
     file: UploadFile,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(can_upload_resume()),
 ):
     """Upload a PDF or DOCX resume. Extracts text and stores embeddings for RAG."""
     settings = get_settings()
@@ -181,7 +182,7 @@ def generate_rag_questions(
     session_id: uuid.UUID,
     body: RAGQuestionsRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(can_generate_questions()),
 ):
     """Generate personalised questions using the candidate's resume context."""
     session = db.execute(
@@ -263,9 +264,7 @@ def delete_current_resume(
     if doc is None:
         raise HTTPException(status_code=404, detail="No resume uploaded yet")
 
-    db.execute(
-        delete(DocumentChunk).where(DocumentChunk.user_id == current_user.id)
-    )
+    db.execute(delete(DocumentChunk).where(DocumentChunk.user_id == current_user.id))
     db.delete(doc)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -326,8 +325,16 @@ def analyze_resume(
         from app.services.resume_scoring import estimate_ats_score
 
         common_skills = [
-            "Python", "JavaScript", "TypeScript", "React", "Node.js",
-            "SQL", "Git", "Docker", "AWS", "REST API",
+            "Python",
+            "JavaScript",
+            "TypeScript",
+            "React",
+            "Node.js",
+            "SQL",
+            "Git",
+            "Docker",
+            "AWS",
+            "REST API",
         ]
         found = [s for s in common_skills if s.lower() in text.lower()]
         return ResumeAnalysisResponse(
@@ -335,6 +342,9 @@ def analyze_resume(
             skills=found,
             missing_skills=[s for s in common_skills if s not in found][:5],
             keywords=[],
-            suggestions=["Add more quantifiable achievements", "Include relevant certifications"],
+            suggestions=[
+                "Add more quantifiable achievements",
+                "Include relevant certifications",
+            ],
             word_count=word_count,
         )

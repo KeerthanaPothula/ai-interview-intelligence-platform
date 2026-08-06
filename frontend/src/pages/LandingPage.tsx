@@ -17,6 +17,8 @@ import {
   Video,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useRole } from '../context/RoleContext';
+import { homeRouteForRole } from '../utils/roleRoutes';
 import { ScreenshotsCarousel, type CarouselSlide } from '../components/ScreenshotsCarousel';
 
 const GITHUB_URL = 'https://github.com/KeerthanaPothula/ai-interview-intelligence-platform';
@@ -446,6 +448,8 @@ function useReveal() {
 
 export function LandingPage() {
   const { isAuthenticated } = useAuth();
+  const { role } = useRole();
+  const homeRoute = homeRouteForRole(role);
   const rootRef = useReveal();
 
   return (
@@ -463,7 +467,7 @@ export function LandingPage() {
           </nav>
           <div className="lp-nav-actions">
             {isAuthenticated ? (
-              <Link to="/sessions" className="lp-btn lp-btn--sm lp-btn--primary">Dashboard</Link>
+              <Link to={homeRoute} className="lp-btn lp-btn--sm lp-btn--primary">Dashboard</Link>
             ) : (
               <>
                 <Link to="/login" className="lp-nav-link">Log in</Link>
@@ -493,8 +497,8 @@ export function LandingPage() {
             </p>
             <div className="lp-cta-row">
               {isAuthenticated ? (
-                <Link to="/live-interview" className="lp-btn lp-btn--primary lp-btn--lg">
-                  Start Interview →
+                <Link to={homeRoute} className="lp-btn lp-btn--primary lp-btn--lg">
+                  Go to Dashboard →
                 </Link>
               ) : (
                 <Link to="/register" className="lp-btn lp-btn--primary lp-btn--lg">
@@ -966,7 +970,7 @@ export function LandingPage() {
           </p>
           <div className="lp-cta-row lp-cta-row--center lp-reveal">
             {isAuthenticated ? (
-              <Link to="/sessions" className="lp-btn lp-btn--primary lp-btn--lg">
+              <Link to={homeRoute} className="lp-btn lp-btn--primary lp-btn--lg">
                 Go to Dashboard →
               </Link>
             ) : (

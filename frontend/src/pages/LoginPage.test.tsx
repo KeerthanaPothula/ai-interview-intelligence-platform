@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import { LoginPage } from './LoginPage';
 import { ApiError } from '../api/client';
+import { RoleProvider } from '../context/RoleContext';
 
 const mockLogin = vi.fn();
 let mockIsAuthenticated = false;
@@ -15,6 +16,7 @@ vi.mock('../context/AuthContext', async (importOriginal) => {
     useAuth: vi.fn(() => ({
       token: null,
       user: null,
+      userLoading: false,
       isAuthenticated: mockIsAuthenticated,
       login: mockLogin,
       register: vi.fn(),
@@ -26,7 +28,9 @@ vi.mock('../context/AuthContext', async (importOriginal) => {
 function renderLoginPage() {
   return render(
     <MemoryRouter>
-      <LoginPage />
+      <RoleProvider>
+        <LoginPage />
+      </RoleProvider>
     </MemoryRouter>,
   );
 }

@@ -3,13 +3,17 @@ import type {
   AdminActivityEvent,
   AdminOverviewResponse,
   AdminUserListResponse,
+  AdminUserResponse,
   AnalyticsOverviewResponse,
   AudioResponseResponse,
   BenchmarkResponse,
   CandidateListResponse,
+  CandidateResponse,
   ChangePasswordRequest,
   CoachingPlanResponse,
   ConversationTurnResponse,
+  CreateOrganizationRequest,
+  CreateRecruiterRequest,
   DetailResponse,
   EndInterviewResponse,
   FollowUpQuestionResponse,
@@ -21,6 +25,8 @@ import type {
   InterviewReadinessResponse,
   JobRoleCount,
   LiveInterviewSessionResponse,
+  OrganizationListResponse,
+  OrganizationResponse,
   ProcessingStatusResponse,
   QuestionResponse,
   RAGQuestionsResponse,
@@ -36,6 +42,8 @@ import type {
   SessionTrendResponse,
   Token,
   TranscriptResponse,
+  UpdateCandidateStatusRequest,
+  UpdateUserRoleRequest,
   UserCreate,
   UserResponse,
   VoiceAnalysisResponse,
@@ -678,6 +686,18 @@ export function listCandidates(
   );
 }
 
+export function updateCandidateStatus(
+  sessionId: string,
+  data: UpdateCandidateStatusRequest,
+  token: string,
+): Promise<CandidateResponse> {
+  return request<CandidateResponse>(
+    `/api/v1/recruiter/candidates/${sessionId}/status`,
+    { method: 'PATCH', body: JSON.stringify(data) },
+    token,
+  );
+}
+
 export function deleteResume(token: string): Promise<void> {
   return request<void>('/api/v1/documents/resume/current', { method: 'DELETE' }, token);
 }
@@ -725,4 +745,75 @@ export function listAdminJobRoles(token: string): Promise<JobRoleCount[]> {
 
 export function listAdminActivity(token: string, limit = 20): Promise<AdminActivityEvent[]> {
   return request<AdminActivityEvent[]>(`/api/v1/admin/activity?limit=${limit}`, {}, token);
+}
+
+// ---------------------------------------------------------------------------
+// Organization management (Phase 9 — Admin/Super Admin only)
+// ---------------------------------------------------------------------------
+
+export function listOrganizations(token: string): Promise<OrganizationListResponse> {
+  return request<OrganizationListResponse>('/api/v1/admin/organizations', {}, token);
+}
+
+export function createOrganization(
+  data: CreateOrganizationRequest,
+  token: string,
+): Promise<OrganizationResponse> {
+  return request<OrganizationResponse>('/api/v1/admin/organizations', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }, token);
+}
+
+export function deactivateOrganization(orgId: string, token: string): Promise<OrganizationResponse> {
+  return request<OrganizationResponse>(
+    `/api/v1/admin/organizations/${orgId}/deactivate`,
+    { method: 'PATCH' },
+    token,
+  );
+}
+
+export function activateOrganization(orgId: string, token: string): Promise<OrganizationResponse> {
+  return request<OrganizationResponse>(
+    `/api/v1/admin/organizations/${orgId}/activate`,
+    { method: 'PATCH' },
+    token,
+  );
+}
+
+export function createRecruiter(
+  data: CreateRecruiterRequest,
+  token: string,
+): Promise<AdminUserResponse> {
+  return request<AdminUserResponse>('/api/v1/admin/recruiters', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }, token);
+}
+
+export function deactivateUser(userId: string, token: string): Promise<DetailResponse> {
+  return request<DetailResponse>(
+    `/api/v1/admin/users/${userId}/deactivate`,
+    { method: 'PATCH' },
+    token,
+  );
+}
+
+export function activateUser(userId: string, token: string): Promise<DetailResponse> {
+  return request<DetailResponse>(
+    `/api/v1/admin/users/${userId}/activate`,
+    { method: 'PATCH' },
+    token,
+  );
+}
+
+export function updateUserRole(
+  userId: string,
+  data: UpdateUserRoleRequest,
+  token: string,
+): Promise<DetailResponse> {
+  return request<DetailResponse>(`/api/v1/admin/users/${userId}/role`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  }, token);
 }

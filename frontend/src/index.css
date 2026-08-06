@@ -4125,9 +4125,11 @@ h1, h2, h3 {
 }
 
 .cand-status.shortlisted { background: var(--success-bg); color: var(--success-text); }
+.cand-status.hired { background: var(--success-bg); color: var(--success-text); }
 .cand-status.reviewing { background: var(--info-bg); color: var(--info-text); }
+.cand-status.interviewed { background: var(--info-bg); color: var(--info-text); }
 .cand-status.rejected { background: var(--error-bg); color: var(--error-text); }
-.cand-status.pending { background: var(--surface-3); color: var(--muted); }
+.cand-status.applied { background: var(--surface-3); color: var(--muted); }
 
 .cand-detail {
   background: var(--surface);

@@ -36,9 +36,18 @@ def _client_ip(request: Request) -> str:
 
 
 def _issue_token_pair(db: Session, user: User) -> Token:
-    """Create a fresh access token + refresh token pair for `user`."""
+    """Create a fresh access token + refresh token pair for `user`.
+
+    The "role" claim is informational only (e.g. for a client to render UI
+    optimistically without waiting on /auth/me) — it is never trusted for
+    an authorization decision. app.core.deps.get_current_user always
+    re-reads current_user.role from the database on every request, so a
+    role change takes effect on the very next request regardless of what
+    an already-issued token's "role" claim says. See require_role's
+    docstring for the full reasoning.
+    """
     access_token = create_access_token(
-        data={"sub": user.email, "ver": user.token_version}
+        data={"sub": user.email, "ver": user.token_version, "role": user.role}
     )
     raw_refresh_token = generate_refresh_token()
     auth_service.issue_refresh_token(db, user, raw_refresh_token)
@@ -159,7 +168,7 @@ def refresh(
     auth_service.rotate_refresh_token(db, old_row, raw_new_token)
 
     access_token = create_access_token(
-        data={"sub": user.email, "ver": user.token_version}
+        data={"sub": user.email, "ver": user.token_version, "role": user.role}
     )
     log_token_refreshed(user.id, ip)
     return Token(access_token=access_token, refresh_token=raw_new_token)
@@ -278,7 +287,9 @@ def reset_password(
     Returns HTTP 400 on any invalid/expired/reused token — the error message
     is deliberately generic to avoid leaking token validity information.
     """
-    success = auth_service.redeem_password_reset_token(db, body.token, body.new_password)
+    success = auth_service.redeem_password_reset_token(
+        db, body.token, body.new_password
+    )
     if not success:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -292,13 +303,17 @@ def reset_password(
 # ---------------------------------------------------------------------------
 
 
-def _send_reset_email(email: str, reset_url: str, logger: object, settings: Settings) -> None:
+def _send_reset_email(
+    email: str, reset_url: str, logger: object, settings: Settings
+) -> None:
     """Send a password-reset email, or log the URL if SMTP is not configured."""
     import logging
     import smtplib
     from email.message import EmailMessage
 
-    _logger = logger if isinstance(logger, logging.Logger) else logging.getLogger(__name__)
+    _logger = (
+        logger if isinstance(logger, logging.Logger) else logging.getLogger(__name__)
+    )
 
     smtp_host = getattr(settings, "SMTP_HOST", None)
     if not smtp_host:

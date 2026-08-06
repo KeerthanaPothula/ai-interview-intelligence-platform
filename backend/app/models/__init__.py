@@ -37,8 +37,10 @@ from . import (  # noqa: F401
     documents,
     features,
     interview,
+    organization,
     password_reset_token,
     prediction,
     refresh_token,
+    role,
     user,
 )
