@@ -115,26 +115,27 @@ Click **Create Web Service**. The first build installs `torch`,
 
 ---
 
-## 4. Configure the pre-deploy migration command
+## 4. Database migrations run automatically — no action needed
 
-The Docker image does not run migrations on boot (see
-[DEPLOYMENT.md § 1](./DEPLOYMENT.md#1-database-migrations-alembic) for why).
-On Render:
+`backend/Dockerfile`'s `CMD` is `alembic upgrade head && uvicorn ...`, so
+every container start applies any pending migration before the server
+begins accepting traffic — including the very first deploy against an
+empty database. Nothing to configure here; this step exists only to
+explain what's happening and why, since an earlier version of this guide
+asked you to set a Pre-Deploy Command instead.
 
-1. Open the backend service → **Settings** → **Build & Deploy**.
-2. Set **Pre-Deploy Command** to:
+**Free plan has no Pre-Deploy Command and no Shell tab**, so a startup-time
+migration (inside `CMD`) is the only option that works without a paid
+plan. See [DEPLOYMENT.md § 1](./DEPLOYMENT.md#1-database-migrations-alembic)
+for the full reasoning, including why the usual "don't migrate at startup"
+caution doesn't apply to this app's single-instance deployment, and how to
+switch to a Pre-Deploy Command later if you move to multiple instances.
 
-   ```
-   alembic upgrade head
-   ```
-
-3. Save changes.
-
-This runs `alembic upgrade head` from `/app` (the image's `WORKDIR`, where
-`alembic.ini` and `alembic/` live) using the same `DATABASE_URL` as the
-service, **before** each deploy starts receiving traffic. It is idempotent,
-so it's safe on every deploy including the first one against an empty
-database.
+If `alembic upgrade head` fails (bad `DATABASE_URL`, an unreachable
+database), the container exits before binding its port, so Render's health
+check fails the deploy and keeps the previous version live — check the
+failed deploy's boot logs for the alembic error rather than the running
+service's logs.
 
 ---
 
@@ -206,8 +207,9 @@ with a CORS error.
    ```
 2. **Docs disabled**: `https://<backend>.onrender.com/docs` → 404 (expected
    in production, since `DEBUG=false`).
-3. **Migrations applied**: check the Pre-Deploy Command logs (Render →
-   service → **Events**/**Logs**) for `alembic upgrade head` output ending
+3. **Migrations applied**: check the deploy's boot logs (Render → service
+   → **Events**/**Logs**, the entry for the deploy itself, before the
+   "Uvicorn running on..." line) for `alembic upgrade head` output ending
    in the latest revision, with no errors.
 4. **Frontend loads**: open `https://<frontend>.onrender.com` → login/register
    page renders.
@@ -241,10 +243,25 @@ redeploys the backend automatically. Multiple origins can be comma-separated.
 The Static Site's rewrite rule (step 6.5) is missing. Add `/* → /index.html`
 (Rewrite).
 
-**`alembic upgrade head` fails in the Pre-Deploy step**
+**`alembic upgrade head` fails at container startup, deploy never goes live**
 Usually a `DATABASE_URL` mismatch (wrong host/credentials) or the database
 isn't reachable from the backend's region. Confirm you used the *Internal*
 Database URL and that the database and web service are in the same region.
+Check the failed deploy's boot logs for the exact alembic error — the
+previous deploy stays live and serving traffic until this one passes.
+
+**Login/register return "Cannot connect to the backend", but `/health` is fine**
+This means the backend is up but a request is throwing an *unhandled* 500
+(not an `HTTPException`) — most commonly a query against a table/column a
+migration was supposed to add but didn't reach production yet. Because
+Starlette routes the app's catch-all `Exception` handler through
+`ServerErrorMiddleware`, which wraps outside `CORSMiddleware`, that 500 has
+no CORS header; the browser blocks it and `fetch()` reports a generic
+network failure instead of surfacing the 500 — which is why the frontend
+says "cannot connect" instead of showing a real error. Check the backend's
+logs for the actual exception (logged via `logger.error("Unhandled
+exception on...")` in `app/core/exceptions.py`) rather than trusting the
+frontend's message, and confirm migrations are at head (previous item).
 
 **Uploaded audio "disappears" after a redeploy / re-transcription fails with a missing file**
 The Disk from step 5 isn't attached, or its mount path doesn't match

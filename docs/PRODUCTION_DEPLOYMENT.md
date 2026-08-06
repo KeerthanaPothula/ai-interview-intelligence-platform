@@ -16,7 +16,8 @@ Browser
 ┌─────────────────────────────────┐
 │ Render — Web Service             │  https://<your-app>.onrender.com
 │ Docker: FastAPI + Uvicorn        │
-│ Pre-deploy: alembic upgrade head │
+│ CMD: alembic upgrade head &&     │
+│      uvicorn (runs on every boot)│
 └──────────────┬──────────────────┘
                │ postgresql+psycopg2 + SSL
                ▼
@@ -78,22 +79,28 @@ Neon enforces SSL on all connections. `sslmode=require` in the connection string
 
 ### 1.4 Migrations
 
-> **Free plan limitation**: Render Free does not support `preDeployCommand`, so migrations do **not** run automatically on deploy. You must run them manually after each deploy that includes schema changes.
+Migrations run **automatically** — `backend/Dockerfile`'s `CMD` is
+`alembic upgrade head && uvicorn ...`, so every container start (including
+the first deploy against an empty database, and every deploy after that)
+applies any pending revision before the server begins accepting traffic.
+No Shell access or `preDeployCommand` needed — this is deliberate, since
+Render Free supports neither. See
+[DEPLOYMENT.md § 1](./DEPLOYMENT.md#1-database-migrations-alembic) for the
+full reasoning and how to move to a separate Pre-Deploy Command later if
+this ever scales to multiple instances.
 
-**How to run migrations manually:**
+**First deploy**: the database is empty; `alembic upgrade head` applies all migrations from scratch on the very first boot.
 
-1. Open the Render dashboard → `aiip-backend` → **Shell** tab.
-2. Run:
-   ```bash
-   alembic upgrade head
-   ```
-3. The command is idempotent — safe to run on every deploy even when there are no new migrations.
+**Subsequent deploys**: only new migrations are applied — safe/no-op if there are none.
 
-**First deploy**: the database is empty; `alembic upgrade head` applies all migrations from scratch.
+If a migration genuinely fails (bad `DATABASE_URL`, an unreachable
+database), the container exits before binding its port, so Render's health
+check fails the deploy and keeps the previous version live — check that
+deploy's boot logs for the alembic error.
 
-**Subsequent deploys**: only new migrations are applied.
-
-To run migrations from your local machine instead (requires the Neon connection string):
+To run migrations from your local machine instead (e.g. to inspect the
+result, or on a plan where you've moved this to a Pre-Deploy Command and
+want to run it once manually), requires the Neon connection string:
 ```bash
 DATABASE_URL="postgresql+psycopg2://..." alembic upgrade head
 ```
@@ -142,14 +149,10 @@ On the Free plan, the service spins down after 15 minutes of inactivity. The fir
 
 1. Click **Deploy** (or it starts automatically after the Blueprint is applied).
 2. Watch the build logs — `pip install -r requirements.txt` fetches dependencies and takes 3–5 minutes on first build (no PyTorch on free tier, so it's faster than a full build).
-3. Once the service is live, open the **Shell** tab in the Render dashboard and run:
-   ```bash
-   alembic upgrade head
-   ```
-   This applies all migrations to the empty Neon database.
+3. The boot logs (after the build finishes) show `alembic upgrade head` running and applying all migrations to the empty Neon database, immediately before the "Uvicorn running on..." line — no manual step needed.
 4. Check `/health` returns `{"status":"healthy","audio_processing_enabled":false,...}`.
 
-> **Important**: Without this step the app will fail on any request that touches the database. The Free plan does not support automatic pre-deploy commands.
+> **Note**: if the migration step in the boot logs fails, the deploy never goes live and Render keeps serving the previous version (or shows the service as failed, on a first deploy) — fix `DATABASE_URL` and redeploy rather than trying to run the migration by hand, since the Free plan has neither a Shell tab nor `preDeployCommand`.
 
 ### 2.6 Production URLs
 
@@ -274,7 +277,7 @@ Both platforms auto-deploy on push to `main`:
 
 | Event | Action |
 |---|---|
-| `git push origin main` | Render rebuilds backend image + runs pre-deploy migration + hot-swaps the service |
+| `git push origin main` | Render rebuilds backend image + runs `alembic upgrade head` on container start + hot-swaps the service |
 | `git push origin main` | Vercel rebuilds frontend bundle + deploys to CDN in ~30s |
 
 No manual steps required after the initial setup.

@@ -32,7 +32,8 @@ and its own troubleshooting section. Most common issues:
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Fresh deploy: every request 500s with a DB error | No Pre-Deploy Command configured, so `alembic upgrade head` never ran | Set the Render Pre-Deploy Command — see [DEPLOYMENT.md § 1](./DEPLOYMENT.md#1-database-migrations-alembic) |
+| Fresh deploy: every request touching the DB 500s | `backend/Dockerfile`'s `CMD` migration step failed at boot (bad `DATABASE_URL`, unreachable DB) — check that deploy's boot logs, before the "Uvicorn running on..." line | Fix `DATABASE_URL`/network access and redeploy; see [DEPLOYMENT.md § 1](./DEPLOYMENT.md#1-database-migrations-alembic) |
+| Login/register show "Cannot connect to the backend" but `/health` returns healthy | An unhandled 500 (often the migration issue above) has no CORS header, so the browser blocks it and the frontend reports a generic network error instead of the real 500 | Check the backend's own logs for the actual exception — don't trust "cannot connect" as a literal network diagnosis; see [RENDER_DEPLOYMENT.md § 9](./RENDER_DEPLOYMENT.md) |
 | Uploaded audio disappears after a redeploy | No Render Disk attached at `/app/uploads` (Render's filesystem is ephemeral by default) | Attach a Render Disk — see [DEPLOYMENT.md § 2](./DEPLOYMENT.md#2-persistent-storage) |
 | Frontend loads but every API call fails with a CORS error | The deployed frontend's origin isn't in the backend's `CORS_ORIGINS` | Update `CORS_ORIGINS` on the backend service to include the exact deployed frontend URL |
 | `DEBUG=true is not permitted when ENVIRONMENT=production` at boot | Both env vars set inconsistently on the Render service | Set `DEBUG=false` alongside `ENVIRONMENT=production` |

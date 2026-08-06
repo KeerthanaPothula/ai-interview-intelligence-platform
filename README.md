@@ -136,8 +136,9 @@ pipeline.
 
 ### Infrastructure
 - Multi-stage, non-root Docker build; Docker Compose for local dev
-- Alembic-migrated PostgreSQL (SQLite for tests), pre-deploy migration
-  strategy, persistent storage strategy for uploaded audio
+- Alembic-migrated PostgreSQL (SQLite for tests), migrations applied
+  automatically on container start, persistent storage strategy for
+  uploaded audio
 
 ### DevOps
 - GitHub Actions CI (lint, test + coverage, build, Docker validation) and a
@@ -410,7 +411,7 @@ Vercel (frontend) → Render Web Service (backend) → Neon PostgreSQL
 | Service | Platform | Config |
 |---|---|---|
 | Frontend | Vercel (Hobby, free) | `frontend/vercel.json` — SPA rewrites |
-| Backend | Render Standard ($25/mo) | `render.yaml` — Docker + Disk + pre-deploy migration |
+| Backend | Render Standard ($25/mo) | `render.yaml` — Docker + Disk + migration on container start |
 | Database | Neon PostgreSQL (free tier) | External; `DATABASE_URL` with `sslmode=require` |
 
 One-click deploy via Render Blueprint (reads `render.yaml`):

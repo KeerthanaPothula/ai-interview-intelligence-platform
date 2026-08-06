@@ -12,36 +12,57 @@ for the overall deployment diagram.
 ### Current state
 
 `backend/alembic/env.py` and the migration chain under
-`backend/alembic/versions/` are correct and PostgreSQL-compatible, but
-nothing in the Docker image, docker-compose, or the application's startup
-code runs `alembic upgrade head`. A freshly provisioned PostgreSQL database
-has no tables until this command is run.
+`backend/alembic/versions/` are correct and PostgreSQL-compatible.
+`backend/Dockerfile`'s `CMD` runs `alembic upgrade head && uvicorn ...` on
+every container start, so migrations are applied automatically — a freshly
+provisioned PostgreSQL database gets all tables on first boot, and every
+subsequent deploy picks up only the new revisions.
 
-### Recommended approach: pre-deploy command, not startup-time migration
+### Why startup-time migration, not a separate pre-deploy step
 
-Run migrations as a separate, one-time step that completes **before** the
-new application code receives traffic — not inside `app.main`'s startup
-lifespan, and not as part of the container's `CMD`.
+An earlier version of this doc recommended a **Pre-Deploy Command** instead
+(a separate step that runs before the new deploy is promoted) and argued
+against running migrations in `CMD`, for two reasons: multiple instances
+could race to apply the same migration concurrently, and a failed migration
+would crash the app in a restart loop instead of failing a separate,
+observable pre-deploy step.
 
-Why not run migrations at application startup:
+Both concerns are real in general, but don't apply to how this app is
+actually deployed:
 
-- Render (and most platforms) can start multiple instances, or restart a
-  crashed instance independently. If `alembic upgrade head` ran inside
-  `main.py`'s lifespan, every instance start would race to apply the same
-  migration — unnecessary contention and a source of hard-to-diagnose
-  startup failures.
-- A failed migration would crash the entire app on boot, and a restart loop
-  would repeatedly retry a partially-applied migration.
-- Decoupling "deploy new code" from "migrate schema" makes each step
-  independently observable and retryable.
+- **No concurrent instances.** Render's Free plan runs exactly one
+  instance, and the app's own design (single Uvicorn worker, in-process
+  Whisper singleton, a Disk that "restricts the service to a single
+  instance" — see [RENDER_DEPLOYMENT.md § 5](./RENDER_DEPLOYMENT.md))
+  never scales horizontally. There is nothing to race against.
+- **A failed migration crashing the boot is the correct outcome, not a
+  risk.** `alembic upgrade head` exits non-zero on a genuine failure, so
+  `&&` never invokes uvicorn — the container never binds to its port, so
+  Render's health check never passes, so **Render fails the deploy and
+  keeps the previous, still-running version live and serving traffic**,
+  exactly like a failed pre-deploy step would. The alembic error is in the
+  deploy's boot logs either way. A restart loop only happens if the
+  underlying cause (bad `DATABASE_URL`, an unreachable database) doesn't
+  resolve itself — the same as it would for any other startup dependency
+  check.
 
-### Render: Pre-Deploy Command
+The actual reason this was changed: **Render's Free plan supports neither
+a Pre-Deploy Command nor a Shell tab** — the previously-recommended
+approach is simply unavailable without a paid plan, and running migrations
+by hand isn't optional-but-nicer here, it's impossible. `CMD`-time
+migration is the option that exists on every Render plan.
 
-Render web services support a **Pre-Deploy Command**, which runs to
-completion — using the same image and environment variables as the service
-— *before* the new deploy is promoted and starts receiving traffic.
+If this deployment ever moves to multiple instances (a paid plan with
+autoscaling, or a job queue worker fleet), move the `alembic upgrade head`
+step back out to a Pre-Deploy Command or a dedicated one-off CI job at that
+point — the migration files and `env.py` don't change either way, only
+where `alembic upgrade head` is invoked from.
 
-Set the Pre-Deploy Command to:
+### Render: Pre-Deploy Command (optional, paid plans only)
+
+If you're on a paid Render plan and prefer to decouple migration from
+startup (e.g. once you do run multiple instances), you can still set a
+**Pre-Deploy Command**:
 
 ```
 alembic upgrade head
@@ -54,8 +75,9 @@ environment at runtime, so no extra configuration is needed beyond the
 `DATABASE_URL` env var the app already requires.
 
 `alembic upgrade head` is idempotent — if the database is already at the
-latest revision, it's a no-op. This makes it safe to run on every deploy,
-including the very first one against a brand-new database.
+latest revision, it's a no-op. Running it both here and in `CMD` is
+harmless (the second run is just a no-op check against `alembic_version`);
+you don't need to remove the `CMD` step if you also configure this.
 
 ### Local development (docker-compose)
 

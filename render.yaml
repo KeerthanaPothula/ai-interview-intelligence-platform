@@ -35,8 +35,14 @@ services:
     # Render hits this path to determine if the instance is healthy.
     healthCheckPath: /health
 
-    # NOTE: preDeployCommand is not supported on the Free plan.
-    # Run migrations manually after each deploy — see docs/PRODUCTION_DEPLOYMENT.md.
+    # NOTE: preDeployCommand is not supported on the Free plan (and the
+    # Free plan has no Shell tab either, so a migration step can't be run
+    # by hand). Migrations instead run automatically as part of
+    # backend/Dockerfile's CMD (`alembic upgrade head && uvicorn ...`) on
+    # every container start — idempotent, and a genuine migration failure
+    # exits non-zero so uvicorn never starts and Render fails the deploy
+    # health check instead of promoting a broken instance. See
+    # docs/PRODUCTION_DEPLOYMENT.md and docs/DEPLOYMENT.md § 1.
 
     envVars:
       # ----------------------------------------------------------------

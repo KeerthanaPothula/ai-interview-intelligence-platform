@@ -136,5 +136,19 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
 # production and falls back to 8000 for local `docker run` /
 # docker-compose, where EXPOSE 8000 and the published port mapping
 # still apply.
+#
+# Migrations: `alembic upgrade head &&` runs before every server start,
+# in the container itself, rather than relying on a Render Pre-Deploy
+# Command or a manual Shell session — Render's Free plan supports
+# neither (no Shell tab, and preDeployCommand is a paid-plan feature;
+# see render.yaml). `alembic upgrade head` is idempotent: with the DB
+# already at head it's a fast no-op (one SELECT against
+# alembic_version), so this costs a few hundred ms on every restart,
+# including free-tier cold starts. Shell-form CMD's `&&` means a
+# genuine migration failure (bad DATABASE_URL, a broken revision) exits
+# non-zero and uvicorn never starts — Render's health check then fails
+# the deploy instead of routing traffic to a server with a stale schema,
+# which is exactly what silently happened before this change (see
+# docs/RENDER_DEPLOYMENT.md and docs/PRODUCTION_DEPLOYMENT.md).
 # -------------------------------------------------------------
-CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
+CMD alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
