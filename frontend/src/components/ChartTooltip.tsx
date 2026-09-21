@@ -26,10 +26,15 @@ export function ChartTooltip({ active, payload, label, decimals }: ChartTooltipP
         boxShadow: 'var(--shadow)',
       }}
     >
-      <p style={{ margin: '0 0 0.4rem', color: 'var(--muted)', fontWeight: 600 }}>{label}</p>
+      <p style={{ margin: '0 0 0.4rem', color: 'var(--text-2)', fontWeight: 600 }}>{label}</p>
       {payload.map((p) => (
-        <p key={p.name} style={{ margin: '0.15rem 0', color: p.color }}>
-          {p.name}: <strong>{decimals != null ? p.value?.toFixed(decimals) : p.value}</strong>
+        // Text stays on --text (series hues are for graphics, not copy); the
+        // swatch carries the series color.
+        <p key={p.name} style={{ margin: '0.15rem 0', color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+          <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: '50%', background: p.color, flexShrink: 0 }} />
+          <span>
+            {p.name}: <strong>{decimals != null ? p.value?.toFixed(decimals) : p.value}</strong>
+          </span>
         </p>
       ))}
     </div>

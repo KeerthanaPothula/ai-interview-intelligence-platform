@@ -30,11 +30,11 @@ function ConfidenceBadge({ score }: ConfidenceBadgeProps) {
 }
 
 const CHART_COLORS: Record<string, string> = {
-  Pace: '#3D7EFF',
-  Energy: '#22C55E',
-  Confidence: '#EC4899',
-  Fluency: '#F59E0B',
-  Steadiness: '#8B5CF6',
+  Pace: 'var(--chart-blue)',
+  Energy: 'var(--chart-green)',
+  Confidence: 'var(--chart-pink)',
+  Fluency: 'var(--chart-amber)',
+  Steadiness: 'var(--chart-purple)',
 };
 
 // Each axis is a linear normalization of a single raw metric onto a 0-100

@@ -187,7 +187,7 @@ export function ProfilePage() {
                     style={{
                       color: 'var(--error-text)',
                       background: 'var(--error-bg)',
-                      border: '1px solid rgba(239,68,68,0.2)',
+                      border: '1px solid var(--error-border)',
                       padding: '0.55rem 0.75rem',
                       borderRadius: 'var(--radius-sm)',
                       fontSize: '0.84rem',
@@ -250,7 +250,7 @@ export function ProfilePage() {
                     type="button"
                     className="btn btn-sm"
                     style={{
-                      background: 'var(--error)',
+                      background: 'var(--danger-solid)',
                       color: '#fff',
                       border: 'none',
                       flexShrink: 0,

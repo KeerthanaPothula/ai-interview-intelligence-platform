@@ -276,7 +276,7 @@ export function InterviewReportPage() {
     Communication: 'var(--success)',
     Technical: 'var(--warning)',
     'Problem Solving': 'var(--accent)',
-    Confidence: '#EC4899',
+    Confidence: 'var(--chart-pink)',
   };
 
   return (
@@ -360,7 +360,7 @@ export function InterviewReportPage() {
           {/* Strengths */}
           {(report || strengths.length > 0) && (
             <div className="section-panel">
-              <h2 className="card-header-title" style={{ marginBottom: '0.75rem', color: 'var(--success)' }}>Strengths</h2>
+              <h2 className="card-header-title" style={{ marginBottom: '0.75rem', color: 'var(--success-text)' }}>Strengths</h2>
               {strengths.length > 0 ? (
                 <ul style={{ margin: 0, paddingLeft: '1.2rem', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
                   {strengths.map((s, i) => (
@@ -376,7 +376,7 @@ export function InterviewReportPage() {
           {/* Weaknesses */}
           {(report || weaknesses.length > 0) && (
             <div className="section-panel">
-              <h2 className="card-header-title" style={{ marginBottom: '0.75rem', color: 'var(--warning)' }}>Areas to Improve</h2>
+              <h2 className="card-header-title" style={{ marginBottom: '0.75rem', color: 'var(--warning-text)' }}>Areas to Improve</h2>
               {weaknesses.length > 0 ? (
                 <ul style={{ margin: 0, paddingLeft: '1.2rem', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
                   {weaknesses.map((w, i) => (
@@ -452,7 +452,7 @@ export function InterviewReportPage() {
                 {readiness.percentile_rank != null && (
                   <div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '0.25rem' }}>Percentile</div>
-                    <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--success)' }}>Top {(100 - readiness.percentile_rank).toFixed(0)}%</div>
+                    <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--success-text)' }}>Top {(100 - readiness.percentile_rank).toFixed(0)}%</div>
                   </div>
                 )}
               </div>

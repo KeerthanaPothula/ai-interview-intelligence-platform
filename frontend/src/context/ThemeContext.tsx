@@ -1,8 +1,11 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
 const STORAGE_KEY = 'aiip-theme';
 
 export type Theme = 'light' | 'dark';
+
+// Keep in sync with the inline script in index.html.
+const THEME_COLOR: Record<Theme, string> = { dark: '#070C18', light: '#F6F8FC' };
 
 interface ThemeContextValue {
   theme: Theme;
@@ -20,13 +23,41 @@ function readInitialTheme(): Theme {
   return attr === 'light' ? 'light' : 'dark';
 }
 
+function isTheme(value: unknown): value is Theme {
+  return value === 'light' || value === 'dark';
+}
+
+function applyTheme(theme: Theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', THEME_COLOR[theme]);
+}
+
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<Theme>(readInitialTheme);
 
   const setTheme = useCallback((next: Theme) => {
-    document.documentElement.setAttribute('data-theme', next);
-    localStorage.setItem(STORAGE_KEY, next);
+    applyTheme(next);
     setThemeState(next);
+    try {
+      localStorage.setItem(STORAGE_KEY, next);
+    } catch {
+      // Storage blocked/full: the theme still applies for this page load,
+      // it just won't persist. DOM and React state have already been updated.
+    }
+  }, []);
+
+  // Follow theme changes made in another tab. `key` is null when storage is
+  // cleared and `newValue` is null when the key is removed — both ignored, the
+  // current theme simply stays.
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === STORAGE_KEY && isTheme(e.newValue)) {
+        applyTheme(e.newValue);
+        setThemeState(e.newValue);
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
   }, []);
 
   const toggleTheme = useCallback(() => {

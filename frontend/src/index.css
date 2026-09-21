@@ -21,7 +21,8 @@
   /* Text */
   --text: #EDF1FF;
   --text-2: #A8B4D0;
-  --muted: #5A6680;
+  /* #8592AE is 5.2-6.3:1 on --bg..--surface-3 (was #5A6680, ~3:1) — AA for text. */
+  --muted: #8592AE;
 
   /* Brand */
   --primary: #3D7EFF;
@@ -43,6 +44,52 @@
   --info: #3B82F6;
   --info-bg: rgba(59, 130, 246, 0.12);
   --info-text: #93C5FD;
+
+  /* Semantic borders — tinted outlines for chips, toasts and alert boxes. */
+  --primary-border: rgba(61, 126, 255, 0.3);
+  --accent-border: rgba(139, 92, 246, 0.3);
+  --success-border: rgba(34, 197, 94, 0.3);
+  --error-border: rgba(239, 68, 68, 0.3);
+  --warning-border: rgba(245, 158, 11, 0.3);
+  --info-border: rgba(59, 130, 246, 0.3);
+
+  /* Solid fills that carry white text. Theme-independent: every value is
+     >= 4.8:1 against #fff (the bright --primary/--success hues are only
+     2.5-3.7:1, which fails AA for button labels). */
+  --primary-solid: #2563EB;
+  --primary-solid-hover: #1D4ED8;
+  --success-solid: #047857;
+  --success-solid-hover: #065F46;
+  --danger-solid: #DC2626;
+  --danger-solid-hover: #B91C1C;
+  --diff-1: #047857;
+  --diff-2: #1D4ED8;
+  --diff-3: #B45309;
+  --diff-4: #B91C1C;
+  --diff-5: #6D28D9;
+
+  /* Chart series — consumed by recharts/SVG via var(). Each is >= 3:1
+     (graphics) against --surface/--surface-2 in its theme, and the light
+     set is also >= 4.5:1 on white so it can double as text. */
+  --chart-blue: #3D7EFF;
+  --chart-green: #22C55E;
+  --chart-amber: #F59E0B;
+  --chart-red: #EF4444;
+  --chart-purple: #8B5CF6;
+  --chart-pink: #EC4899;
+
+  /* Recruiter avatar initials: the hue is used as TEXT on a 13% tint of
+     itself, so each must be >= 4.5:1 on that tint (also on the selected-row
+     tint). Dark values are light 300/400-weight hues. */
+  --avatar-1: #B39DFB;
+  --avatar-2: #60A5FA;
+  --avatar-3: #22D3EE;
+  --avatar-4: #34D399;
+  --avatar-5: #FBBF24;
+  --avatar-6: #F87171;
+
+  /* Translucent card surface (auth form) — needs a light counterpart. */
+  --surface-glass: rgba(13, 21, 38, 0.85);
 
   /* Legacy aliases (keep components working) */
   --color-bg: var(--bg);
@@ -106,10 +153,10 @@
   --overlay-subtle: rgba(15, 23, 42, 0.035);
 
   /* Text — #0F172A on #FFFFFF is ~16.5:1; #45526E on #FFFFFF is ~7.3:1;
-     #5B6B85 on #FFFFFF is ~5.1:1 — all comfortably pass WCAG AA. */
+     #526079 on #FFFFFF is ~6.4:1 (5.3:1 on --surface-3) — all pass WCAG AA. */
   --text: #0F172A;
   --text-2: #45526E;
-  --muted: #5B6B85;
+  --muted: #526079;
 
   /* Brand */
   --primary: #2563EB;
@@ -122,7 +169,7 @@
      on a light surface, not just the tinted -bg chips. */
   --success: #16A34A;
   --success-bg: rgba(22, 163, 74, 0.10);
-  --success-text: #15803D;
+  --success-text: #14722F;
   --error: #DC2626;
   --error-bg: rgba(220, 38, 38, 0.10);
   --error-text: #B91C1C;
@@ -132,6 +179,31 @@
   --info: #2563EB;
   --info-bg: rgba(37, 99, 235, 0.10);
   --info-text: #1D4ED8;
+
+  --primary-border: rgba(37, 99, 235, 0.35);
+  --accent-border: rgba(124, 58, 237, 0.35);
+  --success-border: rgba(22, 163, 74, 0.4);
+  --error-border: rgba(220, 38, 38, 0.35);
+  --warning-border: rgba(217, 119, 6, 0.4);
+  --info-border: rgba(37, 99, 235, 0.35);
+
+  /* Chart series — darkened so lines/bars stay >= 3:1 on white. */
+  --chart-blue: #2563EB;
+  --chart-green: #15803D;
+  --chart-amber: #B45309;
+  --chart-red: #DC2626;
+  --chart-purple: #7C3AED;
+  --chart-pink: #DB2777;
+
+  /* Avatar initials — dark 700/800-weight hues for light surfaces. */
+  --avatar-1: #6D28D9;
+  --avatar-2: #1D4ED8;
+  --avatar-3: #155E75;
+  --avatar-4: #065F46;
+  --avatar-5: #92400E;
+  --avatar-6: #991B1B;
+
+  --surface-glass: rgba(255, 255, 255, 0.85);
 
   /* Shadows — lighter, since a dark shadow on white reads as elevation,
      not the near-black glow that works on a dark surface. */
@@ -159,15 +231,15 @@ button {
   font-size: 0.9rem;
   padding: 0.5rem 1rem;
   border-radius: var(--radius-sm);
-  border: 1px solid var(--primary);
-  background-color: var(--primary);
+  border: 1px solid var(--primary-solid);
+  background-color: var(--primary-solid);
   color: #fff;
   cursor: pointer;
   transition: background 0.15s, opacity 0.15s;
 }
 
 button:hover {
-  background-color: var(--primary-hover);
+  background-color: var(--primary-solid-hover);
 }
 
 button:disabled {
@@ -379,7 +451,7 @@ h1, h2, h3 {
 .sb-nav-item.active,
 .sb-nav-item[aria-current="page"] {
   background: var(--primary-dim);
-  color: #93BBFF;
+  color: var(--info-text);
 }
 
 .sb-nav-icon {
@@ -529,7 +601,7 @@ h1, h2, h3 {
 .auth-form {
   position: relative;
   z-index: 1;
-  background: rgba(13, 21, 38, 0.85);
+  background: var(--surface-glass);
   backdrop-filter: blur(20px);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg);
@@ -702,8 +774,8 @@ h1, h2, h3 {
 
 .pw-strength-seg.filled-1 { background: var(--error); }
 .pw-strength-seg.filled-2 { background: var(--warning); }
-.pw-strength-seg.filled-3 { background: #10B981; }
-.pw-strength-seg.filled-4 { background: var(--success); }
+.pw-strength-seg.filled-3 { background: var(--success); }
+.pw-strength-seg.filled-4 { background: var(--success-text); }
 
 .pw-strength-label {
   font-size: 0.72rem;
@@ -749,11 +821,11 @@ h1, h2, h3 {
 }
 
 .btn-primary {
-  background: var(--primary);
+  background: var(--primary-solid);
   color: #fff;
 }
 .btn-primary:hover:not(:disabled) {
-  background: var(--primary-hover);
+  background: var(--primary-solid-hover);
 }
 
 .btn-secondary {
@@ -766,19 +838,19 @@ h1, h2, h3 {
 }
 
 .btn-success {
-  background: #10B981;
+  background: var(--success-solid);
   color: #fff;
 }
 .btn-success:hover:not(:disabled) {
-  background: #059669;
+  background: var(--success-solid-hover);
 }
 
 .btn-danger {
-  background: #EF4444;
+  background: var(--danger-solid);
   color: #fff;
 }
 .btn-danger:hover:not(:disabled) {
-  background: #DC2626;
+  background: var(--danger-solid-hover);
 }
 
 .btn-ghost {
@@ -1383,19 +1455,19 @@ h1, h2, h3 {
 
 .toast-success {
   background: var(--surface-2);
-  border-color: rgba(34, 197, 94, 0.3);
+  border-color: var(--success-border);
   color: var(--success-text);
 }
 
 .toast-error {
   background: var(--surface-2);
-  border-color: rgba(239, 68, 68, 0.3);
+  border-color: var(--error-border);
   color: var(--error-text);
 }
 
 .toast-info {
   background: var(--surface-2);
-  border-color: rgba(59, 130, 246, 0.3);
+  border-color: var(--info-border);
   color: var(--info-text);
 }
 
@@ -1638,7 +1710,7 @@ h1, h2, h3 {
 
 .interview-summary-card {
   background: var(--info-bg);
-  border: 1px solid rgba(59, 130, 246, 0.3);
+  border: 1px solid var(--info-border);
   border-radius: var(--radius);
   padding: 1.5rem;
   margin-bottom: 2rem;
@@ -2860,26 +2932,26 @@ h1, h2, h3 {
 
 .activity-event-dot.type-session_created {
   background: var(--primary-dim);
-  border-color: rgba(61,126,255,0.3);
-  color: var(--primary);
+  border-color: var(--primary-border);
+  color: var(--info-text);
 }
 
 .activity-event-dot.type-session_completed {
-  background: rgba(34,197,94,0.12);
-  border-color: rgba(34,197,94,0.3);
-  color: var(--success);
+  background: var(--success-bg);
+  border-color: var(--success-border);
+  color: var(--success-text);
 }
 
 .activity-event-dot.type-report_generated {
   background: var(--accent-dim);
-  border-color: rgba(139,92,246,0.3);
+  border-color: var(--accent-border);
   color: var(--accent);
 }
 
 .activity-event-dot.type-resume_uploaded {
-  background: rgba(245,158,11,0.12);
-  border-color: rgba(245,158,11,0.3);
-  color: var(--warning);
+  background: var(--warning-bg);
+  border-color: var(--warning-border);
+  color: var(--warning-text);
 }
 
 .activity-event-line {
@@ -2943,20 +3015,20 @@ h1, h2, h3 {
 }
 
 .insight-item.positive {
-  background: rgba(34,197,94,0.07);
-  border: 1px solid rgba(34,197,94,0.18);
+  background: var(--success-bg);
+  border: 1px solid var(--success-border);
   color: var(--success-text);
 }
 
 .insight-item.warning {
-  background: rgba(245,158,11,0.07);
-  border: 1px solid rgba(245,158,11,0.18);
+  background: var(--warning-bg);
+  border: 1px solid var(--warning-border);
   color: var(--warning-text);
 }
 
 .insight-item.info {
-  background: rgba(59,130,246,0.07);
-  border: 1px solid rgba(59,130,246,0.18);
+  background: var(--info-bg);
+  border: 1px solid var(--info-border);
   color: var(--info-text);
 }
 
@@ -3058,8 +3130,8 @@ h1, h2, h3 {
 
 .skills-chip {
   background: var(--primary-dim);
-  color: var(--primary);
-  border: 1px solid rgba(61,126,255,0.25);
+  color: var(--info-text);
+  border: 1px solid var(--primary-border);
   border-radius: 100px;
   padding: 0.2rem 0.65rem;
   font-size: 0.77rem;
@@ -3067,9 +3139,9 @@ h1, h2, h3 {
 }
 
 .skills-chip.missing {
-  background: rgba(239,68,68,0.08);
+  background: var(--error-bg);
   color: var(--error-text);
-  border-color: rgba(239,68,68,0.2);
+  border-color: var(--error-border);
 }
 
 .suggestions-list {
@@ -3341,7 +3413,7 @@ h1, h2, h3 {
   right: -3px;
   min-width: 16px;
   height: 16px;
-  background: var(--error);
+  background: var(--danger-solid);
   color: #fff;
   font-size: 0.62rem;
   font-weight: 800;
@@ -4244,7 +4316,7 @@ input:focus, textarea:focus {
 button:focus-visible, a:focus-visible { outline-offset: 3px; }
 
 .skip-link {
-  background: var(--primary);
+  background: var(--primary-solid);
   color: #fff;
   font-weight: 700;
   font-size: 0.875rem;
@@ -4473,7 +4545,7 @@ button:focus-visible, a:focus-visible { outline-offset: 3px; }
 .error-banner {
   color: var(--error-text);
   background: var(--error-bg);
-  border: 1px solid rgba(239, 68, 68, 0.2);
+  border: 1px solid var(--error-border);
   padding: 0.6rem 0.875rem;
   border-radius: var(--radius-sm);
   font-size: 0.84rem;
@@ -4625,6 +4697,47 @@ button:focus-visible, a:focus-visible { outline-offset: 3px; }
     --text: #111827 !important;
     --text-2: #374151 !important;
     --muted: #6b7280 !important;
+    --surface-glass: #ffffff !important;
+
+    /* Brand / semantic tokens: the dark theme's bright text hues (#93C5FD,
+       #4ADE80...) vanish on white paper, and the light theme's are only
+       tuned for screens — pin all of them to ink-safe values (>= 4.5:1 on
+       white). Tints stay translucent so printed chips keep their shape. */
+    --primary: #1d4ed8 !important;
+    --primary-hover: #1e40af !important;
+    --primary-dim: rgba(29, 78, 216, 0.08) !important;
+    --accent: #6d28d9 !important;
+    --accent-dim: rgba(109, 40, 217, 0.08) !important;
+    --success: #15803d !important;
+    --success-bg: rgba(21, 128, 61, 0.08) !important;
+    --success-text: #166534 !important;
+    --error: #b91c1c !important;
+    --error-bg: rgba(185, 28, 28, 0.08) !important;
+    --error-text: #991b1b !important;
+    --warning: #b45309 !important;
+    --warning-bg: rgba(180, 83, 9, 0.08) !important;
+    --warning-text: #92400e !important;
+    --info: #1d4ed8 !important;
+    --info-bg: rgba(29, 78, 216, 0.08) !important;
+    --info-text: #1e40af !important;
+    --primary-border: rgba(29, 78, 216, 0.4) !important;
+    --accent-border: rgba(109, 40, 217, 0.4) !important;
+    --success-border: rgba(21, 128, 61, 0.4) !important;
+    --error-border: rgba(185, 28, 28, 0.4) !important;
+    --warning-border: rgba(180, 83, 9, 0.4) !important;
+    --info-border: rgba(29, 78, 216, 0.4) !important;
+    --chart-blue: #1d4ed8 !important;
+    --chart-green: #15803d !important;
+    --chart-amber: #b45309 !important;
+    --chart-red: #b91c1c !important;
+    --chart-purple: #6d28d9 !important;
+    --chart-pink: #be185d !important;
+    --avatar-1: #6d28d9 !important;
+    --avatar-2: #1d4ed8 !important;
+    --avatar-3: #155e75 !important;
+    --avatar-4: #065f46 !important;
+    --avatar-5: #92400e !important;
+    --avatar-6: #991b1b !important;
   }
 
   .sb-sidebar,

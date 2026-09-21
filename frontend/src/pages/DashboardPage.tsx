@@ -385,7 +385,7 @@ export function DashboardPage() {
             icon={<TrendingUp size={16} />}
             accent="var(--accent)"
           />
-          <StatCard label="Responses Analysed" value={overview.total_responses_analyzed} icon={<BrainCircuit size={16} />} accent="#F59E0B" />
+          <StatCard label="Responses Analysed" value={overview.total_responses_analyzed} icon={<BrainCircuit size={16} />} accent="var(--chart-amber)" />
           <StatCard label="Strongest Skill" value={overview.strongest_skill} icon={<Award size={16} />} accent="var(--success)" />
           <StatCard label="Weakest Skill" value={overview.weakest_skill} icon={<Award size={16} />} accent="var(--error)" />
           {overview.improvement_score != null && (
@@ -452,7 +452,7 @@ export function DashboardPage() {
                   <div className="skill-bar-list" style={{ gap: '0.55rem' }}>
                     {radarData.map((item, i) => {
                       const pct = Math.round((item.score / 10) * 100);
-                      const colors = ['#3D7EFF', '#22C55E', '#F59E0B', '#EF4444', '#8B5CF6'];
+                      const colors = ['var(--chart-blue)', 'var(--chart-green)', 'var(--chart-amber)', 'var(--chart-red)', 'var(--chart-purple)'];
                       return (
                         <div key={item.skill} className="skill-bar-row" style={{ gridTemplateColumns: '100px 1fr 32px' }}>
                           <span className="skill-bar-name" style={{ fontSize: '0.77rem' }}>{item.skill}</span>
@@ -506,10 +506,10 @@ export function DashboardPage() {
                       <YAxis domain={[0, 10]} tick={{ fontSize: 11, fill: 'var(--muted)' }} />
                       <Tooltip content={<ChartTooltip decimals={1} />} />
                       <Legend wrapperStyle={{ fontSize: '0.8rem' }} />
-                      <Line type="monotone" dataKey="Overall" stroke="#3D7EFF" strokeWidth={2} dot={false} />
-                      <Line type="monotone" dataKey="Communication" stroke="#22C55E" strokeWidth={2} dot={false} />
-                      <Line type="monotone" dataKey="Technical" stroke="#F59E0B" strokeWidth={2} dot={false} />
-                      <Line type="monotone" dataKey="Problem Solving" stroke="#EF4444" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="Overall" stroke="var(--chart-blue)" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="Communication" stroke="var(--chart-green)" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="Technical" stroke="var(--chart-amber)" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="Problem Solving" stroke="var(--chart-red)" strokeWidth={2} dot={false} />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
@@ -524,7 +524,7 @@ export function DashboardPage() {
                     <RadarChart data={radarData}>
                       <PolarGrid stroke="var(--border)" />
                       <PolarAngleAxis dataKey="skill" tick={{ fontSize: 11, fill: 'var(--muted)' }} />
-                      <Radar name="Latest Session" dataKey="score" stroke="#3D7EFF" fill="#3D7EFF" fillOpacity={0.2} />
+                      <Radar name="Latest Session" dataKey="score" stroke="var(--chart-blue)" fill="var(--chart-blue)" fillOpacity={0.2} />
                       <Tooltip content={<ChartTooltip decimals={1} />} />
                     </RadarChart>
                   </ResponsiveContainer>

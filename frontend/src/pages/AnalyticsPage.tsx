@@ -153,10 +153,10 @@ export function AnalyticsPage() {
                 <YAxis domain={[0, 10]} tick={{ fontSize: 11, fill: 'var(--muted)' }} />
                 <Tooltip content={<ChartTooltip decimals={1} />} />
                 <Legend wrapperStyle={{ fontSize: '0.8rem' }} />
-                <Line type="monotone" dataKey="Overall" stroke="#3D7EFF" strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="Communication" stroke="#22C55E" strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="Technical" stroke="#F59E0B" strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="Confidence" stroke="#8B5CF6" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="Overall" stroke="var(--chart-blue)" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="Communication" stroke="var(--chart-green)" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="Technical" stroke="var(--chart-amber)" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="Confidence" stroke="var(--chart-purple)" strokeWidth={2} dot={false} />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -173,7 +173,7 @@ export function AnalyticsPage() {
                 <RadarChart data={radarData}>
                   <PolarGrid stroke="var(--border)" />
                   <PolarAngleAxis dataKey="skill" tick={{ fontSize: 11, fill: 'var(--muted)' }} />
-                  <Radar name="Average" dataKey="score" stroke="#3D7EFF" fill="#3D7EFF" fillOpacity={0.2} />
+                  <Radar name="Average" dataKey="score" stroke="var(--chart-blue)" fill="var(--chart-blue)" fillOpacity={0.2} />
                   <Tooltip content={<ChartTooltip decimals={1} />} />
                 </RadarChart>
               </ResponsiveContainer>
@@ -208,7 +208,7 @@ export function AnalyticsPage() {
             <h2 className="card-header-title" style={{ marginBottom: '1rem' }}>Benchmark</h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
               <BenchmarkRow label="Your avg score" value={benchmark.user_average_score != null ? `${benchmark.user_average_score}/10` : '—'} accent="var(--primary)" />
-              <BenchmarkRow label="Percentile rank" value={benchmark.percentile_rank != null ? `Top ${(100 - benchmark.percentile_rank).toFixed(0)}%` : '—'} accent="var(--success)" />
+              <BenchmarkRow label="Percentile rank" value={benchmark.percentile_rank != null ? `Top ${(100 - benchmark.percentile_rank).toFixed(0)}%` : '—'} accent="var(--success-text)" />
               <BenchmarkRow label="Platform responses" value={benchmark.total_platform_responses ?? 0} />
               <BenchmarkRow label="Your responses" value={benchmark.user_responses_analyzed ?? 0} />
             </div>
@@ -221,14 +221,14 @@ export function AnalyticsPage() {
             <h2 className="card-header-title" style={{ marginBottom: '1rem' }}>Skills Summary</h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
               {overview.strongest_skill && (
-                <div style={{ padding: '0.75rem', background: 'rgba(34,197,94,0.07)', border: '1px solid rgba(34,197,94,0.18)', borderRadius: 'var(--radius-sm)' }}>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--success)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.3rem' }}>Strongest</div>
+                <div style={{ padding: '0.75rem', background: 'var(--success-bg)', border: '1px solid var(--success-border)', borderRadius: 'var(--radius-sm)' }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--success-text)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.3rem' }}>Strongest</div>
                   <div style={{ fontWeight: 700, color: 'var(--text)' }}>{overview.strongest_skill}</div>
                 </div>
               )}
               {overview.weakest_skill && (
-                <div style={{ padding: '0.75rem', background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.18)', borderRadius: 'var(--radius-sm)' }}>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--warning)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.3rem' }}>Needs Work</div>
+                <div style={{ padding: '0.75rem', background: 'var(--warning-bg)', border: '1px solid var(--warning-border)', borderRadius: 'var(--radius-sm)' }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--warning-text)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.3rem' }}>Needs Work</div>
                   <div style={{ fontWeight: 700, color: 'var(--text)' }}>{overview.weakest_skill}</div>
                 </div>
               )}

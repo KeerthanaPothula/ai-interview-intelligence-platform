@@ -369,9 +369,9 @@ export function AdminPage() {
             {Object.entries(overview.sessions_by_status).map(([status, count]) => {
               const pct = overview.total_sessions > 0 ? (count / overview.total_sessions) * 100 : 0;
               const color =
-                status === 'completed' ? '#22C55E' :
-                status === 'in_progress' ? '#3D7EFF' :
-                status === 'processing' ? '#F59E0B' : '#5A6680';
+                status === 'completed' ? 'var(--chart-green)' :
+                status === 'in_progress' ? 'var(--chart-blue)' :
+                status === 'processing' ? 'var(--chart-amber)' : 'var(--muted)';
               return (
                 <div key={status}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', marginBottom: '0.25rem' }}>
@@ -471,8 +471,8 @@ export function AdminPage() {
                 <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: 'var(--muted)' }} />
                 <Tooltip content={<ChartTooltip />} />
                 <Legend wrapperStyle={{ fontSize: '0.78rem' }} />
-                <Line type="monotone" dataKey="Signups" stroke="#3D7EFF" strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="Sessions" stroke="#22C55E" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="Signups" stroke="var(--chart-blue)" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="Sessions" stroke="var(--chart-green)" strokeWidth={2} dot={false} />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -488,7 +488,7 @@ export function AdminPage() {
                   <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: 'var(--muted)' }} />
                   <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 10, fill: 'var(--muted)' }} />
                   <Tooltip content={<ChartTooltip />} />
-                  <Bar dataKey="Sessions" fill="#8B5CF6" radius={[0, 4, 4, 0]} />
+                  <Bar dataKey="Sessions" fill="var(--chart-purple)" radius={[0, 4, 4, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>

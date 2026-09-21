@@ -2,27 +2,29 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- Lets the browser paint its own chrome (canvas, scrollbars) dark or
+         light before the stylesheet arrives; index.css then pins
+         color-scheme per data-theme. -->
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#070C18" />
     <!--
       Blocking, synchronous theme script — must run before first paint to
-      avoid a flash of the wrong theme. Reads the persisted preference or
-      falls back to the OS preference, then stamps data-theme on <html>
-      before any stylesheet paints. ThemeContext (src/context/ThemeContext.tsx)
-      reads this same attribute on mount rather than re-deciding it.
+      avoid a flash of the wrong theme. Order: saved aiip-theme, then the OS
+      preference, then dark. Storage and matchMedia are guarded separately so
+      a blocked localStorage still honors the OS preference. ThemeContext
+      (src/context/ThemeContext.tsx) reads the resulting attribute on mount
+      rather than re-deciding it; the theme-color values here must match
+      THEME_COLOR there.
     -->
     <script>
       (function () {
-        try {
-          var stored = localStorage.getItem('aiip-theme');
-          var theme =
-            stored === 'light' || stored === 'dark'
-              ? stored
-              : window.matchMedia('(prefers-color-scheme: light)').matches
-                ? 'light'
-                : 'dark';
-          document.documentElement.setAttribute('data-theme', theme);
-        } catch (e) {
-          document.documentElement.setAttribute('data-theme', 'dark');
+        var t;
+        try { t = localStorage.getItem('aiip-theme'); } catch (e) {}
+        if (t !== 'light' && t !== 'dark') {
+          try { t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'; } catch (e) { t = 'dark'; }
         }
+        document.documentElement.setAttribute('data-theme', t);
+        document.querySelector('meta[name="theme-color"]').content = t === 'light' ? '#F6F8FC' : '#070C18';
       })();
     </script>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />

@@ -257,7 +257,7 @@ export function ResumePage() {
             <button
               type="button"
               className="btn btn-sm"
-              style={{ background: 'var(--error-bg)', color: 'var(--error-text)', border: '1px solid rgba(239,68,68,0.2)' }}
+              style={{ background: 'var(--error-bg)', color: 'var(--error-text)', border: '1px solid var(--error-border)' }}
               onClick={handleDelete}
               disabled={deleting}
               aria-label="Delete resume"
@@ -287,7 +287,7 @@ export function ResumePage() {
                 textAlign: 'center',
                 color: 'var(--error-text)',
                 background: 'var(--error-bg)',
-                border: '1px solid rgba(239,68,68,0.2)',
+                border: '1px solid var(--error-border)',
               }}
             >
               {analysisError}

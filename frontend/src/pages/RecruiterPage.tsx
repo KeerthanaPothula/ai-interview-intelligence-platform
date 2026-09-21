@@ -31,12 +31,18 @@ const STATUS_OPTIONS: CandidateStatus[] = [
 
 type SortKey = 'name' | 'resumeScore' | 'interviewScore' | 'communication' | 'technical' | 'appliedDays';
 
-const AVATAR_COLORS = ['#7c3aed', '#2563eb', '#0891b2', '#059669', '#d97706', '#dc2626'];
+// Theme-aware tokens (index.css): the hue is the initials' text colour, over a 13% tint of itself.
+const AVATAR_COLORS = ['var(--avatar-1)', 'var(--avatar-2)', 'var(--avatar-3)', 'var(--avatar-4)', 'var(--avatar-5)', 'var(--avatar-6)'];
 
 function avatarColorFor(name: string): string {
   let hash = 0;
   for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
   return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+}
+
+function avatarStyle(name: string) {
+  const color = avatarColorFor(name);
+  return { background: `color-mix(in srgb, ${color} 13%, transparent)`, color };
 }
 
 function initialsFor(name: string): string {
@@ -48,7 +54,7 @@ function ScoreBar({ value }: { value: number | null }) {
   if (value == null) {
     return <span style={{ color: 'var(--muted)' }}>—</span>;
   }
-  const color = value >= 85 ? '#10b981' : value >= 70 ? '#3b82f6' : '#f59e0b';
+  const color = value >= 85 ? 'var(--chart-green)' : value >= 70 ? 'var(--chart-blue)' : 'var(--chart-amber)';
   return (
     <div className="score-with-bar">
       <span style={{ fontWeight: 700, color: 'var(--text)' }}>{value}</span>
@@ -312,7 +318,6 @@ export function RecruiterPage() {
                   </thead>
                   <tbody>
                     {items.map((c) => {
-                      const color = avatarColorFor(c.name);
                       return (
                         <tr
                           key={c.id}
@@ -322,7 +327,7 @@ export function RecruiterPage() {
                         >
                           <td>
                             <div className="cand-name-cell">
-                              <div className="cand-avatar" style={{ background: color + '22', color }}>
+                              <div className="cand-avatar" style={avatarStyle(c.name)}>
                                 {initialsFor(c.name)}
                               </div>
                               <div>
@@ -384,7 +389,7 @@ export function RecruiterPage() {
               transition={{ duration: 0.25, ease }}
             >
               <div className="cand-detail-hd">
-                <div className="cand-detail-avatar" style={{ background: avatarColorFor(selected.name) + '22', color: avatarColorFor(selected.name) }}>
+                <div className="cand-detail-avatar" style={avatarStyle(selected.name)}>
                   {initialsFor(selected.name)}
                 </div>
                 <div style={{ flex: 1 }}>
@@ -410,7 +415,7 @@ export function RecruiterPage() {
                   { label: 'Communication', value: selected.communication },
                   { label: 'Technical', value: selected.technical },
                 ].map((m) => {
-                  const color = m.value == null ? 'var(--muted)' : m.value >= 85 ? '#10b981' : m.value >= 70 ? '#3b82f6' : '#f59e0b';
+                  const color = m.value == null ? 'var(--muted)' : m.value >= 85 ? 'var(--chart-green)' : m.value >= 70 ? 'var(--chart-blue)' : 'var(--chart-amber)';
                   return (
                     <div key={m.label} className="cand-metric">
                       <div className="cand-metric-label">{m.label}</div>

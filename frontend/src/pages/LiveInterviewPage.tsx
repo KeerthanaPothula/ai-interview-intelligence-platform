@@ -15,13 +15,13 @@ import { useAuth } from '../context/AuthContext';
 const ease = [0.4, 0, 0.2, 1] as [number, number, number, number];
 
 const DIFFICULTY_LABELS = ['', 'Warm-up', 'Moderate', 'Intermediate', 'Challenging', 'Advanced'];
-const DIFFICULTY_COLORS = ['', '#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#7c3aed'];
+const DIFFICULTY_COLORS = ['', 'var(--diff-1)', 'var(--diff-2)', 'var(--diff-3)', 'var(--diff-4)', 'var(--diff-5)'];
 
 function DifficultyBadge({ level }: { level: number }) {
   return (
     <span
       className="difficulty-badge"
-      style={{ backgroundColor: DIFFICULTY_COLORS[level] ?? '#6b7280' }}
+      style={{ backgroundColor: DIFFICULTY_COLORS[level] ?? 'var(--muted)' }}
     >
       {DIFFICULTY_LABELS[level] ?? `Level ${level}`}
     </span>

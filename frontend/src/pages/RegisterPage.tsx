@@ -79,7 +79,7 @@ export function RegisterPage() {
               height: 56,
               borderRadius: '50%',
               background: 'var(--success-bg)',
-              border: '1px solid rgba(34,197,94,0.3)',
+              border: '1px solid var(--success-border)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -258,7 +258,7 @@ export function RegisterPage() {
             style={{
               color: 'var(--error-text)',
               background: 'var(--error-bg)',
-              border: '1px solid rgba(239,68,68,0.2)',
+              border: '1px solid var(--error-border)',
               padding: '0.6rem 0.75rem',
               borderRadius: 'var(--radius-sm)',
               fontSize: '0.84rem',
