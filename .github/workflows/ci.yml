@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
 
+# Least privilege: no job here writes to the repo, so the default GITHUB_TOKEN
+# only needs to read it.
+permissions:
+  contents: read
+
 # Cancel superseded runs on the same branch/PR so only the latest commit's
 # CI keeps consuming runner minutes.
 concurrency:
@@ -71,13 +76,15 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: "pip"
-          cache-dependency-path: backend/requirements.txt
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
 
       # System dependency required by openai-whisper at import time.
       - name: Install ffmpeg
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
 
-      - run: pip install --no-cache-dir -r requirements.txt
+      - run: pip install --no-cache-dir -r requirements-dev.txt
 
       # conftest.py sets safe defaults for DATABASE_URL (in-memory SQLite),
       # JWT_SECRET_KEY, and GEMINI_API_KEY via os.environ.setdefault, so no

@@ -173,7 +173,9 @@ def test_handler_returns_500_with_cors_header_for_allowed_origin(client):
 
 
 def test_handler_omits_cors_header_for_disallowed_origin(client):
-    response = client.get("/boom", headers={"Origin": "https://not-allowed.example.com"})
+    response = client.get(
+        "/boom", headers={"Origin": "https://not-allowed.example.com"}
+    )
     assert response.status_code == 500
     assert "access-control-allow-origin" not in response.headers
 

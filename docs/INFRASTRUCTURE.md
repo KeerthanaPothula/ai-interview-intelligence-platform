@@ -36,19 +36,22 @@ third-party coverage account or token is required.
 
 | Job | What it does |
 |---|---|
-| `pip-audit` | `pip-audit -r backend/requirements.txt` against the PyPA Advisory Database |
-| `npm-audit` | `npm audit --omit=dev` against `frontend/` |
+| `pip-audit` | **Blocking.** `python scripts/audit_dependencies.py` — `pip-audit --strict` on `backend/requirements.txt` (runtime + transitive) against the PyPA Advisory Database; undocumented advisories in `backend/pip-audit-exceptions.txt` fail the job. Dev tooling is audited in a separate non-blocking step |
+| `npm-audit` | **Blocking.** `npm run audit` (`frontend/scripts/audit-prod.mjs`) — production tree only; undocumented advisories in `frontend/audit-exceptions.json` fail the job. Dev dependencies are audited in a separate non-blocking step |
 | `secrets-scan` | `gitleaks/gitleaks-action@v2` — scans the diff (PRs) or full history (pushes) for likely committed secrets |
 | `codeql` | GitHub CodeQL static analysis for Python and JavaScript/TypeScript |
 
-`pip-audit`, `npm-audit`, and `secrets-scan` run with
-`continue-on-error: true` — they are informational (surface advisories/hits
-for manual triage per [SECURITY.md](../SECURITY.md)) rather than
-merge-blocking, since a new advisory against an already-pinned, otherwise-
-fine transitive dependency (or a gitleaks false positive on a test fixture)
-shouldn't halt unrelated PRs. `codeql` is not soft-failed; it requires the
-`security-events: write` permission to upload results, declared explicitly
-in the job.
+`pip-audit` and `npm-audit` are **blocking**: an advisory in the production
+dependencies that is not documented (with a reason and a removal condition) in
+`backend/pip-audit-exceptions.txt` / `frontend/audit-exceptions.json` fails the
+run. Each job has exactly one `continue-on-error` step, for its *dev-tooling*
+audit, which is reported but never blocks. The workflow also runs weekly, since
+new advisories appear against unchanged dependencies. Triage process:
+[SECURITY.md](../SECURITY.md#dependency-security). Only `secrets-scan` runs with
+`continue-on-error: true` at job level — it is informational (a gitleaks false
+positive on a test fixture shouldn't halt unrelated PRs). `codeql` is not
+soft-failed; it requires the `security-events: write` permission to upload
+results, declared explicitly in the job.
 
 `backend/tests/test_ci_config.py` parses both workflow files and asserts the
 expected jobs/triggers exist, so a malformed or accidentally-renamed job is
@@ -248,7 +251,7 @@ defaults in `.env.example`:
 
 ```bash
 cd backend
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 uvicorn app.main:app --reload
 curl http://localhost:8000/health
 curl http://localhost:8000/ready

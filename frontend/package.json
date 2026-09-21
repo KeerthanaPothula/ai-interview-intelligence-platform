@@ -11,7 +11,7 @@
     "test": "vitest run",
     "coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
-    "audit": "npm audit --omit=dev"
+    "audit": "node scripts/audit-prod.mjs"
   },
   "dependencies": {
     "framer-motion": "^12.42.2",

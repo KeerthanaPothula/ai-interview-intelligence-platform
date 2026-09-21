@@ -33,7 +33,7 @@ for running the backend directly on the host instead.
 cd backend
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+pip install -r requirements-dev.txt   # runtime + pytest/ruff/black/pip-audit
 
 cp ../.env.example ../.env
 # Point DATABASE_URL at a Postgres instance you control, or run one via
@@ -74,7 +74,7 @@ uvicorn app.main:app --reload
 | `alembic revision --autogenerate -m "description"` | Generate a new migration from model changes |
 | `alembic upgrade head` | Apply all pending migrations |
 | `alembic downgrade -1` | Revert the most recent migration (local only) |
-| `pip-audit -r requirements.txt` | Check dependencies for known vulnerabilities |
+| `python scripts/audit_dependencies.py` | Blocking production-dependency audit (same as CI); exceptions live in `pip-audit-exceptions.txt` — see [SECURITY.md](../SECURITY.md#dependency-security) |
 
 ### Frontend (`cd frontend`)
 
@@ -130,6 +130,8 @@ inline comments: [`.env.example`](../.env.example).
 | `UPLOAD_DIR` | `uploads` | No | Audio storage path |
 | `MAX_UPLOAD_SIZE_MB` | `10` | No | Audio upload ceiling |
 | `MAX_RESUME_UPLOAD_SIZE_MB` | `5` | No | Resume/JD upload ceiling |
+| `MAX_REQUEST_BODY_KB` | `256` | No | Body cap for ordinary (JSON etc.) requests; enforced before parsing/auth, over → `413`. Uploads use their own limits |
+| `MAX_FORM_BODY_KB` | `16` | No | Body cap for urlencoded bodies (login form); over → `413` |
 | `CORS_ORIGINS` | `` (empty) | No | Comma-separated exact origins; empty disables cross-origin requests |
 | `RATE_LIMIT_LOGIN_ATTEMPTS` | `5` | No | Per-IP, per window |
 | `RATE_LIMIT_LOGIN_WINDOW_SECONDS` | `60` | No | Window width |

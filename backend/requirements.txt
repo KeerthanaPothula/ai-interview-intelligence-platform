@@ -4,7 +4,12 @@
 # Week 2 scope: + Gemini AI · audio uploads
 # Week 3 scope: + Whisper transcription · PyTorch CPU · AI analysis
 # =============================================================
-# Install:  pip install -r requirements.txt
+# Install:  pip install -r requirements.txt        (runtime — what the Docker image ships)
+# Dev/CI:   pip install -r requirements-dev.txt    (runtime + test/lint/audit tooling)
+#
+# Everything in THIS file is audited by the blocking `pip-audit` CI gate
+# (.github/workflows/security.yml). Keep test/lint tooling out of it — it belongs
+# in requirements-dev.txt, whose advisories are reported but non-blocking.
 # =============================================================
 
 
@@ -12,8 +17,21 @@
 # Runtime Dependencies
 # -------------------------------------------------------------
 
-# Web framework — async-native, automatic OpenAPI docs, Pydantic v2
-fastapi==0.115.5
+# Web framework — async-native, automatic OpenAPI docs, Pydantic v2.
+# 0.116.1 (was 0.115.5) is the smallest release whose Starlette range (<0.48)
+# admits a patched Starlette; its only change over 0.116.0 is that range.
+# Deliberately NOT newer: 0.118.0 changed when `yield` dependencies (our get_db
+# session) run their exit code, which is a runtime-behaviour change to test on
+# its own — see pip-audit-exceptions.txt for what that blocks.
+fastapi==0.116.1
+
+# ASGI toolkit underneath FastAPI (routing, multipart/form parsing, middleware).
+# Pinned explicitly, not left to FastAPI's range: a bare `fastapi` bump does NOT
+# upgrade an already-installed Starlette (0.41.3 satisfies the new range too),
+# and fresh installs would float to whatever is newest inside <0.48.
+# 0.47.2+ fixes PYSEC-2026-1941 (multipart uploads blocking the event loop) —
+# this parser handles every user upload. Must stay inside fastapi's range.
+starlette==0.47.3
 
 # ASGI server — [standard] adds uvloop (faster event loop),
 # httptools (faster HTTP parser), and websockets support
@@ -29,8 +47,10 @@ alembic==1.14.0
 # locally; fine for dev and Docker; swap to psycopg2 for prod if needed
 psycopg2-binary==2.9.10
 
-# JWT encoding / decoding — used to issue and verify access tokens
-python-jose[cryptography]==3.3.0
+# JWT encoding / decoding — used to issue and verify access tokens.
+# 3.5.0 (was 3.3.0): 3.3.0 has published advisories (PYSEC-2024-232/233, fixed in
+# 3.4.0) — see the pip-audit CI job.
+python-jose[cryptography]==3.5.0
 
 # Password hashing — using bcrypt directly instead of passlib.
 # passlib 1.7.4 (last updated 2020) reads bcrypt.__about__.__version__
@@ -45,7 +65,9 @@ pydantic-settings==2.6.1
 # Required by FastAPI to parse multipart/form-data bodies —
 # OAuth2PasswordRequestForm (login endpoint) and audio file uploads
 # will not work without it
-python-multipart==0.0.12
+# 0.0.32 (was 0.0.12): 0.0.12 has multipart-parsing DoS advisories (PYSEC-2026-1851
+# and later, fixed up to 0.0.31) and this parser handles every untrusted upload.
+python-multipart==0.0.32
 
 # Enables Pydantic's EmailStr type, which validates email format
 # on the register endpoint
@@ -118,32 +140,13 @@ torch==2.6.0+cpu
 
 
 # -------------------------------------------------------------
-# Development Dependencies
-# (not needed in production — separate file if repo grows)
+# HTTP client
 # -------------------------------------------------------------
 
-# Testing framework
-pytest==8.3.4
-
-# Async HTTP client — used as the FastAPI TestClient transport
-# for writing integration tests against the running app
+# Runtime dependency: app/core/ai_reliability.py imports httpx to classify
+# transport errors raised by the Gemini SDK (which itself depends on it).
+# Also the transport behind FastAPI's TestClient.
 httpx==0.28.1
-
-# Code formatter
-black==24.10.0
-
-# Linter — covers flake8, isort, and more in a single fast tool
-ruff==0.8.1
-
-# Dependency vulnerability scanner — checks installed packages against the
-# PyPA Advisory Database. Run with: pip-audit -r requirements.txt
-# See SECURITY.md for the full dependency-audit workflow.
-pip-audit==2.7.3
-
-# YAML parser — used by tests/test_ci_config.py to structurally validate
-# the GitHub Actions workflow files. Already present transitively (via
-# huggingface-hub), pinned directly here since test code imports it.
-pyyaml==6.0.3
 
 
 # -------------------------------------------------------------
@@ -163,7 +166,9 @@ librosa==0.10.2
 
 # PDF text extraction — used by document_extraction_service to pull text from
 # resume/JD PDFs uploaded by candidates. Pure-Python, no C extensions.
-pypdf==4.3.1
+# 6.19.0 (was 4.3.1): 4.3.1 has dozens of advisories (malformed-PDF DoS/loops)
+# and this library parses user-uploaded files. Only PdfReader/extract_text are used.
+pypdf==6.19.0
 
 # DOCX text extraction — extracts text from Word documents for the RAG system.
 python-docx==1.1.2
@@ -204,12 +209,3 @@ opentelemetry-instrumentation-sqlalchemy==0.48b0
 # Honeycomb, etc.) when OTEL_EXPORTER_OTLP_ENDPOINT is configured.
 # Falls back to a console exporter when unset (see app/core/tracing.py).
 opentelemetry-exporter-otlp-proto-http==1.27.0
-
-
-# -------------------------------------------------------------
-# Phase 4 — Testing: coverage reporting
-# -------------------------------------------------------------
-
-# pytest plugin that produces coverage reports (text + XML for CI
-# upload) from the existing pytest test suite — no new test runner.
-pytest-cov==5.0.0

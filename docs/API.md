@@ -29,6 +29,21 @@ prevents account enumeration. See [SECURITY.md](../SECURITY.md).
 
 ---
 
+## Request body limits
+
+Every request body is size-checked **before** it is parsed or authenticated, and
+rejected with `413 {"detail": "Request body too large."}` when over the limit:
+
+| Request | Limit |
+|---|---|
+| `multipart/form-data` to the two upload routes (audio response, resume) | the endpoint's per-file cap (`MAX_UPLOAD_SIZE_MB` / `MAX_RESUME_UPLOAD_SIZE_MB`) + 1 MiB of multipart framing |
+| `application/x-www-form-urlencoded` (login) | `MAX_FORM_BODY_KB` (default 16 KiB) |
+| everything else (JSON, …) | `MAX_REQUEST_BODY_KB` (default 256 KiB) |
+
+Uploads still return their own precise `413` message when the *file* is over its
+cap; the generic message above appears for bodies far beyond it. Applies with or
+without `Content-Length` (chunked bodies are counted as they stream).
+
 ## Health & Observability
 
 ### `GET /health`

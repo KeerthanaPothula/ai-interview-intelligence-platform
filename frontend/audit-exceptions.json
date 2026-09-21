@@ -1,0 +1,19 @@
+{
+  "_readme": "Documented exceptions for the BLOCKING production npm audit (scripts/audit-prod.mjs, `npm run audit`). Every entry needs id, package, reason and removeWhen. Never add an entry just to get CI green: verify the advisory is not reachable (or that no compatible fix exists) and write that down. Delete entries as upgrades land. Baseline triaged 2026-09-21.",
+  "exceptions": [
+    {
+      "id": "GHSA-wrjc-x8rr-h8h6",
+      "package": "react-router",
+      "severity": "moderate",
+      "reason": "Open redirect via a backslash in the target passed to <Link>/useNavigate (bypass of CVE-2025-68470). Not reachable: every navigation target in src/ is a string literal, a static route table, a fixed role->route map, or the fixed prefix '/sessions/' + an id (checked by review of every Link/NavLink/Navigate/useNavigate call site) — no attacker-controlled URL ever reaches the router. The only fix is react-router 7.18+ (advisory range >=6.0.0 <7.18.0), a major upgrade the app has not taken.",
+      "removeWhen": "react-router-dom is migrated to v7 (>=7.18), or a patched 6.x release is published."
+    },
+    {
+      "id": "GHSA-337j-9hxr-rhxg",
+      "package": "react-router",
+      "severity": "moderate",
+      "reason": "Arbitrary constructor injection in deserializeErrors() during React Router SSR hydration. Not applicable: the app is a client-only SPA (<BrowserRouter>); there is no server rendering, data-router hydration or createStaticRouter anywhere in src/. The only fix is react-router 7.18+ (advisory range >=6.4.0 <7.18.0), a major upgrade.",
+      "removeWhen": "react-router-dom is migrated to v7 (>=7.18), or a patched 6.x release is published."
+    }
+  ]
+}

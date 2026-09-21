@@ -1,0 +1,35 @@
+# =============================================================
+# Development / CI tooling — NOT installed in the production image.
+#
+#   pip install -r requirements-dev.txt
+#
+# Pulls in the runtime dependencies (requirements.txt) plus everything
+# needed to test, lint and audit. Advisories against packages listed HERE
+# are reported by CI but do not block merges; advisories against
+# requirements.txt do. See SECURITY.md "Dependency Security".
+# =============================================================
+
+-r requirements.txt
+
+# Testing framework
+pytest==8.3.4
+
+# pytest plugin that produces coverage reports (text + XML for CI upload)
+# from the existing pytest test suite — no new test runner.
+pytest-cov==5.0.0
+
+# Code formatter (CI: `black --check .`)
+black==24.10.0
+
+# Linter — covers flake8, isort, and more in a single fast tool
+# (CI: `ruff check .`)
+ruff==0.8.1
+
+# Dependency vulnerability scanner — checks pinned packages against the
+# PyPA Advisory Database. See SECURITY.md for the dependency-audit workflow.
+pip-audit==2.7.3
+
+# YAML parser — used by tests/test_ci_config.py to structurally validate
+# the GitHub Actions workflow files. Already present transitively (via
+# huggingface-hub), pinned directly here since test code imports it.
+pyyaml==6.0.3

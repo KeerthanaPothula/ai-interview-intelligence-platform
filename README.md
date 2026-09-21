@@ -269,7 +269,8 @@ ai-interview-intelligence-platform/
 │   │   └── core/              # Cross-cutting: security, rate limiting, middleware, observability
 │   ├── alembic/                # Database migrations
 │   ├── tests/                  # pytest suite (267 tests)
-│   └── requirements.txt
+│   ├── requirements.txt        # runtime dependencies (shipped in the image, audited in CI)
+│   └── requirements-dev.txt    # runtime + test/lint/audit tooling
 ├── frontend/
 │   ├── src/
 │   │   ├── pages/              # One component per route (Dashboard, Resume, Recruiter, Admin, ...)
@@ -360,7 +361,7 @@ Backend at `http://localhost:8000`.
 # Backend
 cd backend
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+pip install -r requirements-dev.txt                 # runtime + test/lint tooling
 cp ../.env.example ../.env
 alembic upgrade head
 uvicorn app.main:app --reload
@@ -392,6 +393,8 @@ at the point of use. The ones you actually need to set for local dev:
 | `WHISPER_MODEL` | No (default `base`) | Whisper model size — bigger = more accurate, slower, more RAM |
 | `ENABLE_AUDIO_PROCESSING` | No (default `true`) | Kill switch for the Whisper/voice pipeline |
 | `MAX_UPLOAD_SIZE_MB` | No (default `50`) | Audio/resume upload ceiling |
+| `MAX_REQUEST_BODY_KB` | No (default `256`) | Cap on ordinary (JSON etc.) request bodies; larger → `413` |
+| `MAX_FORM_BODY_KB` | No (default `16`) | Cap on urlencoded (login form) bodies; larger → `413` |
 | `ENABLE_METRICS` | No (default `true`) | Toggles the `/metrics` Prometheus endpoint |
 | `ENABLE_TRACING` | No (default `false`) | Opt-in OpenTelemetry tracing |
 | `VITE_API_BASE_URL` | Yes (frontend) | Backend origin the SPA calls — set in `frontend/.env` |

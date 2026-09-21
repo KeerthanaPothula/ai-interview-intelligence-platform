@@ -253,11 +253,11 @@ def main() -> None:
                         # recruiter pipeline with a real status — matches
                         # recruiter_service's "latest completed session
                         # per user" semantics.
-                        recruiter_status=RECRUITER_STATUS_CYCLE[
-                            i % len(RECRUITER_STATUS_CYCLE)
-                        ]
-                        if is_latest
-                        else None,
+                        recruiter_status=(
+                            RECRUITER_STATUS_CYCLE[i % len(RECRUITER_STATUS_CYCLE)]
+                            if is_latest
+                            else None
+                        ),
                     )
         else:
             print(

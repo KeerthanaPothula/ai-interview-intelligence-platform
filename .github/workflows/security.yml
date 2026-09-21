@@ -4,18 +4,23 @@ on:
   push:
     branches: [main]
   pull_request:
+  # New advisories appear against dependencies that have not changed, so also
+  # audit weekly (Mondays 04:17 UTC) — a red run here means "triage this
+  # advisory", see SECURITY.md "Dependency Security".
+  schedule:
+    - cron: "17 4 * * 1"
 
 permissions:
   contents: read
 
 jobs:
+  # BLOCKING. Fails on any advisory in the production (runtime) dependencies —
+  # including transitive ones — that is not documented, with a reason and a
+  # removal condition, in backend/pip-audit-exceptions.txt. Also fails if a
+  # dependency cannot be audited (--strict), so nothing silently drops out.
   pip-audit:
     name: Dependency Audit (Python)
     runs-on: ubuntu-latest
-    # Informational: surfaces advisories against pinned versions without
-    # blocking merges. See SECURITY.md "Dependency Security" for the
-    # triage process (bump the affected pin, re-run the test suite).
-    continue-on-error: true
     defaults:
       run:
         working-directory: backend
@@ -26,13 +31,26 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Same version as requirements-dev.txt.
       - run: pip install --no-cache-dir pip-audit==2.7.3
-      - run: pip-audit -r requirements.txt
 
+      - name: Audit production dependencies (blocking)
+        run: python scripts/audit_dependencies.py
+
+      # Test/lint/audit tooling is never shipped, so its advisories are
+      # reported here but must not block a merge. This step is the only place
+      # a failure is tolerated, and only because it audits dev-only pins.
+      - name: Audit dev tooling (informational, non-blocking)
+        continue-on-error: true
+        run: |
+          sed '/^-r /d' requirements-dev.txt > "$RUNNER_TEMP/requirements-dev-only.txt"
+          pip-audit -r "$RUNNER_TEMP/requirements-dev-only.txt" --no-deps --disable-pip --progress-spinner off
+
+  # BLOCKING. Fails on any advisory in the production dependency tree that is
+  # not documented in frontend/audit-exceptions.json (see scripts/audit-prod.mjs).
   npm-audit:
     name: Dependency Audit (JavaScript)
     runs-on: ubuntu-latest
-    continue-on-error: true
     defaults:
       run:
         working-directory: frontend
@@ -46,7 +64,15 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - run: npm ci
-      - run: npm audit --omit=dev
+
+      - name: Audit production dependencies (blocking)
+        run: npm run audit
+
+      # devDependencies (build/test tooling) never ship to users, so their
+      # advisories are reported but must not block a merge.
+      - name: Audit all dependencies incl. dev tooling (informational, non-blocking)
+        continue-on-error: true
+        run: npm audit
 
   secrets-scan:
     name: Secrets Scan (gitleaks)

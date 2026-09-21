@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select, union_all, literal, case
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.constants import API_V1_PREFIX
@@ -183,30 +183,38 @@ def get_activity_timeline(
 
     # Session created events
     sessions = (
-        db.query(InterviewSession.title, InterviewSession.status, InterviewSession.created_at)
+        db.query(
+            InterviewSession.title, InterviewSession.status, InterviewSession.created_at
+        )
         .filter(InterviewSession.user_id == user_id)
         .order_by(InterviewSession.created_at.desc())
         .limit(limit)
         .all()
     )
     for s in sessions:
-        events.append(ActivityEvent(
-            event_type="session_created",
-            title=f"Interview session created",
-            subtitle=s.title,
-            created_at=s.created_at,
-        ))
-        if s.status == "completed":
-            events.append(ActivityEvent(
-                event_type="session_completed",
-                title="Interview completed",
+        events.append(
+            ActivityEvent(
+                event_type="session_created",
+                title="Interview session created",
                 subtitle=s.title,
                 created_at=s.created_at,
-            ))
+            )
+        )
+        if s.status == "completed":
+            events.append(
+                ActivityEvent(
+                    event_type="session_completed",
+                    title="Interview completed",
+                    subtitle=s.title,
+                    created_at=s.created_at,
+                )
+            )
 
     # Report generated events
     reports = (
-        db.query(SessionReport.session_id, SessionReport.created_at, InterviewSession.title)
+        db.query(
+            SessionReport.session_id, SessionReport.created_at, InterviewSession.title
+        )
         .join(InterviewSession, SessionReport.session_id == InterviewSession.id)
         .filter(InterviewSession.user_id == user_id)
         .order_by(SessionReport.created_at.desc())
@@ -214,12 +222,14 @@ def get_activity_timeline(
         .all()
     )
     for r in reports:
-        events.append(ActivityEvent(
-            event_type="report_generated",
-            title="AI Report generated",
-            subtitle=r.title,
-            created_at=r.created_at,
-        ))
+        events.append(
+            ActivityEvent(
+                event_type="report_generated",
+                title="AI Report generated",
+                subtitle=r.title,
+                created_at=r.created_at,
+            )
+        )
 
     # Resume upload events
     resumes = (
@@ -230,12 +240,14 @@ def get_activity_timeline(
         .all()
     )
     for rv in resumes:
-        events.append(ActivityEvent(
-            event_type="resume_uploaded",
-            title="Resume uploaded",
-            subtitle=rv.filename,
-            created_at=rv.created_at,
-        ))
+        events.append(
+            ActivityEvent(
+                event_type="resume_uploaded",
+                title="Resume uploaded",
+                subtitle=rv.filename,
+                created_at=rv.created_at,
+            )
+        )
 
     events.sort(key=lambda e: e.created_at, reverse=True)
     return ActivityTimelineResponse(events=events[:limit])
@@ -258,10 +270,12 @@ def get_insights(
 
     total = analyses_q.count()
     if total == 0:
-        insights.append(InsightItem(
-            text="Complete your first interview session to unlock personalized insights.",
-            kind="info",
-        ))
+        insights.append(
+            InsightItem(
+                text="Complete your first interview session to unlock personalized insights.",
+                kind="info",
+            )
+        )
         return InsightsResponse(insights=insights)
 
     avg = analyses_q.with_entities(
@@ -276,8 +290,7 @@ def get_insights(
     thirty_days_ago = now_utc - timedelta(days=30)
 
     recent_avg = (
-        analyses_q
-        .filter(InterviewAnalysis.created_at >= thirty_days_ago)
+        analyses_q.filter(InterviewAnalysis.created_at >= thirty_days_ago)
         .with_entities(
             func.avg(InterviewAnalysis.overall_score).label("overall"),
             func.avg(InterviewAnalysis.communication_score).label("comm"),
@@ -296,29 +309,73 @@ def get_insights(
     conf = _fv(avg.conf)
 
     if overall >= 8.0:
-        insights.append(InsightItem(text=f"Excellent overall score of {overall:.1f}/10 — you're interview-ready!", kind="positive"))
+        insights.append(
+            InsightItem(
+                text=f"Excellent overall score of {overall:.1f}/10 — you're interview-ready!",
+                kind="positive",
+            )
+        )
     elif overall >= 6.0:
-        insights.append(InsightItem(text=f"Good average score of {overall:.1f}/10. A bit more practice will sharpen your edge.", kind="info"))
+        insights.append(
+            InsightItem(
+                text=f"Good average score of {overall:.1f}/10. A bit more practice will sharpen your edge.",
+                kind="info",
+            )
+        )
     else:
-        insights.append(InsightItem(text=f"Average score is {overall:.1f}/10. Focus on targeted practice to improve.", kind="warning"))
+        insights.append(
+            InsightItem(
+                text=f"Average score is {overall:.1f}/10. Focus on targeted practice to improve.",
+                kind="warning",
+            )
+        )
 
-    skill_map = {"Communication": comm, "Technical": tech, "Problem Solving": ps, "Confidence": conf}
+    skill_map = {
+        "Communication": comm,
+        "Technical": tech,
+        "Problem Solving": ps,
+        "Confidence": conf,
+    }
     best_skill = max(skill_map, key=lambda k: skill_map[k])
     worst_skill = min(skill_map, key=lambda k: skill_map[k])
-    insights.append(InsightItem(text=f"{best_skill} is your strongest area ({skill_map[best_skill]:.1f}/10) — great job!", kind="positive"))
+    insights.append(
+        InsightItem(
+            text=f"{best_skill} is your strongest area ({skill_map[best_skill]:.1f}/10) — great job!",
+            kind="positive",
+        )
+    )
 
     if skill_map[worst_skill] < 6.0:
-        insights.append(InsightItem(text=f"{worst_skill} needs work ({skill_map[worst_skill]:.1f}/10). Consider targeted practice.", kind="warning"))
+        insights.append(
+            InsightItem(
+                text=f"{worst_skill} needs work ({skill_map[worst_skill]:.1f}/10). Consider targeted practice.",
+                kind="warning",
+            )
+        )
 
     if recent_avg.comm is not None and avg.comm is not None:
         delta = _fv(recent_avg.comm) - _fv(avg.comm)
         if delta > 0.5:
-            insights.append(InsightItem(text=f"Communication improved by {delta:.1f} points in the last 30 days.", kind="positive"))
+            insights.append(
+                InsightItem(
+                    text=f"Communication improved by {delta:.1f} points in the last 30 days.",
+                    kind="positive",
+                )
+            )
         elif delta < -0.5:
-            insights.append(InsightItem(text="Communication score has dipped slightly this month — review your recent feedback.", kind="warning"))
+            insights.append(
+                InsightItem(
+                    text="Communication score has dipped slightly this month — review your recent feedback.",
+                    kind="warning",
+                )
+            )
 
     if total >= 3:
-        completion_rate = min(100, int(total / max(1, total) * 100))
-        insights.append(InsightItem(text=f"You've analyzed {total} responses. Keep up the momentum!", kind="info"))
+        insights.append(
+            InsightItem(
+                text=f"You've analyzed {total} responses. Keep up the momentum!",
+                kind="info",
+            )
+        )
 
     return InsightsResponse(insights=insights)

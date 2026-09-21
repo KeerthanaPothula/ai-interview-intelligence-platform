@@ -119,7 +119,9 @@ def register_exception_handlers(app: FastAPI) -> None:
         return response
 
 
-def _apply_bypassed_middleware_headers(request: Request, response: JSONResponse) -> None:
+def _apply_bypassed_middleware_headers(
+    request: Request, response: JSONResponse
+) -> None:
     """Hand-apply what CORSMiddleware and SecurityHeadersMiddleware would
     normally add, because neither runs for this response.
 
