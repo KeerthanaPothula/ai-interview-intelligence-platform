@@ -108,11 +108,18 @@ def call_gemini_with_retry(
                 result = fn()
                 _record("success")
                 return result
-            except httpx.TimeoutException as exc:
+            except httpx.TransportError as exc:
+                # Superset of httpx.TimeoutException: also covers connect
+                # failures, dropped connections and protocol errors — all
+                # transient network faults worth retrying.
                 last_exc = exc
                 last_was_rate_limit = False
                 logger.warning(
-                    "%s timed out (attempt %d/%d)", operation, attempt, max_retries
+                    "%s failed with a network error (%s) (attempt %d/%d)",
+                    operation,
+                    type(exc).__name__,
+                    attempt,
+                    max_retries,
                 )
             except genai_errors.APIError as exc:
                 last_exc = exc

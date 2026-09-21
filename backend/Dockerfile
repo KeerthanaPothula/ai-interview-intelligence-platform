@@ -151,4 +151,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
 # which is exactly what silently happened before this change (see
 # docs/RENDER_DEPLOYMENT.md and docs/PRODUCTION_DEPLOYMENT.md).
 # -------------------------------------------------------------
-CMD alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
+CMD alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}

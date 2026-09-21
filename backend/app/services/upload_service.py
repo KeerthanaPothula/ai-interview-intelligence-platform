@@ -114,17 +114,21 @@ async def validate_upload(file: UploadFile) -> tuple[bytes, int, str, str]:
             ),
         )
 
-    content: bytes = await file.read()
-    file_size: int = len(content)
-
     settings = get_settings()
     max_bytes = settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024
 
+    # Read at most max+1 bytes: an oversized upload is rejected without ever
+    # being pulled into memory in full (a large body could otherwise OOM a
+    # small instance before the size check runs).
+    content: bytes = await file.read(max_bytes + 1)
+    file_size: int = len(content)
+
     if file_size > max_bytes:
+        reported_size = file.size or file_size
         raise HTTPException(
             status_code=413,
             detail=(
-                f"File size {file_size:,} bytes exceeds the maximum of "
+                f"File size {reported_size:,} bytes exceeds the maximum of "
                 f"{settings.MAX_UPLOAD_SIZE_MB} MB ({max_bytes:,} bytes)."
             ),
         )

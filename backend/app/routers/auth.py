@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
+from app.core.client_ip import get_client_ip
 from app.core.deps import get_current_user
 from app.core.rate_limit import enforce_login_rate_limit
 from app.core.security import create_access_token, generate_refresh_token
@@ -30,9 +31,12 @@ from app.services import auth_service
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
+# Bounded so an unreachable SMTP server cannot pin a worker thread forever.
+_SMTP_TIMEOUT_SECONDS = 10
+
 
 def _client_ip(request: Request) -> str:
-    return request.client.host if request.client else "unknown"
+    return get_client_ip(request)
 
 
 def _issue_token_pair(db: Session, user: User) -> Token:
@@ -163,6 +167,15 @@ def refresh(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired refresh token.",
         )
+    if not user.is_active:
+        # A deactivated account must not keep minting tokens — get_current_user
+        # would reject them anyway, but they would become valid again the
+        # moment the account is reactivated.
+        log_token_refresh_rejected(ip, "user_deactivated")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token.",
+        )
 
     raw_new_token = generate_refresh_token()
     auth_service.rotate_refresh_token(db, old_row, raw_new_token)
@@ -221,7 +234,8 @@ def change_password(
     """Change password for the authenticated user.
 
     Validates current_password before updating. Increments token_version to
-    invalidate all existing access tokens on success.
+    invalidate all existing access tokens and revokes every refresh token on
+    success.
     """
     from app.core.security import get_password_hash, verify_password
 
@@ -233,6 +247,10 @@ def change_password(
     current_user.hashed_password = get_password_hash(body.new_password)
     current_user.token_version = (current_user.token_version or 0) + 1
     db.commit()
+    # token_version only kills existing *access* tokens. A leaked refresh token
+    # would otherwise keep minting fresh access tokens (stamped with the new
+    # version) after the password rotation — same as /auth/reset-password does.
+    auth_service.revoke_all_refresh_tokens_for_user(db, current_user.id)
     return DetailResponse(detail="Password changed successfully. Please log in again.")
 
 
@@ -240,9 +258,11 @@ def change_password(
     "/forgot-password",
     response_model=DetailResponse,
     summary="Request a password-reset link",
+    dependencies=[Depends(enforce_login_rate_limit)],
 )
 def forgot_password(
     body: ForgotPasswordRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> DetailResponse:
@@ -252,9 +272,14 @@ def forgot_password(
     email is registered — this prevents user enumeration attacks.
 
     In production, configure SMTP via the SMTP_* environment variables and the
-    token will be sent as an email link. Without SMTP config, the raw token is
-    logged at WARNING level so it can be retrieved from server logs during
-    development/testing.
+    token will be sent as an email link. Without SMTP config outside production,
+    the reset URL is logged at WARNING level so it can be retrieved from server
+    logs during development/testing; in production it is never logged (a log
+    reader could otherwise take over any account).
+
+    The email is sent from a background task so the response time does not
+    depend on the SMTP server (which would both hang the request and leak,
+    via timing, whether the address is registered).
     """
     import logging
 
@@ -264,7 +289,9 @@ def forgot_password(
 
     if raw_token is not None:
         reset_url = f"{settings.FRONTEND_URL}/reset-password/{raw_token}"
-        _send_reset_email(body.email, reset_url, logger, settings)
+        background_tasks.add_task(
+            _send_reset_email, body.email, reset_url, logger, settings
+        )
 
     return DetailResponse(
         detail="If an account with that email exists, a password-reset link has been sent."
@@ -275,6 +302,7 @@ def forgot_password(
     "/reset-password",
     response_model=DetailResponse,
     summary="Set a new password using a reset token",
+    dependencies=[Depends(enforce_login_rate_limit)],
 )
 def reset_password(
     body: ResetPasswordRequest,
@@ -317,11 +345,19 @@ def _send_reset_email(
 
     smtp_host = getattr(settings, "SMTP_HOST", None)
     if not smtp_host:
-        _logger.warning(
-            "SMTP not configured — password reset URL for %s: %s",
-            email,
-            reset_url,
-        )
+        if settings.ENVIRONMENT == "production":
+            # Never write a live reset token to production logs.
+            _logger.error(
+                "SMTP is not configured — password reset email for %s was NOT "
+                "sent. Set SMTP_HOST (and SMTP_USER/SMTP_PASSWORD) to enable it.",
+                email,
+            )
+        else:
+            _logger.warning(
+                "SMTP not configured — password reset URL for %s: %s",
+                email,
+                reset_url,
+            )
         return
 
     try:
@@ -341,7 +377,9 @@ def _send_reset_email(
             f"If you did not request this, you can safely ignore this email."
         )
 
-        with smtplib.SMTP(smtp_host, smtp_port) as server:
+        with smtplib.SMTP(
+            smtp_host, smtp_port, timeout=_SMTP_TIMEOUT_SECONDS
+        ) as server:
             server.starttls()
             if smtp_user and smtp_password:
                 server.login(smtp_user, smtp_password)

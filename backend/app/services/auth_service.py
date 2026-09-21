@@ -70,6 +70,12 @@ def register_user(db: Session, user_data: UserCreate) -> User:
     return user
 
 
+# Verified against when the email is unknown, so "no such user" costs the same
+# bcrypt work as "wrong password" and response time does not reveal which
+# emails are registered.
+_DUMMY_PASSWORD_HASH = get_password_hash("dummy-password-for-timing-equalisation")
+
+
 def authenticate_user(db: Session, email: str, password: str) -> User | None:
     """
     Verify email + password and return the User if correct.
@@ -85,6 +91,7 @@ def authenticate_user(db: Session, email: str, password: str) -> User | None:
     """
     user = get_user_by_email(db, email)
     if user is None:
+        verify_password(password, _DUMMY_PASSWORD_HASH)
         return None
     if not verify_password(password, user.hashed_password):
         return None

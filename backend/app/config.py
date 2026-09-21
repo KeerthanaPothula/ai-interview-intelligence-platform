@@ -182,6 +182,24 @@ class Settings(BaseSettings):
     # smaller cap than MAX_UPLOAD_SIZE_MB is appropriate.
     MAX_RESUME_UPLOAD_SIZE_MB: int = Field(default=5, gt=0)
 
+    # Application-level request-body caps (app/core/body_limit.py). They are
+    # enforced BEFORE the body is parsed or authentication runs, so they do not
+    # depend on the hosting platform's own limit. Oversized requests get HTTP 413.
+    #
+    # Limit for ordinary requests (JSON etc.), in KiB. The largest legitimate body
+    # today is ~41 KB (a session with a 10,000-character description in 4-byte
+    # characters); the default leaves ~6x headroom. Raise it together with any
+    # schema field you allow to grow.
+    MAX_REQUEST_BODY_KB: int = Field(default=256, gt=0)
+
+    # Limit for application/x-www-form-urlencoded bodies (only the login form
+    # uses them, ~170 bytes), in KiB. Deliberately much smaller: Starlette does not
+    # bound urlencoded field counts (PYSEC-2026-249) and parsing many tiny fields
+    # is ~quadratic (16 KiB ~0.1 s, 1 MiB ~17 s of event-loop time).
+    MAX_FORM_BODY_KB: int = Field(default=16, gt=0)
+    # Uploads keep their own limits (MAX_UPLOAD_SIZE_MB / MAX_RESUME_UPLOAD_SIZE_MB)
+    # and are only available to the two upload routes, as multipart/form-data.
+
     # ------------------------------------------------------------------
     # CORS
     # ------------------------------------------------------------------
@@ -256,6 +274,33 @@ class Settings(BaseSettings):
             )
         return self
 
+    # Fail fast on obviously unsafe production values. Only ever raises for
+    # ENVIRONMENT=production so local development and the test suite keep
+    # working with placeholder-ish values.
+    @model_validator(mode="after")
+    def production_must_not_use_unsafe_values(self) -> "Settings":
+        if self.ENVIRONMENT != "production":
+            return self
+        if "*" in self.CORS_ORIGINS:
+            raise ValueError(
+                "CORS_ORIGINS must list explicit origins when ENVIRONMENT=production; "
+                "'*' is not allowed."
+            )
+        placeholder_prefixes = (
+            "replace_with",
+            "change_me",
+            "changeme",
+            "change-me",
+            "your_",
+            "your-",
+        )
+        if self.JWT_SECRET_KEY.lower().startswith(placeholder_prefixes):
+            raise ValueError(
+                "JWT_SECRET_KEY looks like a copied .env.example placeholder. "
+                "Generate a real secret (e.g. `openssl rand -hex 32`)."
+            )
+        return self
+
     # ------------------------------------------------------------------
     # Phase 3 — Login rate limiting & account lockout
     #
@@ -276,6 +321,16 @@ class Settings(BaseSettings):
 
     # Width of the fixed window (seconds) used by RATE_LIMIT_LOGIN_ATTEMPTS.
     RATE_LIMIT_LOGIN_WINDOW_SECONDS: int = Field(default=60, gt=0)
+
+    # Number of reverse proxies in front of the app that append to
+    # X-Forwarded-For (e.g. 1 behind a single load balancer). 0 (default)
+    # ignores the header entirely and uses the TCP peer address — correct
+    # for direct exposure, and never spoofable. Behind a proxy the peer is
+    # the proxy itself, so without this every user shares one rate-limit
+    # bucket and one IP in the security log. The client address is taken as
+    # the Nth entry from the RIGHT of X-Forwarded-For, i.e. the one written
+    # by our own trusted proxy — never the client-controlled left side.
+    TRUSTED_PROXY_COUNT: int = Field(default=0, ge=0, le=5)
 
     # Number of consecutive failed password attempts against one account
     # before that account is temporarily locked, independent of the

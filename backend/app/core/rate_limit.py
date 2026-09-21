@@ -18,6 +18,7 @@ from threading import Lock
 from fastapi import HTTPException, Request, status
 
 from app.config import get_settings
+from app.core.client_ip import get_client_ip
 
 
 class InMemoryRateLimiter:
@@ -67,7 +68,7 @@ def enforce_login_rate_limit(request: Request) -> None:
     as effectively as one repeatedly guessing a single account's password.
     """
     settings = get_settings()
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = get_client_ip(request)
     allowed, retry_after = login_rate_limiter.check(
         f"{request.url.path}:{client_ip}",
         settings.RATE_LIMIT_LOGIN_ATTEMPTS,

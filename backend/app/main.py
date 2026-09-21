@@ -45,6 +45,7 @@ from sqlalchemy import text
 from starlette.responses import Response
 
 from app.config import get_settings
+from app.core.body_limit import RequestBodyLimitMiddleware
 from app.core.constants import API_V1_PREFIX
 from app.core.exceptions import register_exception_handlers
 from app.core.logging_config import configure_logging
@@ -115,6 +116,24 @@ _VERSION = "0.2.0"
 # ---------------------------------------------------------------------------
 
 
+def _log_production_config_warnings() -> None:
+    """Flag production settings that pass validation but break real features."""
+    if settings.ENVIRONMENT != "production":
+        return
+    if not settings.CORS_ORIGINS:
+        logger.warning(
+            "CORS_ORIGINS is empty: browsers on the deployed frontend will be "
+            "blocked from calling this API. Set it to the frontend's origin."
+        )
+    if any(h in settings.FRONTEND_URL for h in ("localhost", "127.0.0.1")):
+        logger.warning(
+            "FRONTEND_URL points at localhost: password-reset links will not work "
+            "for real users. Set it to the deployed frontend URL."
+        )
+    if not settings.SMTP_HOST:
+        logger.warning("SMTP_HOST is not set: password-reset emails cannot be sent.")
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     logger.info(
@@ -122,6 +141,7 @@ async def lifespan(_app: FastAPI):
         _VERSION,
         settings.ENVIRONMENT,
     )
+    _log_production_config_warnings()
     logger.info(
         "Settings loaded: debug=%s, audio_processing_enabled=%s",
         settings.DEBUG,
@@ -184,6 +204,16 @@ app = FastAPI(
 # deployment fails closed (no allowed origins, no credentialed CORS) rather
 # than falling back to an insecure wildcard.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Request body size limit
+#
+# Added BEFORE CORS/security headers/observability, i.e. it is the innermost
+# middleware, so its 413 responses still pass back out through them and carry
+# CORS, security and request-ID headers. See app/core/body_limit.py for the
+# limits (uploads keep their own per-file caps).
+# ---------------------------------------------------------------------------
+app.add_middleware(RequestBodyLimitMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -326,7 +356,10 @@ def _check_database() -> tuple[bool, str | None]:
             db.close()
         return True, None
     except Exception as exc:  # noqa: BLE001 - readiness must report, not raise
-        return False, str(exc)
+        # /ready is unauthenticated: the driver's message can include the DB
+        # host, port and user, so log it and return only a generic reason.
+        logger.warning("Readiness check: database unreachable: %s", exc)
+        return False, "Database unreachable."
 
 
 @app.get("/ready", tags=["Health"], summary="Readiness check")

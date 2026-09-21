@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
+from app.core.client_ip import get_client_ip
 from app.core.constants import API_V1_PREFIX
 from app.core.file_validation import (
     looks_like_declared_document_type,
@@ -39,6 +41,8 @@ from app.models.user import User
 
 router = APIRouter(prefix=f"{API_V1_PREFIX}/documents", tags=["Documents"])
 
+logger = logging.getLogger(__name__)
+
 _ALLOWED_MIME = {
     "application/pdf",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -46,11 +50,11 @@ _ALLOWED_MIME = {
 
 
 def _client_ip(request: Request) -> str:
-    return request.client.host if request.client else "unknown"
+    return get_client_ip(request)
 
 
 @router.post("/resume/upload", response_model=ResumeDocumentResponse, status_code=201)
-async def upload_resume(
+def upload_resume(
     request: Request,
     file: UploadFile,
     db: Session = Depends(get_db),
@@ -68,7 +72,10 @@ async def upload_resume(
             detail=f"Unsupported file type: {file.content_type}. Upload PDF or DOCX.",
         )
 
-    content = await file.read()
+    # Read at most max+1 bytes so an oversized upload is rejected without ever
+    # being loaded into memory in full. (Sync endpoint -> runs in the threadpool,
+    # so the blocking read/extract/embed below never stalls the event loop.)
+    content = file.file.read(max_size_bytes + 1)
     if len(content) > max_size_bytes:
         log_upload_rejected(current_user.id, ip, "file_too_large")
         raise HTTPException(
@@ -108,7 +115,19 @@ async def upload_resume(
             str(file_path), file.content_type
         )
     except Exception as exc:
-        raise HTTPException(status_code=422, detail=f"Failed to extract text: {exc}")
+        # Don't keep an unreadable file on disk, and don't echo the parser's
+        # exception text (it can contain server-side paths) back to the client.
+        file_path.unlink(missing_ok=True)
+        logger.warning(
+            "Resume text extraction failed for user %s: %s", current_user.id, exc
+        )
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Failed to extract text from the uploaded file. Make sure it is a "
+                "valid, non-encrypted PDF or DOCX."
+            ),
+        )
 
     # Delete previous chunks for this user (replace with new resume)
     db.execute(
@@ -277,7 +296,6 @@ def analyze_resume(
 ) -> ResumeAnalysisResponse:
     """Analyze the current resume: ATS score, skills, suggestions."""
     import json as _json
-    import re as _re
 
     stmt = (
         select(ResumeDocument)

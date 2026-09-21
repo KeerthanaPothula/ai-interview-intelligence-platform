@@ -96,8 +96,8 @@ def get_overview(db: Session) -> AdminOverviewResponse:
         )
     ).all()
     sessions_by_status = {status: 0 for status in VALID_SESSION_STATUSES}
-    for status, count in status_rows:
-        sessions_by_status[status] = count
+    for session_status, count in status_rows:
+        sessions_by_status[session_status] = count
 
     total_reports = db.query(SessionReport).count()
     avg_score_row = db.execute(
@@ -226,9 +226,9 @@ def list_users(
             email=u.email,
             role=u.role,
             organization_id=u.organization_id,
-            organization_name=org_names.get(u.organization_id)
-            if u.organization_id
-            else None,
+            organization_name=(
+                org_names.get(u.organization_id) if u.organization_id else None
+            ),
             is_active=u.is_active,
             created_at=u.created_at,
             sessions_completed=sessions_by_user.get(u.id, (0, None))[0],
@@ -427,6 +427,17 @@ def set_user_active(
     user = db.get(User, user_id)
     if user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="User not found.")
+    # Privilege boundary: a plain Admin manages recruiters/candidates. Without
+    # this check an Admin could deactivate (lock out) a Super Admin or another
+    # Admin, which the role model reserves for the Super Admin.
+    if (
+        user.role in (Role.ADMIN.value, Role.SUPER_ADMIN.value)
+        and acting_user.role != Role.SUPER_ADMIN.value
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only a Super Admin can change the status of an Admin or Super Admin account.",
+        )
     user.is_active = is_active
     db.commit()
     db.refresh(user)

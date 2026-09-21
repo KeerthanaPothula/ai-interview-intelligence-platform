@@ -82,14 +82,27 @@ def scope_organization_id(current_user: User) -> uuid.UUID | None:
     """Return the organization_id to scope candidate queries to, or None
     for "no scoping" (platform-wide — Admin/Super Admin only).
 
-    A Recruiter with organization_id=None (should never happen in practice
-    — Admin-created recruiter accounts always assign one — but defensively
-    handled) sees zero candidates rather than the whole platform: falling
-    open on a misconfigured account would be the actual security bug here.
+    A Recruiter with organization_id=None is NOT platform-wide, even though
+    this function returns None for them too — callers must check
+    has_candidate_access() first (see list_candidates / update_candidate_status).
+    Such an account is reachable in practice (a Super Admin promoting an
+    unaffiliated candidate to recruiter via PATCH /users/{id}/role), and
+    treating None as "no scoping" there would expose every organization's
+    candidates to it.
     """
-    if current_user.role in (Role.ADMIN.value, Role.SUPER_ADMIN.value):
+    if is_platform_wide(current_user):
         return None
     return current_user.organization_id
+
+
+def is_platform_wide(current_user: User) -> bool:
+    """Admin/Super Admin see every organization's candidates."""
+    return current_user.role in (Role.ADMIN.value, Role.SUPER_ADMIN.value)
+
+
+def has_candidate_access(current_user: User) -> bool:
+    """Fail closed: a Recruiter needs an organization to see any candidates."""
+    return is_platform_wide(current_user) or current_user.organization_id is not None
 
 
 def _all_candidates(
@@ -213,8 +226,10 @@ def list_candidates(
     current_user's organization unless they're Admin/Super Admin — see
     scope_organization_id.
     """
-    candidates = _all_candidates(
-        db, organization_id=scope_organization_id(current_user)
+    candidates = (
+        _all_candidates(db, organization_id=scope_organization_id(current_user))
+        if has_candidate_access(current_user)
+        else []
     )
 
     if search:
@@ -236,9 +251,9 @@ def list_candidates(
     summary: dict[str, float | int | None] = {
         "total_candidates": total,
         "shortlisted_count": sum(1 for c in candidates if c.status == "shortlisted"),
-        "avg_resume_score": round(sum(resume_scores) / len(resume_scores), 1)
-        if resume_scores
-        else None,
+        "avg_resume_score": (
+            round(sum(resume_scores) / len(resume_scores), 1) if resume_scores else None
+        ),
         "avg_interview_score": (
             round(sum(c.interview_score for c in candidates) / total, 1)
             if total
@@ -300,7 +315,9 @@ def update_candidate_status(
 
     session, candidate_user = row
     org_scope = scope_organization_id(current_user)
-    if org_scope is not None and candidate_user.organization_id != org_scope:
+    if not has_candidate_access(current_user) or (
+        org_scope is not None and candidate_user.organization_id != org_scope
+    ):
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Candidate not found.")
 
     session.recruiter_status = new_status

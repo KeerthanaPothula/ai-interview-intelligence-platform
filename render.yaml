@@ -123,6 +123,11 @@ services:
       # ----------------------------------------------------------------
       - key: CORS_ORIGINS
         sync: false          # set manually in Render dashboard
+      # Public URL of the deployed frontend (e.g. https://your-app.vercel.app),
+      # no trailing slash. Used to build password-reset links; the default is
+      # http://localhost:5173, which would send real users a dead link.
+      - key: FRONTEND_URL
+        sync: false          # set manually in Render dashboard
 
       # ----------------------------------------------------------------
       # Observability
@@ -155,6 +160,18 @@ services:
       # 10 s gives Neon enough time to wake up before the check is declared failed.
       - key: READINESS_DB_TIMEOUT_SECONDS
         value: 10.0
+
+# Optional settings deliberately NOT declared above (each needs a value that
+# only the deployer knows) — set them in the Render dashboard when needed:
+#   SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASSWORD / SMTP_FROM
+#       Without SMTP_HOST, password-reset emails are not sent (in production the
+#       reset link is never written to the logs either).
+#   TRUSTED_PROXY_COUNT
+#       Render terminates TLS in front of this container, so every request
+#       arrives from the proxy's IP and all users share one login rate-limit
+#       bucket. Set to the number of proxies that append to X-Forwarded-For
+#       (verify against a real request's headers; 1 is typical for a single
+#       load balancer) so the limiter sees each client's real address.
 
 # No disk block — free plan does not support persistent disks.
 # Audio processing is disabled so no uploaded files need to persist.
