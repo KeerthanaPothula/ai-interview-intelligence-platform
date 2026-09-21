@@ -456,8 +456,9 @@ request:
 - **`ci.yml`** — backend lint (`ruff` + `black`), frontend lint
   (`eslint`), backend tests + coverage (gated at 75%), frontend tests +
   coverage (gated at a low 7-8% tripwire, not a quality bar — see
-  [Testing](#testing)), frontend build verification, and a Docker build
-  validation.
+  [Testing](#testing)), a PostgreSQL migration check (the Alembic chain
+  against a real PostgreSQL 16 service), frontend build verification, and a
+  Docker build validation.
 - **`security.yml`** — `pip-audit`, `npm audit`, and GitHub CodeQL static
   analysis.
 

@@ -51,6 +51,7 @@ class TestCiWorkflow:
             "backend-lint",
             "frontend-lint",
             "backend-test",
+            "backend-migrations",
             "frontend-test",
             "frontend-build",
             "docker-build",
@@ -71,6 +72,65 @@ class TestCiWorkflow:
             "coverage gating was removed from ci.yml — a coverage regression "
             "would no longer fail the build"
         )
+
+
+class TestMigrationJob:
+    """The Alembic chain must run against real PostgreSQL in CI, and stay blocking."""
+
+    @staticmethod
+    def _job() -> dict:
+        return _load("ci.yml")["jobs"]["backend-migrations"]
+
+    def test_postgres_service_is_pinned_and_health_checked(self):
+        postgres = self._job()["services"]["postgres"]
+        assert re.fullmatch(
+            r"postgres:\d+(\.\d+)?(-alpine)?", postgres["image"]
+        ), "pin the PostgreSQL major version (not `latest`) so CI is deterministic"
+        options = postgres["options"]
+        assert (
+            "--health-cmd" in options and "pg_isready" in options
+        ), "without a health check, migrations can start before PostgreSQL is ready"
+
+    def test_nothing_in_the_job_can_continue_on_error(self):
+        job = self._job()
+        assert "continue-on-error" not in job
+        for step in job["steps"]:
+            assert "continue-on-error" not in step, step.get("name")
+
+    def test_runs_alembic_upgrade_head_twice_and_checks_the_head(self):
+        runs = [s.get("run", "") for s in self._job()["steps"]]
+        upgrades = [r for r in runs if r.strip() == "alembic upgrade head"]
+        assert len(upgrades) == 2, "expected a fresh upgrade and an idempotent re-run"
+        assert any("alembic current" in r and "(head)" in r for r in runs)
+
+    def test_runs_the_postgres_migration_tests_with_a_database_configured(self):
+        steps = [
+            s
+            for s in self._job()["steps"]
+            if "test_migrations_postgres" in s.get("run", "")
+        ]
+        assert len(steps) == 1
+        # Without this variable the tests skip themselves and CI would pass vacuously.
+        assert steps[0]["env"]["MIGRATION_TEST_DATABASE_URL"]
+
+    def test_alembic_steps_get_database_url_from_the_service(self):
+        for step in self._job()["steps"]:
+            if step.get("run", "").strip() == "alembic upgrade head":
+                assert "TEST_DATABASE_URL" in step["env"]["DATABASE_URL"]
+
+    def test_credentials_are_test_only_and_local(self):
+        job = self._job()
+        assert "secrets." not in json.dumps(
+            job
+        ), "the job must not use repository secrets"
+        env = job["env"]
+        assert env["TEST_DATABASE_URL"].split("@")[1].startswith("localhost:5432/")
+        assert "aiip_test" in env["TEST_DATABASE_URL"]
+        assert env["ENVIRONMENT"] == "development"
+
+    def test_migration_tests_file_exists(self):
+        path = Path(__file__).with_name("test_migrations_postgres.py")
+        assert path.is_file()
 
 
 class TestSecurityWorkflow:

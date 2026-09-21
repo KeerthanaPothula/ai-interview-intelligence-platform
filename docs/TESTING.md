@@ -20,6 +20,8 @@ before the app is imported, so the suite needs **no real secrets** and
 **no running database** to pass — this is also what makes
 `backend-test` in CI fast and self-contained (see
 [INFRASTRUCTURE.md § CI/CD](./INFRASTRUCTURE.md#cicd-github-actions)).
+The SQLite suite builds its schema with `create_all`, so it never runs the
+Alembic migrations — see [PostgreSQL migration tests](#postgresql-migration-tests).
 `ENABLE_AUDIO_PROCESSING` is forced to `false` in tests so uploads don't
 trigger a real Whisper/Gemini call from a background task; tests that need
 the pipeline call `processing_service` functions directly and mock the
@@ -94,6 +96,44 @@ tests for any of the zero-coverage files above is a high-value, well-scoped
 contribution (see [CONTRIBUTING.md](./CONTRIBUTING.md)).
 
 ## CI enforcement
+
+### PostgreSQL migration tests
+
+`backend/tests/test_migrations_postgres.py` runs the real Alembic chain
+(`alembic upgrade head`, as a subprocess, exactly like the Docker `CMD`)
+against a real PostgreSQL server, in a fresh empty database it creates and
+drops itself. It checks: every revision file is applied and the database ends
+at the single expected head; the migrated tables equal the ORM models'
+tables; named indexes, `CHECK` and foreign-key constraints exist (and the
+`users.role` check is actually enforced by PostgreSQL); the migrated columns
+have no structural drift from the models (type / nullability / missing
+columns); a second `upgrade head` is a no-op; and `downgrade base` followed by
+`upgrade head` round-trips.
+
+They are skipped unless `MIGRATION_TEST_DATABASE_URL` is set, so the default
+`pytest` run stays SQLite-only. CI's `backend-migrations` job sets it against
+a `postgres:16-alpine` service. To run them locally:
+
+```bash
+docker run -d --name aiip-migtest -p 55432:5432 \
+  -e POSTGRES_USER=aiip_test -e POSTGRES_PASSWORD=aiip_test_password -e POSTGRES_DB=aiip_test \
+  postgres:16-alpine
+cd backend
+MIGRATION_TEST_DATABASE_URL=postgresql+psycopg2://aiip_test:aiip_test_password@localhost:55432/aiip_test \
+  pytest tests/test_migrations_postgres.py -v
+docker rm -f aiip-migtest
+```
+
+**Known, intentionally not asserted:** the migrated schema differs from the
+models in ways that change no behaviour — column `comment=` text that only the
+models carry, five indexes that only the migrations create
+(`ix_conversation_turns_live_session_id`, `ix_document_chunks_user_id`,
+`ix_live_interview_sessions_user_id`, `ix_resume_documents_user_id`,
+`ix_users_organization_id`), and `refresh_tokens.token_hash` /
+`password_reset_tokens.token_hash` / `organizations.name`, which have both a
+unique constraint and a separate index (the `refresh_tokens` index is
+non-unique in the migration but unique in the model). A new migration can
+reconcile these; the test only fails on structural drift.
 
 Both suites run on every push/PR via `backend-test` and `frontend-test` in
 `.github/workflows/ci.yml`; coverage reports are uploaded as workflow

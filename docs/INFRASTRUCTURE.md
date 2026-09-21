@@ -21,6 +21,7 @@ and on every `pull_request`:
 | `backend-lint` | `ruff check .` + `black --check .` against `backend/` |
 | `frontend-lint` | `eslint .` against `frontend/` |
 | `backend-test` | `pytest --cov=app --cov-report=xml --cov-fail-under=75` (in-memory SQLite — no database service needed) |
+| `backend-migrations` | Starts a `postgres:16-alpine` service (health-checked), runs `alembic upgrade head` on the empty database, checks it is at the head revision, re-runs it (must be a no-op), then runs `tests/test_migrations_postgres.py` — see [TESTING.md](./TESTING.md#postgresql-migration-tests). Blocking: no `continue-on-error` |
 | `frontend-test` | `vitest run --coverage` — gated at a low 7-8% tripwire per metric (`vite.config.ts`), not a quality bar |
 | `frontend-build` | `tsc -b && vite build` — catches type errors and build breaks |
 | `docker-build` | Builds the backend image (`docker/build-push-action`, not pushed) to confirm the Dockerfile builds |

@@ -104,6 +104,89 @@ jobs:
           path: backend/coverage.xml
           retention-days: 14
 
+  # The backend-test job above builds its schema with create_all on in-memory
+  # SQLite, so nothing there executes the Alembic migrations — yet production
+  # runs `alembic upgrade head` on Neon PostgreSQL at every container start.
+  # This job runs the real migration chain against a real PostgreSQL server.
+  # Nothing here is allowed to continue-on-error: a migration that fails on
+  # PostgreSQL must fail the build.
+  backend-migrations:
+    name: Migrations (PostgreSQL)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      # Same major version as docker-compose.yml (postgres:16-alpine) and a
+      # major Neon supports. The credentials are test-only, live for the
+      # duration of this job on an ephemeral container, and guard no data.
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: aiip_test
+          POSTGRES_PASSWORD: aiip_test_password
+          POSTGRES_DB: aiip_test
+        ports:
+          - 5432:5432
+        # Steps only start once this reports healthy, so migrations never race
+        # PostgreSQL's startup.
+        options: >-
+          --health-cmd "pg_isready -U aiip_test -d aiip_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      # Settings validation at import time needs these three (alembic/env.py
+      # loads app.config); all are dummies, exactly like backend-test's.
+      ENVIRONMENT: development
+      JWT_SECRET_KEY: test-only-secret-key-at-least-32-characters-long
+      GEMINI_API_KEY: test-gemini-key-not-real
+      TEST_DATABASE_URL: postgresql+psycopg2://aiip_test:aiip_test_password@localhost:5432/aiip_test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+
+      - run: pip install --no-cache-dir -r requirements-dev.txt
+
+      - name: Confirm PostgreSQL is accepting connections
+        run: >-
+          python -c "import psycopg2; c = psycopg2.connect('${{ env.TEST_DATABASE_URL }}'.replace('+psycopg2', ''));
+          cur = c.cursor(); cur.execute('SHOW server_version'); print('PostgreSQL', cur.fetchone()[0])"
+
+      # The exact command the Docker image runs at startup, on an empty database.
+      - name: alembic upgrade head (empty database)
+        env:
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+        run: alembic upgrade head
+
+      - name: Database is at the expected head revision
+        env:
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+        run: |
+          alembic heads
+          alembic current
+          alembic current | grep -q "(head)"
+
+      - name: alembic upgrade head again (must be a no-op)
+        env:
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+        run: alembic upgrade head
+
+      # Tables, indexes, constraints, model drift, idempotency and a
+      # downgrade/upgrade round trip. Creates and drops its own databases on
+      # the server; the schema comes only from the migrations.
+      - name: Migration integrity tests
+        env:
+          MIGRATION_TEST_DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+        run: pytest tests/test_migrations_postgres.py -v -rs
+
   frontend-test:
     name: Frontend Tests + Coverage
     runs-on: ubuntu-latest

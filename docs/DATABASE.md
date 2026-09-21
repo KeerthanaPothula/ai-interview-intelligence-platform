@@ -300,11 +300,16 @@ erDiagram
 | `d8e5f3a2b1c0` | 2026-06-18 | `live_interview_sessions`, `conversation_turns`, `resume_documents`, `document_chunks`, `interview_predictions`, `coaching_plans` |
 | `e9a1c3f5b2d4` | 2026-06-26 | Integrity constraints + indexes (the `CHECK` constraints and indexes listed above) |
 | `f1a2b3c4d5e6` | 2026-06-27 | `refresh_tokens`, account-lockout columns on `users` |
+| `a2b3c4d5e6f7` | 2026-07-04 | `password_reset_tokens` |
+| `b3c4d5e6f7a8` | 2026-08-05 | `organizations`; `role`, `organization_id`, `is_active` on `users` (with `ck_users_role`); `recruiter_status` on `interview_sessions` |
 
 Run `alembic upgrade head` to apply all migrations to a fresh database;
 see [DEPLOYMENT.md](./DEPLOYMENT.md) for how this runs in CI/CD and
 production. `alembic downgrade -1` reverts the most recent revision —
-useful locally, not recommended in production without a backup.
+useful locally, not recommended in production without a backup. CI runs the
+whole chain (upgrade, re-run, downgrade to base, upgrade again) against
+PostgreSQL 16 on every push — see
+[TESTING.md](./TESTING.md#postgresql-migration-tests).
 
 ## Related documentation
 
