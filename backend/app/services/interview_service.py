@@ -3,11 +3,14 @@ from __future__ import annotations
 import uuid
 
 from fastapi import HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import ResourceNotFound
+from app.models.conversation import LiveInterviewSession
 from app.models.interview import (
     InterviewSession,
+    SESSION_STATUS_COMPLETED,
     SESSION_STATUS_DRAFT,
 )
 from app.schemas.interview import SessionCreate, SessionUpdate
@@ -124,6 +127,67 @@ def update_session(
     db.commit()
     db.refresh(session)
     return session
+
+
+def mirror_completed_live_session(
+    db: Session,
+    live_session: LiveInterviewSession,
+) -> InterviewSession:
+    """Create (or return the existing) InterviewSession mirroring a completed
+    LiveInterviewSession, so it appears in GET /interviews and dashboard
+    analytics — both read interview_sessions exclusively and have no
+    knowledge of live_interview_sessions.
+
+    Idempotent by construction:
+      - Checked first: an InterviewSession already mirroring this
+        live_session (matched by live_session_id) is returned as-is rather
+        than duplicated — the common case for a backfill re-run.
+      - Enforced under a race: uq_interview_sessions_live_session_id makes a
+        concurrent double-insert raise IntegrityError, which is caught here
+        and resolved by returning the row the other call just committed.
+
+    title has no equivalent field on LiveInterviewSession and is
+    synthesized. created_at is copied from the live session (rather than
+    left to default to "now") so the mirrored session's history reflects
+    when the interview actually happened, not when it was mirrored.
+
+    Callers decide how to handle failure — see live_interview.end_interview,
+    which logs and continues rather than failing an otherwise-successful
+    interview completion.
+    """
+    existing = (
+        db.query(InterviewSession)
+        .filter(InterviewSession.live_session_id == live_session.id)
+        .first()
+    )
+    if existing is not None:
+        return existing
+
+    mirrored = InterviewSession(
+        user_id=live_session.user_id,
+        title=f"Live Interview – {live_session.job_role}",
+        job_role=live_session.job_role,
+        job_description=live_session.job_description,
+        status=SESSION_STATUS_COMPLETED,
+        created_at=live_session.created_at,
+        live_session_id=live_session.id,
+    )
+    db.add(mirrored)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = (
+            db.query(InterviewSession)
+            .filter(InterviewSession.live_session_id == live_session.id)
+            .first()
+        )
+        if existing is None:
+            raise
+        return existing
+
+    db.refresh(mirrored)
+    return mirrored
 
 
 def delete_session(

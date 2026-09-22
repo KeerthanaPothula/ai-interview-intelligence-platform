@@ -3,6 +3,9 @@
 import json
 import uuid
 
+from app.models.analysis import RESPONSE_STATUS_COMPLETED, Transcript
+from app.models.interview import InterviewSession
+
 
 _MOCK_REPORT = {
     "overall_performance": "Solid candidate with strong communication skills.",
@@ -145,3 +148,168 @@ def test_get_report_wrong_session(client, auth_headers):
 def test_get_report_requires_auth(client, interview_session):
     resp = client.get(f"/api/v1/interviews/{interview_session.id}/report")
     assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Report generation for a mirrored live-interview session
+# ---------------------------------------------------------------------------
+
+
+def _complete_live_interview_and_get_mirror_id(client, auth_headers, db, monkeypatch):
+    monkeypatch.setattr(
+        "app.services.interview_conversation_service.generate_opening_question",
+        lambda job_role, job_description: "Tell me about a challenging project.",
+    )
+    monkeypatch.setattr(
+        "app.services.interview_conversation_service.generate_follow_up_question",
+        lambda **kwargs: ("What would you do differently?", 2),
+    )
+    monkeypatch.setattr(
+        "app.services.interview_conversation_service.generate_interview_summary",
+        lambda **kwargs: "Solid overall performance.",
+    )
+
+    start_resp = client.post(
+        "/api/v1/live-interviews/",
+        json={
+            "job_role": "Data Engineer",
+            "job_description": "Python data pipeline engineering role.",
+            "max_turns": 3,
+        },
+        headers=auth_headers,
+    )
+    session_id = start_resp.json()["id"]
+
+    client.post(
+        f"/api/v1/live-interviews/{session_id}/next-question",
+        json={"response_text": "I rebuilt our ETL pipeline to cut latency by half."},
+        headers=auth_headers,
+    )
+
+    client.post(f"/api/v1/live-interviews/{session_id}/end", headers=auth_headers)
+
+    mirrored = (
+        db.query(InterviewSession)
+        .filter(InterviewSession.live_session_id == uuid.UUID(session_id))
+        .one()
+    )
+    return str(mirrored.id)
+
+
+def test_generate_report_for_live_session_uses_conversation_turns(
+    client, auth_headers, db, monkeypatch
+):
+    """The live-interview report branch reads Q&A from ConversationTurn text,
+    never from AudioResponse/Transcript/InterviewAnalysis (there are none),
+    and passes no per-answer scores through to report_service."""
+    mirrored_id = _complete_live_interview_and_get_mirror_id(
+        client, auth_headers, db, monkeypatch
+    )
+
+    captured = {}
+
+    def _capturing_generate(**kwargs):
+        captured.update(kwargs)
+        return _MOCK_REPORT.copy()
+
+    monkeypatch.setattr(
+        "app.services.report_service.generate_session_report",
+        _capturing_generate,
+    )
+
+    resp = client.post(
+        f"/api/v1/interviews/{mirrored_id}/report/generate",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 201, resp.text
+
+    assert captured["analyses"] == []
+    assert captured["voice_analytics"] == []
+    questions = [qt["question"] for qt in captured["questions_and_transcripts"]]
+    transcripts = [qt["transcript"] for qt in captured["questions_and_transcripts"]]
+    assert "Tell me about a challenging project." in questions
+    assert "I rebuilt our ETL pipeline to cut latency by half." in transcripts
+
+
+def test_live_session_report_does_not_invent_numeric_scores(
+    client, auth_headers, db, monkeypatch
+):
+    """With no analyses/voice_analytics, report_service's own averaging
+    (_safe_mean on an empty list) yields None — this asserts the endpoint
+    surfaces that None rather than a fabricated number, using the real
+    (unmocked) report_service.generate_session_report."""
+    mirrored_id = _complete_live_interview_and_get_mirror_id(
+        client, auth_headers, db, monkeypatch
+    )
+
+    # Only the Gemini call itself is mocked — report_service's own score
+    # aggregation logic runs for real.
+    class _FakeResponse:
+        text = (
+            '{"overall_performance": "Did fine.", "strengths": ["Clear communicator"], '
+            '"weaknesses": [], "improvement_plan": [], "readiness_level": "Developing"}'
+        )
+
+    class _FakeModels:
+        def generate_content(self, model, contents):
+            return _FakeResponse()
+
+    class _FakeClient:
+        models = _FakeModels()
+
+    monkeypatch.setattr(
+        "app.services.report_service._get_client", lambda: _FakeClient()
+    )
+
+    resp = client.post(
+        f"/api/v1/interviews/{mirrored_id}/report/generate",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 201, resp.text
+    data = resp.json()
+    assert data["final_score"] is None
+    assert data["communication_score"] is None
+    assert data["technical_score"] is None
+    assert data["problem_solving_score"] is None
+    assert data["confidence_score"] is None
+    assert data["readiness_level"] == "Developing"
+
+
+def test_upload_flow_report_generation_unchanged(
+    client, auth_headers, interview_session, interview_question, audio_response, db,
+    monkeypatch,
+):
+    """Regression check: a normal (non-live) session with a real Question +
+    completed AudioResponse still goes through the original code path
+    (untouched by the live-interview branch) and produces a report."""
+    audio_response.status = RESPONSE_STATUS_COMPLETED
+    db.add(
+        Transcript(
+            audio_response_id=audio_response.id,
+            text="I led the migration to a microservices architecture.",
+            word_count=8,
+        )
+    )
+    db.commit()
+
+    captured = {}
+
+    def _capturing_generate(**kwargs):
+        captured.update(kwargs)
+        return _MOCK_REPORT.copy()
+
+    monkeypatch.setattr(
+        "app.services.report_service.generate_session_report",
+        _capturing_generate,
+    )
+
+    resp = client.post(
+        f"/api/v1/interviews/{interview_session.id}/report/generate",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 201, resp.text
+    assert len(captured["questions_and_transcripts"]) == 1
+    assert (
+        captured["questions_and_transcripts"][0]["transcript"]
+        == "I led the migration to a microservices architecture."
+    )

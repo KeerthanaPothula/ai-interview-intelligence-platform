@@ -89,7 +89,16 @@ EXPECTED_FKS = [
         "audio_responses",
         "SET NULL",
     ),
+    (
+        "interview_sessions",
+        "fk_interview_sessions_live_session_id",
+        "live_interview_sessions",
+        "SET NULL",
+    ),
 ]
+EXPECTED_UNIQUE_CONSTRAINTS: dict[str, set[str]] = {
+    "interview_sessions": {"uq_interview_sessions_live_session_id"},
+}
 # autogenerate operations that mean the migrated schema and the ORM models
 # disagree about the shape of the data (as opposed to comments/index naming).
 STRUCTURAL_DIFF_OPS = {
@@ -212,6 +221,62 @@ def test_expected_check_and_foreign_key_constraints_exist(migrated):
         assert name in fks, f"{table}: missing foreign key {name}"
         assert fks[name]["referred_table"] == referred
         assert fks[name]["options"].get("ondelete") == on_delete
+
+
+def test_expected_unique_constraints_exist(migrated):
+    _, engine, _ = migrated
+    inspector = sa.inspect(engine)
+    for table, expected in EXPECTED_UNIQUE_CONSTRAINTS.items():
+        names = {c["name"] for c in inspector.get_unique_constraints(table)}
+        assert expected <= names, f"{table}: missing unique constraint {expected - names}"
+
+
+def test_live_session_id_unique_constraint_is_enforced_by_postgresql(migrated):
+    """Two InterviewSession rows cannot mirror the same LiveInterviewSession —
+    this is what makes end_interview's mirroring idempotent under a race."""
+    _, engine, _ = migrated
+    user_id = uuid.uuid4()
+    live_session_id = uuid.uuid4()
+    with engine.begin() as conn:
+        conn.execute(
+            sa.text(
+                "INSERT INTO users (id, email, hashed_password, full_name, role) "
+                "VALUES (:id, 'mig-user@example.com', 'x', 'Migration Test', 'candidate')"
+            ),
+            {"id": user_id},
+        )
+        conn.execute(
+            sa.text(
+                "INSERT INTO live_interview_sessions "
+                "(id, user_id, job_role, job_description) "
+                "VALUES (:id, :user_id, 'Engineer', 'A role.')"
+            ),
+            {"id": live_session_id, "user_id": user_id},
+        )
+        conn.execute(
+            sa.text(
+                "INSERT INTO interview_sessions "
+                "(id, user_id, title, job_role, job_description, status, live_session_id) "
+                "VALUES (:id, :user_id, 'Live Interview', 'Engineer', 'A role.', "
+                "'completed', :live_session_id)"
+            ),
+            {"id": uuid.uuid4(), "user_id": user_id, "live_session_id": live_session_id},
+        )
+    with pytest.raises(sa.exc.IntegrityError, match="uq_interview_sessions_live_session_id"):
+        with engine.begin() as conn:
+            conn.execute(
+                sa.text(
+                    "INSERT INTO interview_sessions "
+                    "(id, user_id, title, job_role, job_description, status, live_session_id) "
+                    "VALUES (:id, :user_id, 'Live Interview', 'Engineer', 'A role.', "
+                    "'completed', :live_session_id)"
+                ),
+                {
+                    "id": uuid.uuid4(),
+                    "user_id": user_id,
+                    "live_session_id": live_session_id,
+                },
+            )
 
 
 def test_role_check_constraint_is_enforced_by_postgresql(migrated):

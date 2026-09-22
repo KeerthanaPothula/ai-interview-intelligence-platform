@@ -21,6 +21,7 @@ from app.database import Base
 
 if TYPE_CHECKING:
     from app.models.analysis import AudioResponse
+    from app.models.conversation import LiveInterviewSession
     from app.models.features import FollowUpQuestion, SessionReport
     from app.models.prediction import CoachingPlan, InterviewPrediction
     from app.models.user import User
@@ -106,6 +107,12 @@ class InterviewSession(Base):
         # in one place rather than scattered across mapped_column calls.
         Index("ix_interview_sessions_user_id", "user_id"),
         Index("ix_interview_sessions_status", "status"),
+        # Enforces mirroring idempotency at the DB level: a given
+        # LiveInterviewSession can back at most one InterviewSession. See
+        # app.services.interview_service.mirror_completed_live_session.
+        UniqueConstraint(
+            "live_session_id", name="uq_interview_sessions_live_session_id"
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -140,6 +147,18 @@ class InterviewSession(Base):
     # candidate list.
     recruiter_status: Mapped[str | None] = mapped_column(
         String(20), nullable=True, default=None
+    )
+
+    # Set when this row mirrors a completed LiveInterviewSession so that
+    # live conversational interviews appear in /interviews and dashboard
+    # analytics (both query this table exclusively). NULL for sessions
+    # created through the normal upload/audio flow. The UNIQUE constraint
+    # above (not this column) is what makes mirroring idempotent.
+    live_session_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid,
+        ForeignKey("live_interview_sessions.id", ondelete="SET NULL"),
+        nullable=True,
+        default=None,
     )
 
     created_at: Mapped[datetime] = mapped_column(
@@ -215,6 +234,13 @@ class InterviewSession(Base):
         back_populates="session",
         uselist=False,
         passive_deletes=True,
+    )
+
+    # No back_populates: LiveInterviewSession has no reason to navigate to
+    # its mirror. Lets report generation read session.live_session.turns
+    # directly instead of a separate query keyed on live_session_id.
+    live_session: Mapped[LiveInterviewSession | None] = relationship(
+        "LiveInterviewSession",
     )
 
     def __repr__(self) -> str:

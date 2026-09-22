@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timezone
 
@@ -26,8 +27,10 @@ from app.schemas.conversation import (
     NextQuestionRequest,
     StartLiveInterviewRequest,
 )
-from app.services import interview_conversation_service
+from app.services import interview_conversation_service, interview_service
 from app.models.user import User
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix=f"{API_V1_PREFIX}/live-interviews", tags=["Live Interviews"])
 
@@ -250,10 +253,34 @@ def end_interview(
     session.completed_at = datetime.now(timezone.utc)
     db.commit()
 
-    return EndInterviewResponse(
+    # Built now, from data already loaded, so the response the candidate
+    # sees does not depend on what happens to the DB session below — a
+    # rollback there must not be able to expire and re-fetch (or fail to
+    # re-fetch) objects this response already needs.
+    response = EndInterviewResponse(
         session_id=session.id,
         status=LIVE_SESSION_STATUS_COMPLETED,
         total_turns=len(turns),
         summary=summary,
         turns=list(turns),
     )
+
+    # Mirror into interview_sessions so this interview appears in
+    # GET /interviews and dashboard analytics (both are blind to
+    # live_interview_sessions). The live interview above is already
+    # committed and successful at this point — a failure here must not
+    # turn that success into a 500, so it is logged and swallowed rather
+    # than raised. db.rollback() discards only the failed mirror insert;
+    # it cannot undo the session.status commit that already happened.
+    try:
+        interview_service.mirror_completed_live_session(db, session)
+    except Exception:
+        logger.exception(
+            "Failed to mirror completed live interview session %s into "
+            "interview_sessions; the live interview itself completed "
+            "successfully and is unaffected.",
+            session.id,
+        )
+        db.rollback()
+
+    return response

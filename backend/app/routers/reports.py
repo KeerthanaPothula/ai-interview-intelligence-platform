@@ -12,6 +12,7 @@ from app.core.deps import get_current_user
 from app.core.exceptions import ResourceNotFound
 from app.database import get_db
 from app.models.analysis import AudioResponse, InterviewAnalysis, Transcript
+from app.models.conversation import ConversationTurn
 from app.models.features import SessionReport, VoiceAnalysis
 from app.models.interview import Question
 from app.models.user import User
@@ -19,6 +20,30 @@ from app.schemas.features import SessionReportResponse
 from app.services import interview_service, report_service
 
 router = APIRouter(prefix=f"{API_V1_PREFIX}/interviews", tags=["Reports"])
+
+
+def _collect_live_interview_qa(
+    db: Session, live_session_id: uuid.UUID
+) -> list[dict]:
+    """Build questions_and_transcripts from a live interview's ConversationTurns.
+
+    Live interviews have no AudioResponse/Transcript/InterviewAnalysis rows —
+    each turn already carries the question and the candidate's answer as
+    plain text. Turns with no answer yet (response_text is None — e.g. the
+    interview's final question, which is asked but never followed up) are
+    included with an empty transcript rather than dropped, matching the
+    upload-flow behavior of passing through whatever transcript text exists.
+    """
+    turns = (
+        db.query(ConversationTurn)
+        .filter(ConversationTurn.live_session_id == live_session_id)
+        .order_by(ConversationTurn.turn_number)
+        .all()
+    )
+    return [
+        {"question": t.question_text, "transcript": t.response_text or ""}
+        for t in turns
+    ]
 
 
 @router.post(
@@ -34,61 +59,74 @@ def generate_report(
     """Generate (or regenerate) a holistic session report using Gemini."""
     session = interview_service.get_session_or_404(db, session_id, current_user.id)
 
-    # Collect all questions and transcripts for the session.
-    questions = (
-        db.query(Question)
-        .filter(Question.session_id == session_id)
-        .order_by(Question.sequence_order)
-        .all()
-    )
+    if session.live_session_id is not None:
+        # Live interview mirror: no AudioResponse/Transcript/InterviewAnalysis
+        # rows exist (no audio was ever uploaded, no per-answer Gemini scoring
+        # ever ran) — the Q&A comes directly from ConversationTurn text, and
+        # numeric scores stay empty rather than being invented.
+        questions_and_transcripts = _collect_live_interview_qa(
+            db, session.live_session_id
+        )
+        analyses: list[dict] = []
+        voice_analytics: list[dict] = []
+    else:
+        # Collect all questions and transcripts for the session.
+        questions = (
+            db.query(Question)
+            .filter(Question.session_id == session_id)
+            .order_by(Question.sequence_order)
+            .all()
+        )
 
-    questions_and_transcripts: list[dict] = []
-    for q in questions:
-        resp = (
-            db.query(AudioResponse)
-            .filter(
-                AudioResponse.question_id == q.id,
-                AudioResponse.status == "completed",
+        questions_and_transcripts = []
+        for q in questions:
+            resp = (
+                db.query(AudioResponse)
+                .filter(
+                    AudioResponse.question_id == q.id,
+                    AudioResponse.status == "completed",
+                )
+                .first()
             )
-            .first()
+            if resp is None:
+                continue
+            transcript = (
+                db.query(Transcript)
+                .filter(Transcript.audio_response_id == resp.id)
+                .first()
+            )
+            questions_and_transcripts.append(
+                {
+                    "question": q.body,
+                    "transcript": transcript.text if transcript else "",
+                }
+            )
+
+        # Collect all analyses for this session.
+        analyses_rows = (
+            db.query(InterviewAnalysis)
+            .join(AudioResponse, InterviewAnalysis.audio_response_id == AudioResponse.id)
+            .filter(AudioResponse.session_id == session_id)
+            .all()
         )
-        if resp is None:
-            continue
-        transcript = (
-            db.query(Transcript).filter(Transcript.audio_response_id == resp.id).first()
-        )
-        questions_and_transcripts.append(
+        analyses = [
             {
-                "question": q.body,
-                "transcript": transcript.text if transcript else "",
+                "overall_score": float(a.overall_score),
+                "communication_score": float(a.communication_score),
+                "technical_score": float(a.technical_score),
+                "problem_solving_score": float(a.problem_solving_score),
             }
+            for a in analyses_rows
+        ]
+
+        # Collect voice analytics.
+        voice_rows = (
+            db.query(VoiceAnalysis)
+            .join(AudioResponse, VoiceAnalysis.audio_response_id == AudioResponse.id)
+            .filter(AudioResponse.session_id == session_id)
+            .all()
         )
-
-    # Collect all analyses for this session.
-    analyses_rows = (
-        db.query(InterviewAnalysis)
-        .join(AudioResponse, InterviewAnalysis.audio_response_id == AudioResponse.id)
-        .filter(AudioResponse.session_id == session_id)
-        .all()
-    )
-    analyses = [
-        {
-            "overall_score": float(a.overall_score),
-            "communication_score": float(a.communication_score),
-            "technical_score": float(a.technical_score),
-            "problem_solving_score": float(a.problem_solving_score),
-        }
-        for a in analyses_rows
-    ]
-
-    # Collect voice analytics.
-    voice_rows = (
-        db.query(VoiceAnalysis)
-        .join(AudioResponse, VoiceAnalysis.audio_response_id == AudioResponse.id)
-        .filter(AudioResponse.session_id == session_id)
-        .all()
-    )
-    voice_analytics = [{"confidence_score": v.confidence_score} for v in voice_rows]
+        voice_analytics = [{"confidence_score": v.confidence_score} for v in voice_rows]
 
     report_data = report_service.generate_session_report(
         job_role=session.job_role,
