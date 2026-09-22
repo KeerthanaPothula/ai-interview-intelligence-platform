@@ -8,8 +8,36 @@ import google.genai as genai
 
 from app.config import get_settings
 from app.core.ai_reliability import call_gemini_with_retry
+from app.core.exceptions import AIServiceError
 
 logger = logging.getLogger(__name__)
+
+
+def _require_text(response, operation: str) -> str:
+    """Return response.text.strip(), or raise AIServiceError if Gemini
+    returned no usable text.
+
+    call_gemini_with_retry only catches transport errors and
+    genai_errors.APIError — it never sees this case, because Gemini answers
+    with a normal 200 OK. response.text is None (not an exception) whenever
+    the response has no candidates or no content parts, which happens when
+    the prompt or the model's own output is blocked (safety filters,
+    recitation, etc.). Calling .strip() on that None is what previously
+    surfaced as an unhandled AttributeError.
+    """
+    text = response.text
+    if not text:
+        logger.error(
+            "%s: Gemini returned no usable text (response likely blocked by "
+            "content/safety filtering).",
+            operation,
+        )
+        raise AIServiceError(
+            f"{operation} could not be completed because the AI did not "
+            "return a usable response. Please try again."
+        )
+    return text.strip()
+
 
 _client: genai.Client | None = None
 
@@ -44,7 +72,7 @@ def generate_opening_question(job_role: str, job_description: str) -> str:
         ),
         operation="Opening question generation",
     )
-    return response.text.strip()
+    return _require_text(response, "Opening question generation")
 
 
 def generate_follow_up_question(
@@ -97,7 +125,8 @@ def generate_follow_up_question(
         ),
         operation="Follow-up interview question generation",
     )
-    return response.text.strip(), difficulty
+    text = _require_text(response, "Follow-up interview question generation")
+    return text, difficulty
 
 
 def generate_interview_summary(
@@ -128,4 +157,4 @@ def generate_interview_summary(
         ),
         operation="Interview summary generation",
     )
-    return response.text.strip()
+    return _require_text(response, "Interview summary generation")

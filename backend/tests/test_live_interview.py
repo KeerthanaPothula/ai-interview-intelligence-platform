@@ -246,6 +246,55 @@ def test_end_interview_requires_auth(client):
     assert resp.status_code == 401
 
 
+def test_end_interview_returns_502_not_500_when_gemini_returns_no_usable_text(
+    client, auth_headers, monkeypatch
+):
+    """Integration-level regression test for the confirmed production bug:
+    a Gemini response with text=None (blocked by content/safety filtering)
+    for the summary prompt must surface as a clean 502 through the
+    AppException handler, never as an unhandled AttributeError reaching the
+    global 500 handler."""
+    monkeypatch.setattr(
+        "app.services.interview_conversation_service.generate_opening_question",
+        _mock_opening,
+    )
+    start_resp = client.post(
+        "/api/v1/live-interviews/",
+        json={
+            "job_role": "Engineer",
+            "job_description": "Python backend engineering role.",
+            "max_turns": 3,
+        },
+        headers=auth_headers,
+    )
+    session_id = start_resp.json()["id"]
+
+    # Exercise the real generate_interview_summary implementation (not a
+    # mock of the whole function) with a fake Gemini client whose response
+    # has no usable text — this is what actually broke in production.
+    class _FakeResponse:
+        text = None
+
+    class _FakeModels:
+        def generate_content(self, model, contents):
+            return _FakeResponse()
+
+    class _FakeClient:
+        models = _FakeModels()
+
+    monkeypatch.setattr(
+        "app.services.interview_conversation_service._get_client",
+        lambda: _FakeClient(),
+    )
+
+    resp = client.post(
+        f"/api/v1/live-interviews/{session_id}/end", headers=auth_headers
+    )
+    assert resp.status_code == 502
+    assert resp.json()["detail"] != "Internal server error."
+    assert "Interview summary generation" in resp.json()["detail"]
+
+
 # ---------------------------------------------------------------------------
 # Mirroring into InterviewSession (so completed live interviews appear in
 # GET /interviews and dashboard analytics)
