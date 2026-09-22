@@ -86,7 +86,7 @@ class Settings(BaseSettings):
     # service. Previously each service hardcoded its own "gemini-2.0-flash"
     # module constant; centralizing here means upgrading models is a
     # one-line config change instead of a multi-file find-and-replace.
-    GEMINI_MODEL: str = "gemini-2.0-flash"
+    GEMINI_MODEL: str = "gemini-3.6-flash"
 
     # How many questions to request from Gemini per session.
     # ge=1 and le=20 enforce sensible bounds at startup.
