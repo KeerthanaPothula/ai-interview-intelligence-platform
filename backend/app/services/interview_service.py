@@ -1,19 +1,25 @@
 from __future__ import annotations
 
 import uuid
+from decimal import Decimal
 
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import ResourceNotFound
-from app.models.conversation import LiveInterviewSession
+from app.models.conversation import (
+    ConversationTurn,
+    ConversationTurnAnalysis,
+    LiveInterviewSession,
+)
 from app.models.interview import (
     InterviewSession,
     SESSION_STATUS_COMPLETED,
     SESSION_STATUS_DRAFT,
 )
 from app.schemas.interview import SessionCreate, SessionUpdate
+from app.services import evaluation_service
 
 
 def create_session(
@@ -188,6 +194,87 @@ def mirror_completed_live_session(
 
     db.refresh(mirrored)
     return mirrored
+
+
+def score_and_store_conversation_turn(
+    db: Session,
+    turn: ConversationTurn,
+    job_role: str,
+    job_description: str,
+) -> ConversationTurnAnalysis | None:
+    """Score a live-interview answer with Gemini and persist the result.
+
+    The live-interview analogue of processing_service's InterviewAnalysis
+    insert — reuses evaluation_service.generate_evaluation() unmodified
+    (it only ever needed plain question/answer/role text, never an
+    AudioResponse) and converts scores via Decimal(str(v)) exactly like
+    processing_service does, for the same reason: Decimal(v) on a raw
+    float would inherit IEEE 754 imprecision (e.g. Decimal("7.4999999...")
+    instead of Decimal("7.5")).
+
+    Returns None, without calling Gemini, when there is nothing to score
+    (response_text is None or blank) — a turn with no answer simply gets
+    no analysis row, the same way an unanswered Question in the upload
+    flow simply has no AudioResponse.
+
+    Idempotent: checked first (the common case — e.g. a caller re-scoring
+    an already-scored turn), and enforced under a race by
+    uq_conversation_turn_analyses_turn_id, exactly like
+    mirror_completed_live_session's IntegrityError fallback.
+
+    Raises whatever evaluation_service.generate_evaluation() raises
+    (AIServiceError) — this function does not swallow Gemini failures.
+    Callers that must not let scoring block their own success (see
+    live_interview.next_question) are responsible for catching it.
+    """
+    if not turn.response_text or not turn.response_text.strip():
+        return None
+
+    existing = (
+        db.query(ConversationTurnAnalysis)
+        .filter(ConversationTurnAnalysis.conversation_turn_id == turn.id)
+        .first()
+    )
+    if existing is not None:
+        return existing
+
+    evaluation_result = evaluation_service.generate_evaluation(
+        transcript_text=turn.response_text,
+        question=turn.question_text,
+        job_role=job_role,
+        job_description=job_description,
+    )
+
+    analysis = ConversationTurnAnalysis(
+        conversation_turn_id=turn.id,
+        overall_score=Decimal(str(evaluation_result["overall_score"])),
+        communication_score=Decimal(str(evaluation_result["communication_score"])),
+        technical_score=Decimal(str(evaluation_result["technical_score"])),
+        problem_solving_score=Decimal(
+            str(evaluation_result["problem_solving_score"])
+        ),
+        confidence_score=Decimal(str(evaluation_result["confidence_score"])),
+        strengths=evaluation_result["strengths"],
+        weaknesses=evaluation_result["weaknesses"],
+        detailed_feedback=evaluation_result["detailed_feedback"],
+        model_used=evaluation_result["model_used"],
+    )
+    db.add(analysis)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = (
+            db.query(ConversationTurnAnalysis)
+            .filter(ConversationTurnAnalysis.conversation_turn_id == turn.id)
+            .first()
+        )
+        if existing is None:
+            raise
+        return existing
+
+    db.refresh(analysis)
+    return analysis
 
 
 def delete_session(

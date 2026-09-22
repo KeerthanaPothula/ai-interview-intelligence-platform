@@ -26,6 +26,23 @@ def _mock_summary(**kwargs):
     return _SUMMARY
 
 
+_MOCK_EVALUATION = {
+    "overall_score": 7.5,
+    "communication_score": 8.0,
+    "technical_score": 7.0,
+    "problem_solving_score": 6.5,
+    "confidence_score": 8.5,
+    "strengths": '["Clear structure"]',
+    "weaknesses": '["Could go deeper on trade-offs"]',
+    "detailed_feedback": "Solid, well-structured answer.",
+    "model_used": "gemini-test-model",
+}
+
+
+def _mock_evaluation(**kwargs):
+    return _MOCK_EVALUATION.copy()
+
+
 # ---------------------------------------------------------------------------
 # POST /api/v1/live-interviews/
 # ---------------------------------------------------------------------------
@@ -93,6 +110,14 @@ def test_next_question_success(client, auth_headers, monkeypatch):
     monkeypatch.setattr(
         "app.services.interview_conversation_service.generate_follow_up_question",
         _mock_follow_up,
+    )
+    # Submitting a response_text now triggers best-effort per-turn scoring
+    # (interview_service.score_and_store_conversation_turn) — mocked here,
+    # like every other Gemini call site in this file, so the test never
+    # makes a real network call.
+    monkeypatch.setattr(
+        "app.services.evaluation_service.generate_evaluation",
+        _mock_evaluation,
     )
 
     start_resp = client.post(

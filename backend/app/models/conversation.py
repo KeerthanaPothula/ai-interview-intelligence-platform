@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
@@ -10,8 +11,10 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
+    UniqueConstraint,
     Uuid,
     func,
 )
@@ -111,3 +114,91 @@ class ConversationTurn(Base):
     live_session: Mapped[LiveInterviewSession] = relationship(
         "LiveInterviewSession", back_populates="turns"
     )
+
+
+class ConversationTurnAnalysis(Base):
+    """
+    ORM model for the `conversation_turn_analyses` table.
+
+    The live-interview analogue of app.models.analysis.InterviewAnalysis —
+    same five Gemini evaluation scores and narrative fields, produced by the
+    exact same app.services.evaluation_service.generate_evaluation() (it
+    takes plain question/answer/role text, not an AudioResponse, so it is
+    reused unmodified) — but keyed to a ConversationTurn instead of an
+    AudioResponse.
+
+    Kept as its own table rather than loosening InterviewAnalysis.
+    audio_response_id to nullable: that column is NOT NULL + UNIQUE and
+    load-bearing for the entire upload/audio pipeline (Transcript,
+    VoiceAnalysis, and reports.py's joins all assume it). A separate table
+    costs nothing that table doesn't already pay and carries zero risk to
+    that working, unrelated code.
+
+    One row per ConversationTurn (UNIQUE constraint below) — turns with no
+    response_text are never scored at all, they simply have no row here.
+    See app.services.interview_service.score_and_store_conversation_turn.
+    """
+
+    __tablename__ = "conversation_turn_analyses"
+    __table_args__ = (
+        CheckConstraint(
+            "overall_score >= 0.0 AND overall_score <= 10.0",
+            name="ck_turn_analyses_overall_score",
+        ),
+        CheckConstraint(
+            "communication_score >= 0.0 AND communication_score <= 10.0",
+            name="ck_turn_analyses_communication_score",
+        ),
+        CheckConstraint(
+            "technical_score >= 0.0 AND technical_score <= 10.0",
+            name="ck_turn_analyses_technical_score",
+        ),
+        CheckConstraint(
+            "problem_solving_score >= 0.0 AND problem_solving_score <= 10.0",
+            name="ck_turn_analyses_problem_solving_score",
+        ),
+        CheckConstraint(
+            "confidence_score >= 0.0 AND confidence_score <= 10.0",
+            name="ck_turn_analyses_confidence_score",
+        ),
+        # One analysis per turn — also what makes scoring idempotent: see
+        # score_and_store_conversation_turn's check-first logic.
+        UniqueConstraint(
+            "conversation_turn_id", name="uq_conversation_turn_analyses_turn_id"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+
+    conversation_turn_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("conversation_turns.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    overall_score: Mapped[Decimal] = mapped_column(Numeric(4, 1), nullable=False)
+    communication_score: Mapped[Decimal] = mapped_column(Numeric(4, 1), nullable=False)
+    technical_score: Mapped[Decimal] = mapped_column(Numeric(4, 1), nullable=False)
+    problem_solving_score: Mapped[Decimal] = mapped_column(
+        Numeric(4, 1), nullable=False
+    )
+    confidence_score: Mapped[Decimal] = mapped_column(Numeric(4, 1), nullable=False)
+
+    # JSON-encoded list[str], same convention as InterviewAnalysis.
+    strengths: Mapped[str | None] = mapped_column(Text, nullable=True)
+    weaknesses: Mapped[str | None] = mapped_column(Text, nullable=True)
+    detailed_feedback: Mapped[str | None] = mapped_column(Text, nullable=True)
+    model_used: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    turn: Mapped[ConversationTurn] = relationship("ConversationTurn")
+
+    def __repr__(self) -> str:
+        return (
+            f"<ConversationTurnAnalysis id={self.id} "
+            f"conversation_turn_id={self.conversation_turn_id} "
+            f"overall_score={self.overall_score}>"
+        )

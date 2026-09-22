@@ -140,6 +140,32 @@ def next_question(
         if body.audio_response_id:
             last_turn.audio_response_id = body.audio_response_id
 
+        # Committed now, before the best-effort scoring attempt below —
+        # autoflush is off for this Session, so an uncommitted
+        # response_text is only a pending in-memory change. If scoring
+        # then fails and we roll back, that rollback must discard only the
+        # failed scoring attempt, never the candidate's answer.
+        db.commit()
+
+        # Score the answer just submitted so Readiness Assessment and
+        # Coaching Plan have genuine per-turn data to average later (see
+        # prediction.py's live-session branch). Best-effort: a candidate
+        # must always get their next question even if Gemini scoring is
+        # slow, rate-limited, or fails outright — this must never turn a
+        # successful next-question response into an error.
+        try:
+            interview_service.score_and_store_conversation_turn(
+                db, last_turn, session.job_role, session.job_description
+            )
+        except Exception:
+            logger.exception(
+                "Failed to score conversation turn %s for live session %s; "
+                "next-question generation continues unaffected.",
+                last_turn.id,
+                session.id,
+            )
+            db.rollback()
+
     history = [
         {
             "turn_number": t.turn_number,

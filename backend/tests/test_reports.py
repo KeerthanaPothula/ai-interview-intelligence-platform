@@ -168,6 +168,23 @@ def _complete_live_interview_and_get_mirror_id(client, auth_headers, db, monkeyp
         "app.services.interview_conversation_service.generate_interview_summary",
         lambda **kwargs: "Solid overall performance.",
     )
+    # The submitted response_text below now triggers best-effort per-turn
+    # scoring (interview_service.score_and_store_conversation_turn) —
+    # mocked so this test never makes a real network call.
+    monkeypatch.setattr(
+        "app.services.evaluation_service.generate_evaluation",
+        lambda **kwargs: {
+            "overall_score": 7.0,
+            "communication_score": 7.0,
+            "technical_score": 7.0,
+            "problem_solving_score": 7.0,
+            "confidence_score": 7.0,
+            "strengths": "[]",
+            "weaknesses": "[]",
+            "detailed_feedback": "Fine.",
+            "model_used": "gemini-test-model",
+        },
+    )
 
     start_resp = client.post(
         "/api/v1/live-interviews/",

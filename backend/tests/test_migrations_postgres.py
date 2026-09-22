@@ -79,6 +79,7 @@ EXPECTED_CHECKS = {
     "users": {"ck_users_role"},
     "interview_analyses": {"ck_analyses_overall_score"},
     "live_interview_sessions": {"ck_live_interview_sessions_status"},
+    "conversation_turn_analyses": {"ck_turn_analyses_overall_score"},
 }
 # (table, constraint name, referred table, ON DELETE)
 EXPECTED_FKS = [
@@ -98,6 +99,7 @@ EXPECTED_FKS = [
 ]
 EXPECTED_UNIQUE_CONSTRAINTS: dict[str, set[str]] = {
     "interview_sessions": {"uq_interview_sessions_live_session_id"},
+    "conversation_turn_analyses": {"uq_conversation_turn_analyses_turn_id"},
 }
 # autogenerate operations that mean the migrated schema and the ORM models
 # disagree about the shape of the data (as opposed to comments/index naming).

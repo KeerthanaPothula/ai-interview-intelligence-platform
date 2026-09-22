@@ -13,7 +13,9 @@ from app.core.constants import API_V1_PREFIX
 from app.core.exceptions import ResourceNotFound, ValidationError
 from app.database import get_db
 from app.models.analysis import AudioResponse, InterviewAnalysis
+from app.models.conversation import ConversationTurn, ConversationTurnAnalysis
 from app.models.features import VoiceAnalysis, SessionReport
+from app.models.interview import InterviewSession
 from app.models.prediction import CoachingPlan, InterviewPrediction
 from app.routers.auth import get_current_user
 from app.schemas.prediction import (
@@ -32,15 +34,66 @@ from app.models.user import User
 router = APIRouter(tags=["Readiness & Coaching"])
 
 
-def _get_session_averages(session_id: uuid.UUID, db: Session) -> dict:
-    """Aggregate score averages and voice metrics for a session."""
+def _avg(vals) -> float:
+    clean = [float(v) for v in vals if v is not None]
+    return sum(clean) / len(clean) if clean else 5.0
+
+
+def _get_session_averages(session: InterviewSession, db: Session) -> dict:
+    """Aggregate score averages (and, for the upload flow, voice metrics)
+    for a session.
+
+    Two independent, non-overlapping sources depending on how the
+    session's answers were scored:
+
+    - Mirrored live-interview sessions (session.live_session_id is not
+      None): ConversationTurnAnalysis rows, joined through
+      ConversationTurn — the live-interview analogue of InterviewAnalysis,
+      produced by interview_service.score_and_store_conversation_turn.
+      Live interviews have no voice/audio signal at all, so
+      avg_confidence/avg_speaking_rate/avg_filler_words are omitted here
+      rather than fabricated — prediction_service.compute_readiness()
+      already has its own documented, neutral defaults for exactly this
+      "no voice signal available" case, so the caller degrades gracefully
+      without this function inventing a number itself.
+
+    - Normal upload/audio sessions (unchanged): InterviewAnalysis rows,
+      joined through AudioResponse, plus VoiceAnalysis metrics.
+    """
+    if session.live_session_id is not None:
+        analyses = (
+            db.execute(
+                select(ConversationTurnAnalysis)
+                .join(
+                    ConversationTurn,
+                    ConversationTurnAnalysis.conversation_turn_id
+                    == ConversationTurn.id,
+                )
+                .where(ConversationTurn.live_session_id == session.live_session_id)
+            )
+            .scalars()
+            .all()
+        )
+
+        if not analyses:
+            return {}
+
+        return {
+            "overall_score": _avg([a.overall_score for a in analyses]),
+            "communication_score": _avg([a.communication_score for a in analyses]),
+            "technical_score": _avg([a.technical_score for a in analyses]),
+            "problem_solving_score": _avg(
+                [a.problem_solving_score for a in analyses]
+            ),
+        }
+
     analyses = (
         db.execute(
             select(InterviewAnalysis)
             .join(
                 AudioResponse, InterviewAnalysis.audio_response_id == AudioResponse.id
             )
-            .where(AudioResponse.session_id == session_id)
+            .where(AudioResponse.session_id == session.id)
         )
         .scalars()
         .all()
@@ -49,15 +102,11 @@ def _get_session_averages(session_id: uuid.UUID, db: Session) -> dict:
     if not analyses:
         return {}
 
-    def _avg(vals):
-        clean = [float(v) for v in vals if v is not None]
-        return sum(clean) / len(clean) if clean else 5.0
-
     voices = (
         db.execute(
             select(VoiceAnalysis)
             .join(AudioResponse, VoiceAnalysis.audio_response_id == AudioResponse.id)
-            .where(AudioResponse.session_id == session_id)
+            .where(AudioResponse.session_id == session.id)
         )
         .scalars()
         .all()
@@ -108,8 +157,8 @@ def generate_readiness_assessment(
     Not a prediction of a real-world interview or hiring outcome — see
     app/services/prediction_service.py for the exact formula and weights.
     """
-    interview_service.get_session_or_404(db, session_id, current_user.id)
-    metrics = _get_session_averages(session_id, db)
+    session = interview_service.get_session_or_404(db, session_id, current_user.id)
+    metrics = _get_session_averages(session, db)
 
     if not metrics:
         raise ValidationError(
@@ -187,7 +236,7 @@ def generate_coaching_plan(
 ):
     """Generate a personalised 7/14/30-day coaching plan via Gemini."""
     session = interview_service.get_session_or_404(db, session_id, current_user.id)
-    metrics = _get_session_averages(session_id, db)
+    metrics = _get_session_averages(session, db)
 
     if not metrics:
         raise ValidationError("No analyses found for this session.")
