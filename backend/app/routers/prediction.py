@@ -7,6 +7,7 @@ import uuid
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.constants import API_V1_PREFIX
@@ -123,6 +124,35 @@ def _get_session_averages(session: InterviewSession, db: Session) -> dict:
     }
 
 
+def _commit_upsert_or_existing(db: Session, new_row, model, session_id: uuid.UUID):
+    """Commit new_row, or fall back to the row a concurrent request just
+    inserted for the same session_id instead of surfacing a raw 500.
+
+    The delete-existing-then-insert sequence at each call site isn't
+    atomic — two genuinely concurrent requests for the same session (two
+    browser tabs, or a client retry racing an in-flight request) can both
+    pass the "does a row already exist" check before either commits; only
+    one INSERT can satisfy the model's UniqueConstraint on session_id, and
+    the loser's db.commit() raises IntegrityError. This treats that race
+    the same way mirror_completed_live_session and
+    score_and_store_conversation_turn already treat theirs: the caller
+    gets back *a* valid, persisted row for their request, never an
+    unhandled IntegrityError.
+    """
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = db.execute(
+            select(model).where(model.session_id == session_id)
+        ).scalar_one_or_none()
+        if existing is None:
+            raise
+        return existing
+    db.refresh(new_row)
+    return new_row
+
+
 def _readiness_response(pred: InterviewPrediction) -> InterviewReadinessResponse:
     """Map the stored row onto the honestly-named response schema.
 
@@ -201,8 +231,7 @@ def generate_readiness_assessment(
         model_version=prediction_service.SCORING_METHOD,
     )
     db.add(pred)
-    db.commit()
-    db.refresh(pred)
+    pred = _commit_upsert_or_existing(db, pred, InterviewPrediction, session_id)
     return _readiness_response(pred)
 
 
@@ -282,8 +311,7 @@ def generate_coaching_plan(
         model_used=plan_data.get("model_used"),
     )
     db.add(plan)
-    db.commit()
-    db.refresh(plan)
+    plan = _commit_upsert_or_existing(db, plan, CoachingPlan, session_id)
 
     return _coaching_response(plan)
 

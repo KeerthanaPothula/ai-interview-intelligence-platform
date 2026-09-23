@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import time
 import uuid
 from decimal import Decimal
 
 from fastapi import HTTPException
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import ResourceNotFound
@@ -20,6 +21,20 @@ from app.models.interview import (
 )
 from app.schemas.interview import SessionCreate, SessionUpdate
 from app.services import evaluation_service
+
+# Bounded retry for mirror_completed_live_session's insert, against a
+# transient dropped/stale DB connection specifically (OperationalError) —
+# e.g. Neon's pooler closing an idle connection between pool_pre_ping's
+# check and this statement. Without this, that one-off blip permanently
+# and silently hides an otherwise-successfully-completed live interview
+# from /interviews, the dashboard, readiness, and coaching forever: once
+# end_interview sets status=COMPLETED, a second /end call 409s immediately
+# and never reaches the mirror step again — there is no other retry path.
+# Deliberately small: this runs synchronously inside the candidate's
+# end-interview request, so it must add ~nothing to the common (no
+# failure) case and only a few hundred ms even in the worst case.
+_MIRROR_MAX_ATTEMPTS = 3
+_MIRROR_RETRY_DELAY_SECONDS = 0.2
 
 
 def create_session(
@@ -152,6 +167,11 @@ def mirror_completed_live_session(
         concurrent double-insert raise IntegrityError, which is caught here
         and resolved by returning the row the other call just committed.
 
+    Retried up to _MIRROR_MAX_ATTEMPTS times on OperationalError (a
+    transient dropped/stale connection) — see the module-level comment
+    above these constants for why this is worth a bounded retry
+    specifically for this call, unlike most single-shot writes elsewhere.
+
     title has no equivalent field on LiveInterviewSession and is
     synthesized. created_at is copied from the live session (rather than
     left to default to "now") so the mirrored session's history reflects
@@ -169,31 +189,42 @@ def mirror_completed_live_session(
     if existing is not None:
         return existing
 
-    mirrored = InterviewSession(
-        user_id=live_session.user_id,
-        title=f"Live Interview – {live_session.job_role}",
-        job_role=live_session.job_role,
-        job_description=live_session.job_description,
-        status=SESSION_STATUS_COMPLETED,
-        created_at=live_session.created_at,
-        live_session_id=live_session.id,
-    )
-    db.add(mirrored)
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        existing = (
-            db.query(InterviewSession)
-            .filter(InterviewSession.live_session_id == live_session.id)
-            .first()
+    last_exc: OperationalError | None = None
+    for attempt in range(1, _MIRROR_MAX_ATTEMPTS + 1):
+        mirrored = InterviewSession(
+            user_id=live_session.user_id,
+            title=f"Live Interview – {live_session.job_role}",
+            job_role=live_session.job_role,
+            job_description=live_session.job_description,
+            status=SESSION_STATUS_COMPLETED,
+            created_at=live_session.created_at,
+            live_session_id=live_session.id,
         )
-        if existing is None:
-            raise
-        return existing
+        db.add(mirrored)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            existing = (
+                db.query(InterviewSession)
+                .filter(InterviewSession.live_session_id == live_session.id)
+                .first()
+            )
+            if existing is None:
+                raise
+            return existing
+        except OperationalError as exc:
+            db.rollback()
+            last_exc = exc
+            if attempt < _MIRROR_MAX_ATTEMPTS:
+                time.sleep(_MIRROR_RETRY_DELAY_SECONDS)
+            continue
+        else:
+            db.refresh(mirrored)
+            return mirrored
 
-    db.refresh(mirrored)
-    return mirrored
+    assert last_exc is not None  # loop always sets it before falling through
+    raise last_exc
 
 
 def score_and_store_conversation_turn(

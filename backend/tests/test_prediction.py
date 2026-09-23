@@ -337,3 +337,81 @@ def test_compute_percentile_empty():
     from app.services.prediction_service import compute_percentile
 
     assert compute_percentile(7.0, []) == 50.0
+
+
+# ---------------------------------------------------------------------------
+# _commit_upsert_or_existing — concurrent-request race recovery
+# (production reliability audit finding)
+#
+# generate_readiness_assessment/generate_coaching_plan delete any existing
+# row then insert a new one — two statements, not atomic. Two genuinely
+# concurrent requests for the same session (two browser tabs, or a client
+# retry racing an in-flight request) can both pass the "does a row exist"
+# check before either commits; the loser's commit hits the model's
+# UniqueConstraint on session_id. Without recovery, that surfaces as an
+# unhandled IntegrityError -> a raw 500, even though no actual data
+# corruption occurred (the constraint already prevented the duplicate row).
+# ---------------------------------------------------------------------------
+
+
+def test_commit_upsert_or_existing_recovers_from_concurrent_insert(
+    db, interview_session
+):
+    from app.models.prediction import CoachingPlan
+    from app.routers.prediction import _commit_upsert_or_existing
+
+    winner = CoachingPlan(
+        session_id=interview_session.id,
+        plan_7_day="[]",
+        plan_14_day="[]",
+        plan_30_day="[]",
+        focus_areas="[]",
+    )
+    db.add(winner)
+    db.commit()
+
+    # Simulates a second, concurrent request whose own "does a row already
+    # exist" check ran before `winner` was committed, so it also proceeds
+    # to insert — exactly the race the delete-then-insert sequence cannot
+    # prevent on its own.
+    loser = CoachingPlan(
+        session_id=interview_session.id,
+        plan_7_day="[]",
+        plan_14_day="[]",
+        plan_30_day="[]",
+        focus_areas="[]",
+    )
+    db.add(loser)
+
+    result = _commit_upsert_or_existing(db, loser, CoachingPlan, interview_session.id)
+
+    assert result.id == winner.id
+    assert (
+        db.query(CoachingPlan)
+        .filter(CoachingPlan.session_id == interview_session.id)
+        .count()
+        == 1
+    )
+
+
+def test_commit_upsert_or_existing_succeeds_normally_with_no_conflict(
+    db, interview_session
+):
+    """Regression: the common (no race) case is unaffected — a plain
+    insert still commits and is returned as-is."""
+    from app.models.prediction import CoachingPlan
+    from app.routers.prediction import _commit_upsert_or_existing
+
+    plan = CoachingPlan(
+        session_id=interview_session.id,
+        plan_7_day="[]",
+        plan_14_day="[]",
+        plan_30_day="[]",
+        focus_areas="[]",
+    )
+    db.add(plan)
+
+    result = _commit_upsert_or_existing(db, plan, CoachingPlan, interview_session.id)
+
+    assert result.id == plan.id
+    assert result.session_id == interview_session.id

@@ -702,3 +702,93 @@ def test_end_interview_rejects_audio_response_id_owned_by_another_user(
     )
     assert resp.status_code == 404, resp.text
     assert resp.json()["detail"] == "Audio response not found."
+
+
+# ---------------------------------------------------------------------------
+# mirror_completed_live_session — transient DB error retry
+# (production reliability audit finding)
+#
+# Once end_interview sets status=COMPLETED, a second /end call 409s
+# immediately and never reaches the mirror step again — there is no other
+# path that retries it. Without a retry here, a one-off dropped/stale DB
+# connection on the mirror insert permanently and silently hides an
+# otherwise-successfully-completed interview from /interviews, the
+# dashboard, readiness, and coaching, with no error ever surfaced to
+# anyone.
+# ---------------------------------------------------------------------------
+
+
+def _make_completed_live_session(db, registered_user) -> LiveInterviewSession:
+    live_session = LiveInterviewSession(
+        user_id=uuid.UUID(registered_user["id"]),
+        job_role="Engineer",
+        job_description="A backend role.",
+        status="completed",
+    )
+    db.add(live_session)
+    db.commit()
+    db.refresh(live_session)
+    return live_session
+
+
+def test_mirror_completed_live_session_retries_transient_db_error(
+    db, registered_user, monkeypatch
+):
+    live_session = _make_completed_live_session(db, registered_user)
+
+    real_commit = db.commit
+    call_count = 0
+
+    def _flaky_commit():
+        nonlocal call_count
+        call_count += 1
+        if call_count < 3:
+            raise sqlalchemy.exc.OperationalError(
+                "INSERT", {}, Exception("server closed the connection unexpectedly")
+            )
+        real_commit()
+
+    monkeypatch.setattr(db, "commit", _flaky_commit)
+
+    result = interview_service.mirror_completed_live_session(db, live_session)
+
+    assert call_count == 3
+    assert result.live_session_id == live_session.id
+    assert (
+        db.query(InterviewSession)
+        .filter(InterviewSession.live_session_id == live_session.id)
+        .count()
+        == 1
+    )
+
+
+def test_mirror_completed_live_session_gives_up_after_max_attempts(
+    db, registered_user, monkeypatch
+):
+    """The retry is bounded — it must eventually raise, not loop forever —
+    and end_interview's existing try/except (see
+    test_end_interview_mirror_failure_does_not_fail_the_response) is what
+    keeps that raise from breaking a successful interview completion."""
+    live_session = _make_completed_live_session(db, registered_user)
+
+    call_count = 0
+
+    def _always_fails():
+        nonlocal call_count
+        call_count += 1
+        raise sqlalchemy.exc.OperationalError(
+            "INSERT", {}, Exception("server closed the connection unexpectedly")
+        )
+
+    monkeypatch.setattr(db, "commit", _always_fails)
+
+    with pytest.raises(sqlalchemy.exc.OperationalError):
+        interview_service.mirror_completed_live_session(db, live_session)
+
+    assert call_count == 3
+    assert (
+        db.query(InterviewSession)
+        .filter(InterviewSession.live_session_id == live_session.id)
+        .count()
+        == 0
+    )
