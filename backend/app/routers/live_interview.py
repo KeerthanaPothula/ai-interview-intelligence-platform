@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.constants import API_V1_PREFIX
 from app.core.exceptions import ResourceNotFound
 from app.database import get_db
+from app.models.analysis import AudioResponse
 from app.models.conversation import (
     LIVE_SESSION_STATUS_ACTIVE,
     LIVE_SESSION_STATUS_COMPLETED,
@@ -51,6 +52,33 @@ def _get_session_or_404(
     if result is None:
         raise ResourceNotFound("Live interview session not found.")
     return result
+
+
+def _owned_audio_response_id_or_404(
+    db: Session, audio_response_id: uuid.UUID, user_id: uuid.UUID
+) -> uuid.UUID:
+    """Confirm audio_response_id names an AudioResponse owned by user_id.
+
+    Without this check, a caller could link an arbitrary AudioResponse
+    UUID — including one belonging to a different user — into their own
+    ConversationTurn: the column's only DB-level constraint is the FK
+    (the row must exist), never that the caller owns it. Raises 404
+    (never 403) on ownership mismatch or a nonexistent id, matching this
+    codebase's established IDOR-avoidance convention (see responses.py,
+    follow_up.py) rather than letting a bad id reach db.commit() as an
+    unhandled IntegrityError.
+    """
+    owned = (
+        db.query(AudioResponse.id)
+        .filter(
+            AudioResponse.id == audio_response_id,
+            AudioResponse.user_id == user_id,
+        )
+        .first()
+    )
+    if owned is None:
+        raise ResourceNotFound("Audio response not found.")
+    return audio_response_id
 
 
 @router.post("/", response_model=LiveInterviewSessionResponse, status_code=201)
@@ -139,7 +167,9 @@ def next_question(
         if body.response_text:
             last_turn.response_text = body.response_text
         if body.audio_response_id:
-            last_turn.audio_response_id = body.audio_response_id
+            last_turn.audio_response_id = _owned_audio_response_id_or_404(
+                db, body.audio_response_id, current_user.id
+            )
 
         # Committed now, before the best-effort scoring attempt below —
         # autoflush is off for this Session, so an uncommitted
@@ -278,7 +308,9 @@ def end_interview(
         if body.response_text:
             last_turn.response_text = body.response_text
         if body.audio_response_id:
-            last_turn.audio_response_id = body.audio_response_id
+            last_turn.audio_response_id = _owned_audio_response_id_or_404(
+                db, body.audio_response_id, current_user.id
+            )
 
         # Committed before the best-effort scoring attempt below, for the
         # same reason as next_question: a scoring failure's rollback must

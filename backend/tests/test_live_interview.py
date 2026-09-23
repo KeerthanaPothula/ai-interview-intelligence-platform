@@ -5,8 +5,9 @@ import uuid
 import pytest
 import sqlalchemy.exc
 
+from app.models.analysis import RESPONSE_STATUS_UPLOADED, AudioResponse
 from app.models.conversation import LiveInterviewSession
-from app.models.interview import InterviewSession
+from app.models.interview import QUESTION_SOURCE_AI_GENERATED, InterviewSession, Question
 from app.services import interview_service
 
 _FIRST_Q = "Tell me about your most challenging project."
@@ -490,3 +491,214 @@ def test_live_session_id_unique_constraint_enforced_at_db_level(
     with pytest.raises(sqlalchemy.exc.IntegrityError):
         db.commit()
     db.rollback()
+
+
+# ---------------------------------------------------------------------------
+# IDOR: audio_response_id ownership (security audit finding)
+#
+# next_question/end_interview accept an optional audio_response_id and
+# write it straight onto the candidate's own ConversationTurn. Without an
+# ownership check, a caller could link an arbitrary AudioResponse UUID —
+# including one belonging to a different user — since the column's only
+# DB-level constraint is the FK (the row must exist), never that the
+# caller owns it.
+# ---------------------------------------------------------------------------
+
+
+def _create_foreign_audio_response(client, db) -> uuid.UUID:
+    """Register a second user and create an AudioResponse owned by them —
+    a resource the test's main candidate must never be able to reference."""
+    other = client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "victim@example.com",
+            "password": "securepassword1",
+            "full_name": "Victim User",
+        },
+    )
+    assert other.status_code == 201, other.text
+    other_user_id = uuid.UUID(other.json()["id"])
+
+    session = InterviewSession(
+        user_id=other_user_id,
+        title="Victim's session",
+        job_role="Engineer",
+        job_description="A backend engineering role.",
+    )
+    db.add(session)
+    db.flush()
+    question = Question(
+        session_id=session.id,
+        body="Tell me about yourself.",
+        sequence_order=1,
+        source=QUESTION_SOURCE_AI_GENERATED,
+    )
+    db.add(question)
+    db.flush()
+    response_id = uuid.uuid4()
+    response = AudioResponse(
+        id=response_id,
+        session_id=session.id,
+        question_id=question.id,
+        user_id=other_user_id,
+        file_path=f"{session.id}/{response_id}.webm",
+        file_size_bytes=4096,
+        mime_type="audio/webm",
+        status=RESPONSE_STATUS_UPLOADED,
+    )
+    db.add(response)
+    db.commit()
+    return response_id
+
+
+def test_next_question_rejects_audio_response_id_owned_by_another_user(
+    client, auth_headers, db, monkeypatch
+):
+    foreign_id = _create_foreign_audio_response(client, db)
+
+    monkeypatch.setattr(
+        "app.services.interview_conversation_service.generate_opening_question",
+        _mock_opening,
+    )
+    monkeypatch.setattr(
+        "app.services.interview_conversation_service.generate_follow_up_question",
+        _mock_follow_up,
+    )
+    start_resp = client.post(
+        "/api/v1/live-interviews/",
+        json={
+            "job_role": "Engineer",
+            "job_description": "Python backend engineering role.",
+            "max_turns": 3,
+        },
+        headers=auth_headers,
+    )
+    session_id = start_resp.json()["id"]
+
+    resp = client.post(
+        f"/api/v1/live-interviews/{session_id}/next-question",
+        json={"audio_response_id": str(foreign_id)},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 404, resp.text
+    assert resp.json()["detail"] == "Audio response not found."
+
+
+def test_next_question_rejects_nonexistent_audio_response_id(
+    client, auth_headers, monkeypatch
+):
+    """A garbage id must produce a clean 404, not an unhandled IntegrityError
+    from the foreign key constraint at commit time."""
+    monkeypatch.setattr(
+        "app.services.interview_conversation_service.generate_opening_question",
+        _mock_opening,
+    )
+    start_resp = client.post(
+        "/api/v1/live-interviews/",
+        json={
+            "job_role": "Engineer",
+            "job_description": "Python backend engineering role.",
+            "max_turns": 3,
+        },
+        headers=auth_headers,
+    )
+    session_id = start_resp.json()["id"]
+
+    resp = client.post(
+        f"/api/v1/live-interviews/{session_id}/next-question",
+        json={"audio_response_id": str(uuid.uuid4())},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 404, resp.text
+
+
+def test_next_question_accepts_audio_response_id_owned_by_caller(
+    client, auth_headers, registered_user, db, monkeypatch
+):
+    """Regression: a legitimately-owned audio_response_id must still work —
+    the fix must reject only cross-user references, not the field itself."""
+    monkeypatch.setattr(
+        "app.services.interview_conversation_service.generate_opening_question",
+        _mock_opening,
+    )
+    monkeypatch.setattr(
+        "app.services.interview_conversation_service.generate_follow_up_question",
+        _mock_follow_up,
+    )
+    start_resp = client.post(
+        "/api/v1/live-interviews/",
+        json={
+            "job_role": "Engineer",
+            "job_description": "Python backend engineering role.",
+            "max_turns": 3,
+        },
+        headers=auth_headers,
+    )
+    session_id = start_resp.json()["id"]
+
+    own_session = InterviewSession(
+        user_id=uuid.UUID(registered_user["id"]),
+        title="My own session",
+        job_role="Engineer",
+        job_description="A backend engineering role.",
+    )
+    db.add(own_session)
+    db.flush()
+    own_question = Question(
+        session_id=own_session.id,
+        body="Tell me about yourself.",
+        sequence_order=1,
+        source=QUESTION_SOURCE_AI_GENERATED,
+    )
+    db.add(own_question)
+    db.flush()
+    own_response_id = uuid.uuid4()
+    db.add(
+        AudioResponse(
+            id=own_response_id,
+            session_id=own_session.id,
+            question_id=own_question.id,
+            user_id=uuid.UUID(registered_user["id"]),
+            file_path=f"{own_session.id}/{own_response_id}.webm",
+            file_size_bytes=4096,
+            mime_type="audio/webm",
+            status=RESPONSE_STATUS_UPLOADED,
+        )
+    )
+    db.commit()
+
+    resp = client.post(
+        f"/api/v1/live-interviews/{session_id}/next-question",
+        json={"audio_response_id": str(own_response_id)},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+
+
+def test_end_interview_rejects_audio_response_id_owned_by_another_user(
+    client, auth_headers, db, monkeypatch
+):
+    foreign_id = _create_foreign_audio_response(client, db)
+
+    monkeypatch.setattr(
+        "app.services.interview_conversation_service.generate_opening_question",
+        _mock_opening,
+    )
+    start_resp = client.post(
+        "/api/v1/live-interviews/",
+        json={
+            "job_role": "Engineer",
+            "job_description": "Python backend engineering role.",
+            "max_turns": 3,
+        },
+        headers=auth_headers,
+    )
+    session_id = start_resp.json()["id"]
+
+    resp = client.post(
+        f"/api/v1/live-interviews/{session_id}/end",
+        json={"audio_response_id": str(foreign_id)},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 404, resp.text
+    assert resp.json()["detail"] == "Audio response not found."
