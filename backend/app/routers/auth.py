@@ -63,11 +63,22 @@ def _issue_token_pair(db: Session, user: User) -> Token:
     response_model=UserResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a new user account",
+    dependencies=[Depends(enforce_login_rate_limit)],
 )
 def register(
     user_data: UserCreate,
     db: Session = Depends(get_db),
 ) -> User:
+    """
+    Rate limited per client IP (see enforce_login_rate_limit) for the same
+    reason as login/refresh/password-reset: registration is unauthenticated
+    and hashes the password with bcrypt (deliberately CPU-expensive) before
+    any other check can reject the request, so an unlimited attacker could
+    otherwise pin the CPU of this single-worker deployment with nothing
+    more than repeated POSTs. Shares the same limiter and settings as the
+    other auth endpoints, keyed separately by request.url.path — it cannot
+    consume or be consumed by another endpoint's budget.
+    """
     return auth_service.register_user(db, user_data)
 
 
