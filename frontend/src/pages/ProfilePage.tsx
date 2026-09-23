@@ -1,6 +1,6 @@
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, useEffect, useState } from 'react';
 import { KeyRound, Shield, Trash2, User } from 'lucide-react';
-import { ApiError, changePassword } from '../api/client';
+import { ApiError, changePassword, logoutAllSessions, updateProfile } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 
@@ -22,9 +22,44 @@ function initials(name: string | undefined): string {
 }
 
 export function ProfilePage() {
-  const { token, logout } = useAuth();
+  const { token, logout, user, userLoading, refreshUser } = useAuth();
   const { showToast } = useToast();
   const [tab, setTab] = useState<Tab>('account');
+
+  // Profile form state — seeded from the AuthContext user once it loads,
+  // then edited locally. `user` only ever changes on mount and right after
+  // our own save (via refreshUser), so this never clobbers an in-progress
+  // edit with a background refetch.
+  const [fullName, setFullName] = useState('');
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [profileSaving, setProfileSaving] = useState(false);
+
+  useEffect(() => {
+    if (user) setFullName(user.full_name);
+  }, [user]);
+
+  async function handleSaveProfile(e: FormEvent) {
+    e.preventDefault();
+    setProfileError(null);
+    const trimmed = fullName.trim();
+    if (!trimmed) {
+      setProfileError('Name cannot be empty.');
+      return;
+    }
+    if (!token) return;
+    setProfileSaving(true);
+    try {
+      await updateProfile({ full_name: trimmed }, token);
+      await refreshUser();
+      showToast('Profile updated.', 'success');
+    } catch (err) {
+      setProfileError(
+        err instanceof ApiError ? err.message : 'Unable to update profile. Please try again.',
+      );
+    } finally {
+      setProfileSaving(false);
+    }
+  }
 
   // Change password form state
   const [currentPw, setCurrentPw] = useState('');
@@ -32,6 +67,33 @@ export function ProfilePage() {
   const [confirmPw, setConfirmPw] = useState('');
   const [pwError, setPwError] = useState<string | null>(null);
   const [pwSaving, setPwSaving] = useState(false);
+
+  // Sign out of all sessions
+  const [loggingOutAll, setLoggingOutAll] = useState(false);
+
+  async function handleLogoutAll() {
+    if (!token) return;
+    if (
+      !window.confirm(
+        'This will sign you out on every device, including this one. Continue?',
+      )
+    ) {
+      return;
+    }
+    setLoggingOutAll(true);
+    try {
+      await logoutAllSessions(token);
+      showToast('Signed out of all sessions.', 'success');
+      logout();
+    } catch (err) {
+      showToast(
+        err instanceof ApiError ? err.message : 'Unable to sign out of all sessions.',
+        'error',
+      );
+    } finally {
+      setLoggingOutAll(false);
+    }
+  }
 
   async function handleChangePassword(e: FormEvent) {
     e.preventDefault();
@@ -99,7 +161,7 @@ export function ProfilePage() {
                   style={{ display: 'flex', alignItems: 'center', gap: '1.25rem', marginBottom: '1.5rem' }}
                 >
                   <div className="profile-avatar" aria-hidden="true">
-                    {initials('User')}
+                    {initials(user?.full_name)}
                   </div>
                   <div>
                     <div style={{ fontWeight: 700, fontSize: '1rem', marginBottom: '0.2rem' }}>
@@ -110,17 +172,60 @@ export function ProfilePage() {
                     </div>
                   </div>
                 </div>
-                <div
-                  style={{
-                    padding: '0.85rem 1rem',
-                    background: 'var(--surface-2)',
-                    borderRadius: 'var(--radius-sm)',
-                    fontSize: '0.85rem',
-                    color: 'var(--muted)',
-                  }}
-                >
-                  Profile editing is coming soon. Your account is active and secure.
-                </div>
+
+                <form onSubmit={handleSaveProfile} style={{ maxWidth: 420 }}>
+                  <label>
+                    Full name
+                    <input
+                      type="text"
+                      value={fullName}
+                      onChange={(e) => setFullName(e.target.value)}
+                      required
+                      maxLength={255}
+                      disabled={userLoading}
+                      autoComplete="name"
+                    />
+                  </label>
+                  <label>
+                    Email
+                    <input type="email" value={user?.email ?? ''} disabled readOnly />
+                    <span className="field-hint">Email cannot be changed here.</span>
+                  </label>
+
+                  {profileError && (
+                    <p
+                      role="alert"
+                      style={{
+                        color: 'var(--error-text)',
+                        background: 'var(--error-bg)',
+                        border: '1px solid var(--error-border)',
+                        padding: '0.55rem 0.75rem',
+                        borderRadius: 'var(--radius-sm)',
+                        fontSize: '0.84rem',
+                        margin: '0.5rem 0',
+                      }}
+                    >
+                      {profileError}
+                    </p>
+                  )}
+
+                  <button
+                    type="submit"
+                    className="btn btn-primary btn-sm"
+                    disabled={profileSaving || userLoading}
+                    aria-busy={profileSaving}
+                    style={{ marginTop: '0.5rem' }}
+                  >
+                    {profileSaving ? (
+                      <>
+                        <span className="spinner" aria-hidden="true" />
+                        Saving…
+                      </>
+                    ) : (
+                      'Save Changes'
+                    )}
+                  </button>
+                </form>
               </div>
 
               <div className="profile-section">
@@ -215,6 +320,54 @@ export function ProfilePage() {
                   )}
                 </button>
               </form>
+            </div>
+          )}
+
+          {tab === 'security' && (
+            <div className="profile-section">
+              <h2 className="profile-section-title">
+                <Shield size={16} style={{ display: 'inline', marginRight: 6 }} aria-hidden="true" />
+                Sessions
+              </h2>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '1rem',
+                  flexWrap: 'wrap',
+                  padding: '1rem',
+                  background: 'var(--surface-2)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-sm)',
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: '0.875rem', color: 'var(--text)', marginBottom: '0.2rem' }}>
+                    Sign out of all sessions
+                  </div>
+                  <div style={{ fontSize: '0.82rem', color: 'var(--muted)' }}>
+                    Ends every active session on every device, including this one.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={handleLogoutAll}
+                  disabled={loggingOutAll}
+                  aria-busy={loggingOutAll}
+                  style={{ flexShrink: 0 }}
+                >
+                  {loggingOutAll ? (
+                    <>
+                      <span className="spinner" aria-hidden="true" />
+                      Signing out…
+                    </>
+                  ) : (
+                    'Sign out everywhere'
+                  )}
+                </button>
+              </div>
             </div>
           )}
 

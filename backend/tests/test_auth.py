@@ -6,6 +6,9 @@ an in-memory SQLite database. Each test function gets a clean database
 via the autouse reset_database fixture in conftest.py.
 """
 
+import uuid
+
+from app.models.user import User
 from tests.conftest import VALID_USER
 
 
@@ -142,6 +145,152 @@ class TestGetMe:
             headers={"Authorization": f"Basic {auth_token}"},
         )
         assert response.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# PATCH /api/v1/auth/me
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateProfile:
+    def test_success_updates_full_name(self, client, auth_headers):
+        response = client.patch(
+            "/api/v1/auth/me",
+            json={"full_name": "Updated Name"},
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["full_name"] == "Updated Name"
+        assert body["email"] == VALID_USER["email"]
+
+        # Persisted, not just echoed back.
+        refetched = client.get("/api/v1/auth/me", headers=auth_headers)
+        assert refetched.json()["full_name"] == "Updated Name"
+
+    def test_no_token_returns_401(self, client):
+        response = client.patch("/api/v1/auth/me", json={"full_name": "New Name"})
+        assert response.status_code == 401
+
+    def test_blank_full_name_returns_422(self, client, auth_headers):
+        response = client.patch(
+            "/api/v1/auth/me",
+            json={"full_name": "   "},
+            headers=auth_headers,
+        )
+        assert response.status_code == 422
+
+    def test_missing_full_name_returns_422(self, client, auth_headers):
+        response = client.patch("/api/v1/auth/me", json={}, headers=auth_headers)
+        assert response.status_code == 422
+
+    def test_ignores_client_supplied_role_and_organization(self, client, auth_headers):
+        """ProfileUpdateRequest has no role/organization_id field — extra
+        fields are silently dropped by Pydantic (the default), so a client
+        cannot escalate privilege or move itself into an organization by
+        adding them to the request body. Mirrors
+        test_registration_ignores_client_supplied_role in test_rbac.py."""
+        response = client.patch(
+            "/api/v1/auth/me",
+            json={
+                "full_name": "Still Me",
+                "role": "super_admin",
+                "organization_id": str(uuid.uuid4()),
+            },
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["role"] == "candidate"
+        assert body["organization"] is None
+
+    def test_cannot_target_another_users_account(self, client, auth_headers, db):
+        """There is no user_id anywhere in this request — updating always
+        applies to whichever account the Bearer token belongs to. Register
+        a second account and confirm the first token never touches it."""
+        other = client.post(
+            "/api/v1/auth/register",
+            json={
+                "email": "other-profile@example.com",
+                "password": "securepassword1",
+                "full_name": "Other Person",
+            },
+        )
+        assert other.status_code == 201
+        other_id = other.json()["id"]
+
+        client.patch(
+            "/api/v1/auth/me",
+            json={"full_name": "Changed By Someone Else"},
+            headers=auth_headers,
+        )
+
+        other_user = db.query(User).filter(User.id == uuid.UUID(other_id)).one()
+        assert other_user.full_name == "Other Person"
+
+
+# ---------------------------------------------------------------------------
+# POST /api/v1/auth/logout-all
+# ---------------------------------------------------------------------------
+
+
+class TestLogoutAllSessions:
+    def test_success_returns_200(self, client, auth_headers):
+        response = client.post("/api/v1/auth/logout-all", headers=auth_headers)
+        assert response.status_code == 200
+        assert "detail" in response.json()
+
+    def test_no_token_returns_401(self, client):
+        response = client.post("/api/v1/auth/logout-all")
+        assert response.status_code == 401
+
+    def test_invalidates_the_access_token_used_to_call_it(self, client, auth_headers):
+        """The token_version bump must reject the very same access token on
+        its next use — the core guarantee this endpoint exists for."""
+        client.post("/api/v1/auth/logout-all", headers=auth_headers)
+
+        still_using_old_token = client.get("/api/v1/auth/me", headers=auth_headers)
+        assert still_using_old_token.status_code == 401
+
+    def test_revokes_the_refresh_token(self, client, registered_user):
+        login_resp = client.post(
+            "/api/v1/auth/login",
+            data={"username": VALID_USER["email"], "password": VALID_USER["password"]},
+        )
+        tokens = login_resp.json()
+        headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+
+        client.post("/api/v1/auth/logout-all", headers=headers)
+
+        refresh_resp = client.post(
+            "/api/v1/auth/refresh",
+            json={"refresh_token": tokens["refresh_token"]},
+        )
+        assert refresh_resp.status_code == 401
+
+    def test_does_not_affect_other_users(self, client, auth_headers, db):
+        """Logging out of all of *my* sessions must not touch anyone
+        else's — token_version is per-user."""
+        other = client.post(
+            "/api/v1/auth/register",
+            json={
+                "email": "unaffected@example.com",
+                "password": "securepassword1",
+                "full_name": "Unaffected User",
+            },
+        )
+        other_login = client.post(
+            "/api/v1/auth/login",
+            data={"username": "unaffected@example.com", "password": "securepassword1"},
+        )
+        other_token = other_login.json()["access_token"]
+
+        client.post("/api/v1/auth/logout-all", headers=auth_headers)
+
+        still_works = client.get(
+            "/api/v1/auth/me", headers={"Authorization": f"Bearer {other_token}"}
+        )
+        assert still_works.status_code == 200
 
 
 # ---------------------------------------------------------------------------

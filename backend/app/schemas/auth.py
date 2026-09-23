@@ -92,3 +92,26 @@ class ChangePasswordRequest(BaseModel):
 
     current_password: str = Field(..., min_length=1, max_length=128)
     new_password: str = Field(..., min_length=8, max_length=128)
+
+
+class ProfileUpdateRequest(BaseModel):
+    """Request body for PATCH /auth/me.
+
+    Deliberately just full_name — the only non-sensitive, user-owned field
+    on User that has no security/authorization meaning. email is excluded
+    (changing a login identifier is a bigger, separate concern — re-
+    verification, uniqueness races — not in scope here). role and
+    organization_id are never fields on this schema at all, the same way
+    UserCreate has no role field: a client cannot even attempt to send
+    them, let alone have them silently ignored.
+    """
+
+    full_name: str = Field(..., min_length=1, max_length=255)
+
+    @field_validator("full_name")
+    @classmethod
+    def strip_and_reject_blank(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("full_name cannot be blank or whitespace only.")
+        return stripped

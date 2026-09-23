@@ -68,6 +68,10 @@ export interface UserResponse {
   created_at: string;
 }
 
+export interface ProfileUpdateRequest {
+  full_name: string;
+}
+
 export interface ForgotPasswordRequest {
   email: string;
 }

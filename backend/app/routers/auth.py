@@ -21,6 +21,7 @@ from app.schemas.auth import (
     ChangePasswordRequest,
     DetailResponse,
     ForgotPasswordRequest,
+    ProfileUpdateRequest,
     RefreshRequest,
     ResetPasswordRequest,
     Token,
@@ -232,6 +233,28 @@ def get_me(current_user: User = Depends(get_current_user)) -> User:
     return current_user
 
 
+@router.patch(
+    "/me",
+    response_model=UserResponse,
+    summary="Update the current user's profile information",
+)
+def update_me(
+    body: ProfileUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """Update the authenticated user's own non-sensitive profile fields.
+
+    Operates only on current_user — there is no user_id in the path or
+    body, so there is no way to target another account (matching this
+    codebase's existing self-service pattern, e.g. /change-password).
+    ProfileUpdateRequest carries only full_name: no role, organization,
+    email, or password field exists on this schema for a client to send,
+    the same way UserCreate has no role field at registration.
+    """
+    return auth_service.update_profile(db, current_user, body)
+
+
 @router.post(
     "/change-password",
     response_model=DetailResponse,
@@ -263,6 +286,33 @@ def change_password(
     # version) after the password rotation — same as /auth/reset-password does.
     auth_service.revoke_all_refresh_tokens_for_user(db, current_user.id)
     return DetailResponse(detail="Password changed successfully. Please log in again.")
+
+
+@router.post(
+    "/logout-all",
+    response_model=DetailResponse,
+    summary="Sign out of every session (all devices)",
+)
+def logout_all_sessions(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> DetailResponse:
+    """Invalidate every access token and refresh token for the caller.
+
+    Reuses the exact mechanism /change-password and /reset-password already
+    use for the same purpose — see get_current_user and require_role's
+    docstrings for why bumping token_version is sufficient to invalidate
+    every previously issued access token with no blacklist store. This
+    endpoint's own access token stops working immediately too: the request
+    that carried it already passed authentication before this handler
+    runs, but the very next request with that same token will be rejected
+    by get_current_user's token_version check. The frontend must treat a
+    successful call here as an immediate local logout.
+    """
+    current_user.token_version = (current_user.token_version or 0) + 1
+    db.commit()
+    auth_service.revoke_all_refresh_tokens_for_user(db, current_user.id)
+    return DetailResponse(detail="Signed out of all sessions.")
 
 
 @router.post(

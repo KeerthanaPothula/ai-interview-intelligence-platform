@@ -12,7 +12,7 @@ from app.models.password_reset_token import PasswordResetToken
 from app.models.refresh_token import RefreshToken
 from app.models.role import Role
 from app.models.user import User
-from app.schemas.auth import UserCreate
+from app.schemas.auth import ProfileUpdateRequest, UserCreate
 
 
 def _as_aware_utc(dt: datetime) -> datetime:
@@ -65,6 +65,23 @@ def register_user(db: Session, user_data: UserCreate) -> User:
         role=Role.CANDIDATE.value,
     )
     db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def update_profile(db: Session, user: User, data: ProfileUpdateRequest) -> User:
+    """Update the caller's own non-sensitive profile fields.
+
+    Only ever operates on `user` (the authenticated caller — see
+    app.routers.auth.update_me, which passes current_user and nothing
+    else) — there is no user_id parameter here or on the route, so there
+    is no way to target another account. ProfileUpdateRequest carries only
+    full_name; role, organization_id, email, and every security-sensitive
+    column are untouched because this function never reads them from
+    anywhere.
+    """
+    user.full_name = data.full_name
     db.commit()
     db.refresh(user)
     return user

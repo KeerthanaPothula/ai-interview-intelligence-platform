@@ -28,6 +28,7 @@ import type {
   OrganizationListResponse,
   OrganizationResponse,
   ProcessingStatusResponse,
+  ProfileUpdateRequest,
   QuestionResponse,
   RAGQuestionsResponse,
   ReadinessResponse,
@@ -296,6 +297,17 @@ export function register(data: UserCreate): Promise<UserResponse> {
 
 export function getMe(token: string): Promise<UserResponse> {
   return request<UserResponse>('/api/v1/auth/me', {}, token);
+}
+
+export function updateProfile(
+  data: ProfileUpdateRequest,
+  token: string,
+): Promise<UserResponse> {
+  return request<UserResponse>(
+    '/api/v1/auth/me',
+    { method: 'PATCH', body: JSON.stringify(data) },
+    token,
+  );
 }
 
 export function forgotPassword(data: ForgotPasswordRequest): Promise<DetailResponse> {
@@ -712,6 +724,18 @@ export function changePassword(data: ChangePasswordRequest, token: string): Prom
     method: 'POST',
     body: JSON.stringify(data),
   }, token);
+}
+
+// Invalidates every access/refresh token for the account (see
+// backend/app/routers/auth.py::logout_all_sessions) — including the very
+// token used to call it. Callers must treat a successful response as an
+// immediate local logout (see ProfilePage's handleLogoutAll).
+export function logoutAllSessions(token: string): Promise<DetailResponse> {
+  return request<DetailResponse>(
+    '/api/v1/auth/logout-all',
+    { method: 'POST' },
+    token,
+  );
 }
 
 // ---------------------------------------------------------------------------

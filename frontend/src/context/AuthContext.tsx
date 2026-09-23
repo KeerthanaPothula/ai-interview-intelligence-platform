@@ -26,6 +26,10 @@ interface AuthContextValue {
   login: (email: string, password: string, rememberMe?: boolean) => Promise<void>;
   register: (data: UserCreate) => Promise<void>;
   logout: () => void;
+  // Re-fetches /auth/me and updates `user` in place — used after a
+  // profile edit so the rest of the app (avatar initials, TopBar name)
+  // reflects the change immediately, without a full re-login.
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -74,6 +78,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     api.logoutAndClearTokens();
     setToken(null);
   }, []);
+
+  const refreshUser = useCallback(async () => {
+    if (!token) return;
+    const fetchedUser = await api.getMe(token);
+    setUser(fetchedUser);
+  }, [token]);
 
   // Register the global 401 / silent-refresh hooks once on mount. These let
   // app.core's shared request() function (every API call funnels through
@@ -128,8 +138,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [token]);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ token, user, userLoading, isAuthenticated: token !== null, login, register, logout }),
-    [token, user, userLoading, login, register, logout],
+    () => ({
+      token,
+      user,
+      userLoading,
+      isAuthenticated: token !== null,
+      login,
+      register,
+      logout,
+      refreshUser,
+    }),
+    [token, user, userLoading, login, register, logout, refreshUser],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
