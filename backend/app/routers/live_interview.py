@@ -22,6 +22,7 @@ from app.models.conversation import (
 from app.core.permissions import can_create_interview
 from app.routers.auth import get_current_user
 from app.schemas.conversation import (
+    EndInterviewRequest,
     EndInterviewResponse,
     LiveInterviewSessionResponse,
     NextQuestionRequest,
@@ -240,6 +241,11 @@ def get_conversation(
 @router.post("/{session_id}/end", response_model=EndInterviewResponse)
 def end_interview(
     session_id: uuid.UUID,
+    # Defaulted (not just Optional) so a client that sends no body at all —
+    # including the pre-fix frontend build, during a rolling deploy — keeps
+    # working exactly as before: ending without an answer to the final
+    # question. FastAPI only validates a real body when one is sent.
+    body: EndInterviewRequest = EndInterviewRequest(),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -260,6 +266,37 @@ def end_interview(
         .scalars()
         .all()
     )
+
+    # Persist and score the final answer — mirrors next_question's exact
+    # pattern, because end_interview is the ONLY place the last question's
+    # answer can ever be submitted (the frontend hides next-question once
+    # the candidate reaches the final turn). Mutating turns[-1] here means
+    # the history built below (for the summary) and the turns returned in
+    # the response both automatically reflect it — no re-query needed.
+    if turns and (body.response_text or body.audio_response_id):
+        last_turn = turns[-1]
+        if body.response_text:
+            last_turn.response_text = body.response_text
+        if body.audio_response_id:
+            last_turn.audio_response_id = body.audio_response_id
+
+        # Committed before the best-effort scoring attempt below, for the
+        # same reason as next_question: a scoring failure's rollback must
+        # discard only the failed scoring attempt, never this answer.
+        db.commit()
+
+        try:
+            interview_service.score_and_store_conversation_turn(
+                db, last_turn, session.job_role, session.job_description
+            )
+        except Exception:
+            logger.exception(
+                "Failed to score final conversation turn %s for live "
+                "session %s; interview completion continues unaffected.",
+                last_turn.id,
+                session.id,
+            )
+            db.rollback()
 
     history = [
         {

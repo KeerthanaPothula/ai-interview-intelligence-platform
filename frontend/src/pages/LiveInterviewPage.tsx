@@ -123,7 +123,12 @@ export function LiveInterviewPage() {
     setError(null);
     stopTimer();
     try {
-      const endResult = await endLiveInterview(session.id, token);
+      // Submits whatever the candidate typed for the current (possibly
+      // final) question — next-question is hidden once atLastTurn is
+      // true, so this is the only chance to record that answer.
+      const endResult = await endLiveInterview(session.id, token, {
+        response_text: responseText || undefined,
+      });
       setResult(endResult);
       setPageState('ended');
     } catch {

@@ -30,6 +30,21 @@ class NextQuestionRequest(BaseModel):
     audio_response_id: uuid.UUID | None = None
 
 
+class EndInterviewRequest(BaseModel):
+    """Optional answer to the final question.
+
+    The last question's answer can only ever be submitted here: the
+    frontend hides the next-question action once the candidate reaches the
+    final turn, so there is no earlier request that could have recorded it.
+    Every field is optional (and the whole body is optional at the route —
+    see live_interview.end_interview) so ending without answering the last
+    question still works exactly as before.
+    """
+
+    response_text: str | None = Field(default=None, max_length=5000)
+    audio_response_id: uuid.UUID | None = None
+
+
 class LiveInterviewSessionResponse(BaseModel):
     id: uuid.UUID
     user_id: uuid.UUID

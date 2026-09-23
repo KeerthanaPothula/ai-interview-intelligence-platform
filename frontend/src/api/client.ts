@@ -541,10 +541,11 @@ export function getLiveConversation(
 export function endLiveInterview(
   sessionId: string,
   token: string,
+  body?: { response_text?: string; audio_response_id?: string },
 ): Promise<EndInterviewResponse> {
   return request<EndInterviewResponse>(
     `/api/v1/live-interviews/${sessionId}/end`,
-    { method: 'POST' },
+    { method: 'POST', body: body ? JSON.stringify(body) : undefined },
     token,
   );
 }

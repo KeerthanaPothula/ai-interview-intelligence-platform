@@ -160,6 +160,37 @@ describe('LiveInterviewPage', () => {
     expect(screen.getByText('Interview Complete')).toBeTruthy();
   });
 
+  it('submits the typed answer when ending the interview', async () => {
+    vi.spyOn(client, 'startLiveInterview').mockResolvedValue(MOCK_SESSION);
+    const endSpy = vi.spyOn(client, 'endLiveInterview').mockResolvedValue({
+      session_id: 'sess-1',
+      status: 'completed',
+      total_turns: 1,
+      summary: 'Great performance overall!',
+      turns: MOCK_SESSION.turns,
+    });
+
+    renderPage();
+    await userEvent.type(screen.getByLabelText('Target Role'), 'Engineer');
+    await userEvent.type(
+      screen.getByLabelText('Job Description'),
+      'A Python backend engineering role with FastAPI.',
+    );
+    await userEvent.click(screen.getByText('Start Interview'));
+
+    await waitFor(() => screen.getByLabelText('Your answer'));
+    await userEvent.type(screen.getByLabelText('Your answer'), 'My typed answer.');
+
+    const endButtons = screen.getAllByText('End Interview');
+    await userEvent.click(endButtons[0]);
+
+    await waitFor(() => {
+      expect(endSpy).toHaveBeenCalledWith('sess-1', 'test-token', {
+        response_text: 'My typed answer.',
+      });
+    });
+  });
+
   it('shows error message if start interview fails', async () => {
     vi.spyOn(client, 'startLiveInterview').mockRejectedValue(new Error('Network error'));
 

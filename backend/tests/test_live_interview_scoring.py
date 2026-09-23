@@ -532,3 +532,231 @@ def test_coaching_plan_no_analyses_for_unscored_live_session(
         f"/api/v1/interviews/{mirrored.id}/coaching-plan", headers=auth_headers
     )
     assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# end_interview() — persisting and scoring the final answer
+#
+# The frontend hides next-question once the candidate reaches the last
+# turn, so end_interview is the only place that answer can ever be
+# submitted. Previously endLiveInterview() sent no body at all and the
+# answer was silently discarded — never persisted, never scored.
+# ---------------------------------------------------------------------------
+
+
+def _reach_last_turn(client, auth_headers, monkeypatch, max_turns=3):
+    """Start a live interview and advance to the final (unanswered) turn."""
+    monkeypatch.setattr(
+        "app.services.interview_conversation_service.generate_opening_question",
+        _mock_opening,
+    )
+    monkeypatch.setattr(
+        "app.services.interview_conversation_service.generate_follow_up_question",
+        _mock_follow_up,
+    )
+    monkeypatch.setattr(
+        "app.services.evaluation_service.generate_evaluation", _mock_evaluation
+    )
+
+    start_resp = client.post(
+        "/api/v1/live-interviews/",
+        json={
+            "job_role": "Engineer",
+            "job_description": "Python backend engineering role.",
+            "max_turns": max_turns,
+        },
+        headers=auth_headers,
+    )
+    session_id = start_resp.json()["id"]
+
+    for i in range(max_turns - 1):
+        resp = client.post(
+            f"/api/v1/live-interviews/{session_id}/next-question",
+            json={"response_text": f"Answer to question {i + 1}."},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200, resp.text
+
+    return session_id
+
+
+def test_end_interview_persists_final_answer(client, auth_headers, monkeypatch):
+    monkeypatch.setattr(
+        "app.services.interview_conversation_service.generate_interview_summary",
+        _mock_summary,
+    )
+    session_id = _reach_last_turn(client, auth_headers, monkeypatch)
+
+    resp = client.post(
+        f"/api/v1/live-interviews/{session_id}/end",
+        json={"response_text": "My final answer to the last question."},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["turns"][-1]["response_text"] == "My final answer to the last question."
+
+
+def test_end_interview_scores_final_answer(client, auth_headers, db, monkeypatch):
+    monkeypatch.setattr(
+        "app.services.interview_conversation_service.generate_interview_summary",
+        _mock_summary,
+    )
+    session_id = _reach_last_turn(client, auth_headers, monkeypatch)
+
+    resp = client.post(
+        f"/api/v1/live-interviews/{session_id}/end",
+        json={"response_text": "My final answer to the last question."},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    final_turn_id = uuid.UUID(resp.json()["turns"][-1]["id"])
+
+    analysis = (
+        db.query(ConversationTurnAnalysis)
+        .filter(ConversationTurnAnalysis.conversation_turn_id == final_turn_id)
+        .one_or_none()
+    )
+    assert analysis is not None
+    assert analysis.overall_score == Decimal("7.5")
+
+
+def test_end_interview_final_answer_included_in_summary(
+    client, auth_headers, monkeypatch
+):
+    captured = {}
+
+    def _capturing_summary(*, job_role, conversation_history):
+        captured["conversation_history"] = conversation_history
+        return "Solid performance overall."
+
+    monkeypatch.setattr(
+        "app.services.interview_conversation_service.generate_interview_summary",
+        _capturing_summary,
+    )
+    session_id = _reach_last_turn(client, auth_headers, monkeypatch)
+
+    client.post(
+        f"/api/v1/live-interviews/{session_id}/end",
+        json={"response_text": "My final answer to the last question."},
+        headers=auth_headers,
+    )
+
+    last = captured["conversation_history"][-1]
+    assert last["response_text"] == "My final answer to the last question."
+
+
+def test_end_interview_readiness_and_coaching_include_final_answer(
+    client, auth_headers, db, monkeypatch
+):
+    """The final turn's genuine score must contribute to the average, not
+    just the earlier turns — proving readiness/coaching see the whole
+    interview, not a session that is one answer short."""
+    monkeypatch.setattr(
+        "app.services.interview_conversation_service.generate_interview_summary",
+        _mock_summary,
+    )
+    session_id = _reach_last_turn(client, auth_headers, monkeypatch, max_turns=3)
+
+    # Distinct score for the final answer, so its contribution is visible
+    # in the average rather than indistinguishable from the first turn's.
+    monkeypatch.setattr(
+        "app.services.evaluation_service.generate_evaluation",
+        lambda **kwargs: {
+            "overall_score": 9.5,
+            "communication_score": 9.5,
+            "technical_score": 9.5,
+            "problem_solving_score": 9.5,
+            "confidence_score": 9.5,
+            "strengths": "[]",
+            "weaknesses": "[]",
+            "detailed_feedback": "Excellent.",
+            "model_used": "gemini-test-model",
+        },
+    )
+    client.post(
+        f"/api/v1/live-interviews/{session_id}/end",
+        json={"response_text": "My final answer to the last question."},
+        headers=auth_headers,
+    )
+
+    mirrored = (
+        db.query(InterviewSession)
+        .filter(InterviewSession.live_session_id == uuid.UUID(session_id))
+        .one()
+    )
+
+    captured = {}
+
+    def _capturing_readiness(**kwargs):
+        captured.update(kwargs)
+        return 0.8, "Strong"
+
+    monkeypatch.setattr(
+        "app.routers.prediction.prediction_service.compute_readiness",
+        _capturing_readiness,
+    )
+
+    resp = client.post(
+        f"/api/v1/interviews/{mirrored.id}/readiness", headers=auth_headers
+    )
+    assert resp.status_code == 201, resp.text
+    # Turns 1-2 scored 7.5 each (via _reach_last_turn's mock), final turn
+    # scored 9.5 — the average must be (7.5 + 7.5 + 9.5) / 3, proving the
+    # readiness formula ran over all 3 genuine scores, not just the
+    # earlier turns (which would mean the final answer was silently
+    # dropped, as it was before this fix).
+    assert captured["overall_score"] == pytest.approx((7.5 + 7.5 + 9.5) / 3)
+
+
+def test_end_interview_without_final_answer_still_works(client, auth_headers, monkeypatch):
+    """No body at all (the pre-fix frontend, or simply nothing left to
+    answer) must keep working exactly as before."""
+    monkeypatch.setattr(
+        "app.services.interview_conversation_service.generate_interview_summary",
+        _mock_summary,
+    )
+    session_id = _reach_last_turn(client, auth_headers, monkeypatch)
+
+    resp = client.post(
+        f"/api/v1/live-interviews/{session_id}/end", headers=auth_headers
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["turns"][-1]["response_text"] is None
+
+
+def test_end_interview_final_answer_scoring_failure_does_not_lose_answer(
+    client, auth_headers, db, monkeypatch
+):
+    """A scoring failure for the final answer must not turn a successful
+    interview completion into an error, and must not discard the answer
+    itself — mirrors next_question's identical guarantee."""
+    monkeypatch.setattr(
+        "app.services.interview_conversation_service.generate_interview_summary",
+        _mock_summary,
+    )
+    session_id = _reach_last_turn(client, auth_headers, monkeypatch)
+
+    def _raise(**kwargs):
+        raise AIServiceError("boom")
+
+    monkeypatch.setattr("app.services.evaluation_service.generate_evaluation", _raise)
+
+    resp = client.post(
+        f"/api/v1/live-interviews/{session_id}/end",
+        json={"response_text": "My final answer to the last question."},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    final_turn_id = uuid.UUID(resp.json()["turns"][-1]["id"])
+    assert (
+        resp.json()["turns"][-1]["response_text"]
+        == "My final answer to the last question."
+    )
+
+    analysis = (
+        db.query(ConversationTurnAnalysis)
+        .filter(ConversationTurnAnalysis.conversation_turn_id == final_turn_id)
+        .one_or_none()
+    )
+    assert analysis is None
