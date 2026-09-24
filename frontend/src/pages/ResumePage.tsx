@@ -9,6 +9,7 @@ import {
 } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
+import { ErrorState } from '../components/StateMessage';
 import type { ResumeAnalysisResponse, ResumeDocumentResponse } from '../api/types';
 
 function AtsGauge({ score }: { score: number }) {
@@ -66,15 +67,22 @@ export function ResumePage() {
   const [deleting, setDeleting] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const loadResume = useCallback(async () => {
     if (!token) return;
     setLoadingResume(true);
+    setLoadError(null);
     try {
       const r = await getCurrentResume(token);
       setResume(r);
-    } catch {
+    } catch (err) {
       setResume(null);
+      // 404 means "no resume yet"; anything else is a real failure that must
+      // not be shown as the empty upload state.
+      if (!(err instanceof ApiError && err.status === 404)) {
+        setLoadError(err instanceof ApiError ? err.message : 'Unable to load your resume.');
+      }
     } finally {
       setLoadingResume(false);
     }
@@ -107,7 +115,7 @@ export function ResumePage() {
   }, [resume, runAnalysis]);
 
   async function handleFile(file: File) {
-    if (!token) return;
+    if (!token || uploading) return;
     setUploading(true);
     try {
       const r = await uploadResume(file, token);
@@ -126,6 +134,7 @@ export function ResumePage() {
 
   async function handleDelete() {
     if (!token) return;
+    if (!window.confirm('Delete your resume? This cannot be undone.')) return;
     setDeleting(true);
     try {
       await deleteResume(token);
@@ -151,6 +160,9 @@ export function ResumePage() {
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    // Reset so choosing the same file again (e.g. retry after a failed
+    // upload) still fires onChange.
+    e.target.value = '';
     if (file) handleFile(file);
   };
 
@@ -159,6 +171,15 @@ export function ResumePage() {
       <div className="page-container">
         <PageHeader />
         <div className="section-panel" style={{ height: 200, animation: 'pulse 1.5s ease-in-out infinite' }} />
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="page-container">
+        <PageHeader />
+        <ErrorState message={loadError} onRetry={loadResume} />
       </div>
     );
   }
@@ -177,7 +198,12 @@ export function ResumePage() {
         role="button"
         tabIndex={0}
         aria-label="Upload resume"
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') fileRef.current?.click(); }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            fileRef.current?.click();
+          }
+        }}
         style={{ marginBottom: '1.25rem' }}
       >
         <input

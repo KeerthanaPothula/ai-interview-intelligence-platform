@@ -206,4 +206,82 @@ describe('LiveInterviewPage', () => {
       expect(screen.getByText(/Failed to start/i)).toBeTruthy();
     });
   });
+
+  it('shows the backend message when starting fails with an ApiError', async () => {
+    vi.spyOn(client, 'startLiveInterview').mockRejectedValue(
+      new client.ApiError(403, 'You do not have permission to perform this action.'),
+    );
+
+    renderPage();
+    await userEvent.type(screen.getByLabelText('Target Role'), 'Engineer');
+    await userEvent.type(
+      screen.getByLabelText('Job Description'),
+      'A Python backend engineering role with FastAPI.',
+    );
+    await userEvent.click(screen.getByText('Start Interview'));
+
+    expect(
+      await screen.findByText('You do not have permission to perform this action.'),
+    ).toBeTruthy();
+  });
+
+  it('rejects a one-character role before calling the backend (min_length=2)', async () => {
+    const spy = vi.spyOn(client, 'startLiveInterview');
+
+    renderPage();
+    await userEvent.type(screen.getByLabelText('Target Role'), 'X');
+    await userEvent.type(
+      screen.getByLabelText('Job Description'),
+      'A Python backend engineering role with FastAPI.',
+    );
+    await userEvent.click(screen.getByText('Start Interview'));
+
+    expect(screen.getByText(/at least 2 characters/i)).toBeTruthy();
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('keeps the workspace and timer running when ending fails', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      vi.spyOn(client, 'startLiveInterview').mockResolvedValue(MOCK_SESSION);
+      vi.spyOn(client, 'endLiveInterview').mockRejectedValue(
+        new client.ApiError(409, 'Interview session is already completed'),
+      );
+
+      renderPage();
+      await userEvent.type(screen.getByLabelText('Target Role'), 'Engineer');
+      await userEvent.type(
+        screen.getByLabelText('Job Description'),
+        'A Python backend engineering role with FastAPI.',
+      );
+      await userEvent.click(screen.getByText('Start Interview'));
+      await waitFor(() => screen.getByText('End Interview'));
+
+      await userEvent.click(screen.getAllByText('End Interview')[0]);
+      expect(await screen.findByText('Interview session is already completed')).toBeTruthy();
+      expect(screen.getByTestId('current-question')).toBeTruthy();
+
+      const before = screen.getByLabelText(/Elapsed time/).textContent;
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(screen.getByLabelText(/Elapsed time/).textContent).not.toBe(before);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not render a second <main> landmark inside the app layout', async () => {
+    vi.spyOn(client, 'startLiveInterview').mockResolvedValue(MOCK_SESSION);
+
+    const { container } = renderPage();
+    await userEvent.type(screen.getByLabelText('Target Role'), 'Engineer');
+    await userEvent.type(
+      screen.getByLabelText('Job Description'),
+      'A Python backend engineering role with FastAPI.',
+    );
+    await userEvent.click(screen.getByText('Start Interview'));
+    await waitFor(() => screen.getByTestId('current-question'));
+
+    expect(container.querySelector('main')).toBeNull();
+    expect(container.querySelector('#main-content')).toBeNull();
+  });
 });

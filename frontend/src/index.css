@@ -488,20 +488,6 @@ h1, h2, h3 {
   flex: 1;
 }
 
-.sb-topbar-search {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 0.35rem 0.75rem;
-  color: var(--muted);
-  font-size: 0.84rem;
-  min-width: 200px;
-  cursor: text;
-}
-
 .sb-topbar-actions {
   display: flex;
   align-items: center;
@@ -1763,10 +1749,6 @@ h1, h2, h3 {
 
   .charts-row {
     flex-direction: column;
-  }
-
-  .sb-topbar-search {
-    display: none;
   }
 }
 
@@ -3316,16 +3298,6 @@ h1, h2, h3 {
   margin: 0 0 1.25rem;
   padding-bottom: 0.75rem;
   border-bottom: 1px solid var(--border);
-}
-
-.danger-zone {
-  background: rgba(239,68,68,0.04);
-  border-color: rgba(239,68,68,0.2);
-}
-
-.danger-zone .profile-section-title {
-  color: var(--error-text);
-  border-bottom-color: rgba(239,68,68,0.15);
 }
 
 /* ================================================================== */

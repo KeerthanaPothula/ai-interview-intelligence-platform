@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
+  ApiError,
   endLiveInterview,
   nextLiveQuestion,
   startLiveInterview,
@@ -75,8 +76,9 @@ export function LiveInterviewPage() {
 
   const handleStart = async () => {
     if (!token) return;
-    if (!jobRole.trim() || jobDescription.trim().length < 20) {
-      setError('Please fill in the job role and a description of at least 20 characters.');
+    // Mirrors StartLiveInterviewRequest: job_role min 2, job_description min 20.
+    if (jobRole.trim().length < 2 || jobDescription.trim().length < 20) {
+      setError('Please enter a job role (at least 2 characters) and a description of at least 20 characters.');
       return;
     }
     setLoading(true);
@@ -90,8 +92,8 @@ export function LiveInterviewPage() {
       setPageState('interviewing');
       startTimer();
       setTimeout(() => responseRef.current?.focus(), 100);
-    } catch {
-      setError('Failed to start the interview. Please try again.');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to start the interview. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -110,8 +112,8 @@ export function LiveInterviewPage() {
       setSession(updated);
       setResponseText('');
       setTimeout(() => responseRef.current?.focus(), 80);
-    } catch {
-      setError('Failed to get next question. Please try again.');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to get next question. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -121,7 +123,6 @@ export function LiveInterviewPage() {
     if (!token || !session) return;
     setLoading(true);
     setError(null);
-    stopTimer();
     try {
       // Submits whatever the candidate typed for the current (possibly
       // final) question — next-question is hidden once atLastTurn is
@@ -129,10 +130,11 @@ export function LiveInterviewPage() {
       const endResult = await endLiveInterview(session.id, token, {
         response_text: responseText || undefined,
       });
+      stopTimer();
       setResult(endResult);
       setPageState('ended');
-    } catch {
-      setError('Failed to end the interview. Please try again.');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to end the interview. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -202,13 +204,14 @@ export function LiveInterviewPage() {
             </div>
 
             <div className="form-group">
-              <label>Number of Questions</label>
-              <div className="li-turn-options">
+              <label id="turn-count-label">Number of Questions</label>
+              <div className="li-turn-options" role="group" aria-labelledby="turn-count-label">
                 {TURN_OPTIONS.map((n) => (
                   <button
                     key={n}
                     type="button"
                     className={`li-turn-opt${maxTurns === n ? ' selected' : ''}`}
+                    aria-pressed={maxTurns === n}
                     onClick={() => setMaxTurns(n)}
                   >
                     {n}
@@ -376,7 +379,7 @@ export function LiveInterviewPage() {
           </aside>
 
           {/* CENTER — question + response */}
-          <main className="li-center" id="main-content">
+          <section className="li-center" aria-label="Current question">
             <AnimatePresence mode="wait">
               {currentQuestion && (
                 <motion.div
@@ -466,7 +469,7 @@ export function LiveInterviewPage() {
                 </button>
               )}
             </div>
-          </main>
+          </section>
 
           {/* RIGHT — live stats */}
           <aside className="li-right" aria-label="Session statistics">

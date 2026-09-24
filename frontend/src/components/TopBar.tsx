@@ -1,4 +1,3 @@
-import { Search } from 'lucide-react';
 import { NotificationBell } from './NotificationBell';
 import { ThemeToggle } from './ThemeToggle';
 import { UserMenu } from './UserMenu';
@@ -17,23 +16,6 @@ export function TopBar({ title }: TopBarProps) {
       )}
 
       <div className="sb-topbar-spacer" />
-
-      <div className="sb-topbar-search" role="search" aria-label="Search">
-        <Search size={14} aria-hidden="true" />
-        <span style={{ fontSize: '0.82rem' }}>Search…</span>
-        <span
-          style={{
-            marginLeft: 'auto',
-            fontSize: '0.7rem',
-            background: 'var(--surface-3)',
-            padding: '0.1rem 0.35rem',
-            borderRadius: '4px',
-            color: 'var(--muted)',
-          }}
-        >
-          ⌘K
-        </span>
-      </div>
 
       <div className="sb-topbar-actions">
         <ThemeToggle />

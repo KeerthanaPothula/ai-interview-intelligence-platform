@@ -257,16 +257,13 @@ describe('ProfilePage', () => {
     });
   });
 
-  describe('Danger Zone tab', () => {
-    it('does not perform a destructive action without a secure backend endpoint', async () => {
+  describe('Danger Zone', () => {
+    it('does not offer account deletion or data export, which have no backend endpoint', () => {
       renderPage();
-      await userEvent.click(screen.getByText('Danger Zone'));
 
-      await userEvent.click(screen.getByRole('button', { name: 'Delete Account' }));
-
-      expect(
-        await screen.findByText('Account deletion is not available in this demo.'),
-      ).toBeTruthy();
+      expect(screen.queryByText('Danger Zone')).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Delete Account' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Export Data' })).toBeNull();
     });
   });
 });

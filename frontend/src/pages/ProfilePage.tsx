@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useState } from 'react';
-import { Bell, Globe, KeyRound, Shield, Sun, Trash2, User } from 'lucide-react';
+import { Bell, Globe, KeyRound, Shield, Sun, User } from 'lucide-react';
 import { ApiError, changePassword, logoutAllSessions, updateProfile } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useTheme, type Theme } from '../context/ThemeContext';
@@ -10,12 +10,11 @@ const THEME_OPTIONS: { value: Theme; label: string }[] = [
   { value: 'dark', label: 'Dark' },
 ];
 
-type Tab = 'account' | 'security' | 'danger';
+type Tab = 'account' | 'security';
 
 const TABS: { key: Tab; label: string; icon: typeof User }[] = [
   { key: 'account', label: 'Account', icon: User },
   { key: 'security', label: 'Security', icon: Shield },
-  { key: 'danger', label: 'Danger Zone', icon: Trash2 },
 ];
 
 function initials(name: string | undefined): string {
@@ -438,84 +437,6 @@ export function ProfilePage() {
                     'Sign out everywhere'
                   )}
                 </button>
-              </div>
-            </div>
-          )}
-
-          {/* Danger zone tab */}
-          {tab === 'danger' && (
-            <div className="profile-section danger-zone">
-              <h2 className="profile-section-title">Danger Zone</h2>
-              <div
-                style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}
-              >
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: '1rem',
-                    flexWrap: 'wrap',
-                    padding: '1rem',
-                    background: 'rgba(239,68,68,0.04)',
-                    border: '1px solid rgba(239,68,68,0.15)',
-                    borderRadius: 'var(--radius-sm)',
-                  }}
-                >
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: '0.875rem', color: 'var(--text)', marginBottom: '0.2rem' }}>
-                      Delete Account
-                    </div>
-                    <div style={{ fontSize: '0.82rem', color: 'var(--muted)' }}>
-                      Permanently delete your account and all interview data.
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    className="btn btn-sm"
-                    style={{
-                      background: 'var(--danger-solid)',
-                      color: '#fff',
-                      border: 'none',
-                      flexShrink: 0,
-                    }}
-                    onClick={() =>
-                      showToast('Account deletion is not available in this demo.', 'info')
-                    }
-                  >
-                    Delete Account
-                  </button>
-                </div>
-
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: '1rem',
-                    flexWrap: 'wrap',
-                    padding: '1rem',
-                    background: 'var(--surface-2)',
-                    border: '1px solid var(--border)',
-                    borderRadius: 'var(--radius-sm)',
-                  }}
-                >
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: '0.875rem', color: 'var(--text)', marginBottom: '0.2rem' }}>
-                      Export Data
-                    </div>
-                    <div style={{ fontSize: '0.82rem', color: 'var(--muted)' }}>
-                      Download all your interview sessions, reports, and analytics.
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    onClick={() => showToast('Data export is coming soon.', 'info')}
-                  >
-                    Export Data
-                  </button>
-                </div>
               </div>
             </div>
           )}

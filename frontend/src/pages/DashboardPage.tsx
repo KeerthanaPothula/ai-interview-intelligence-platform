@@ -323,7 +323,9 @@ export function DashboardPage() {
     'Problem Solving': t.average_problem_solving_score,
   }));
 
-  const latestTrend = filteredTrends.at(-1);
+  // /analytics/trends includes every session (outer join), so unscored
+  // drafts must be skipped or a brand-new session zeroes the breakdown.
+  const latestTrend = filteredTrends.findLast((t) => t.average_overall_score != null);
   const radarData = latestTrend
     ? [
         { skill: 'Overall', score: latestTrend.average_overall_score ?? 0 },
@@ -344,7 +346,7 @@ export function DashboardPage() {
   const weeklyCompleted = useMemo(() => {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - 7);
-    return trends.filter((t) => new Date(t.created_at) >= cutoff).length;
+    return trends.filter((t) => t.average_overall_score != null && new Date(t.created_at) >= cutoff).length;
   }, [trends]);
 
   if (loading) {

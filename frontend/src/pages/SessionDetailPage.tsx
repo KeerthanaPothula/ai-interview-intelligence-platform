@@ -8,7 +8,7 @@ import { ApiError, generateQuestions, getSession, listResponses } from '../api/c
 import { QuestionCard } from '../components/QuestionCard';
 import { SessionReportCard } from '../components/SessionReportCard';
 import { Skeleton } from '../components/Skeleton';
-import { ErrorState } from '../components/StateMessage';
+import { EmptyState, ErrorState } from '../components/StateMessage';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import type { AudioResponseResponse, SessionDetailResponse, SessionReportResponse } from '../api/types';
@@ -128,7 +128,14 @@ export function SessionDetailPage() {
         </div>
       </header>
 
-      {session.questions.length === 0 ? (
+      {session.questions.length === 0 && session.status !== 'draft' ? (
+        // Completed live interviews are mirrored here with no questions, and
+        // the backend only generates questions for drafts (409 otherwise).
+        <EmptyState
+          title="No questions to show"
+          description="This session has no recorded questions here. Use View Report to see its results."
+        />
+      ) : session.questions.length === 0 ? (
         <section className="generate-questions">
           <div className="generate-questions-icon" aria-hidden="true">
             <Sparkles size={22} />
