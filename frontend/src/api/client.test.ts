@@ -199,6 +199,96 @@ describe('request() silent refresh-and-retry on 401', () => {
   });
 });
 
+describe('request() concurrent 401s share a single refresh', () => {
+  // Mimics the backend: refresh tokens rotate, and redeeming an already-used
+  // one is treated as theft (401). The /auth/refresh response is held until
+  // every concurrent caller has seen its 401, so the calls genuinely overlap.
+  function rotatingBackend(refreshStatus: 200 | 401 = 200) {
+    const used = new Set<string>();
+    let releaseRefresh: () => void = () => {};
+    const refreshGate = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/auth/refresh')) {
+        const { refresh_token } = JSON.parse(String(init?.body)) as { refresh_token: string };
+        await refreshGate;
+        if (refreshStatus === 401 || used.has(refresh_token)) {
+          return jsonResponse(401, { detail: 'Invalid or expired refresh token.' });
+        }
+        used.add(refresh_token);
+        return jsonResponse(200, {
+          access_token: 'new-token',
+          refresh_token: 'new-refresh',
+          token_type: 'bearer',
+        });
+      }
+      if (url.includes('/auth/me')) {
+        const auth = (init?.headers as Headers).get('Authorization');
+        return auth === 'Bearer new-token'
+          ? jsonResponse(200, MOCK_USER)
+          : jsonResponse(401, { detail: 'expired' });
+      }
+      throw new Error(`Unexpected fetch to ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const calls = (path: string) => fetchMock.mock.calls.filter((c) => String(c[0]).includes(path));
+    return { releaseRefresh, calls };
+  }
+
+  it('makes exactly one /auth/refresh call and every caller retries with the new token', async () => {
+    storeTokens({ access_token: 'expired-token', refresh_token: 'valid-refresh', token_type: 'bearer' }, true);
+    const { releaseRefresh, calls } = rotatingBackend();
+    const onUnauthorized = vi.fn();
+    const onTokenRefreshed = vi.fn();
+    registerUnauthorizedHandler(onUnauthorized);
+    registerTokenRefreshedHandler(onTokenRefreshed);
+
+    const results = Promise.all([getMe('expired-token'), getMe('expired-token'), getMe('expired-token')]);
+    await vi.waitFor(() => expect(calls('/auth/me')).toHaveLength(3));
+    await new Promise((r) => setTimeout(r, 0)); // let every 401 reach the refresh step
+    releaseRefresh();
+
+    expect(await results).toEqual([MOCK_USER, MOCK_USER, MOCK_USER]);
+    expect(calls('/auth/refresh')).toHaveLength(1);
+    expect(onTokenRefreshed).toHaveBeenCalledTimes(1);
+    expect(onUnauthorized).not.toHaveBeenCalled();
+    expect(readStoredAccessToken()).toBe('new-token');
+
+    const retries = calls('/auth/me').slice(3);
+    expect(retries).toHaveLength(3);
+    for (const [, init] of retries) {
+      expect((init?.headers as Headers).get('Authorization')).toBe('Bearer new-token');
+    }
+  });
+
+  it('clears the in-flight refresh after a failure so a later refresh runs normally', async () => {
+    storeTokens({ access_token: 'expired-token', refresh_token: 'revoked-refresh', token_type: 'bearer' }, true);
+    const failing = rotatingBackend(401);
+    const onUnauthorized = vi.fn();
+    registerUnauthorizedHandler(onUnauthorized);
+
+    const failed = Promise.allSettled([getMe('expired-token'), getMe('expired-token')]);
+    await vi.waitFor(() => expect(failing.calls('/auth/me')).toHaveLength(2));
+    await new Promise((r) => setTimeout(r, 0));
+    failing.releaseRefresh();
+
+    const settled = await failed;
+    expect(settled.every((r) => r.status === 'rejected')).toBe(true);
+    expect(failing.calls('/auth/refresh')).toHaveLength(1);
+    expect(onUnauthorized).toHaveBeenCalled();
+
+    // A fresh login later: the failed refresh must not be reused.
+    storeTokens({ access_token: 'expired-token', refresh_token: 'valid-refresh', token_type: 'bearer' }, true);
+    const ok = rotatingBackend(200);
+    ok.releaseRefresh();
+
+    expect(await getMe('expired-token')).toEqual(MOCK_USER);
+    expect(ok.calls('/auth/refresh')).toHaveLength(1);
+  });
+});
+
 describe('error messages surface the backend\'s actual detail for 4xx, not a generic string', () => {
   // Regression coverage for the bug where registering with a duplicate
   // email showed "This action is not allowed in the current state."

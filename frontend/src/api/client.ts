@@ -133,7 +133,23 @@ export function registerTokenRefreshedHandler(
 // the new access token on success, or null if there is no refresh token, it
 // has expired, or the network call fails — any of which means the caller
 // should fall back to treating the request as unauthorized.
-async function performSilentRefresh(): Promise<string | null> {
+//
+// Single-flight: concurrent 401s (e.g. a page's parallel requests) share one
+// /auth/refresh call. Refresh tokens rotate and the backend treats reuse of
+// a rotated token as theft, revoking every session — so a second concurrent
+// redemption of the same token would log the user out everywhere.
+// ponytail: per-tab only; two tabs refreshing at once can still collide
+// (Web Locks API or a backend grace window would cover that).
+let refreshInFlight: Promise<string | null> | null = null;
+
+function performSilentRefresh(): Promise<string | null> {
+  refreshInFlight ??= refreshOnce().finally(() => {
+    refreshInFlight = null;
+  });
+  return refreshInFlight;
+}
+
+async function refreshOnce(): Promise<string | null> {
   const refreshTokenValue = readStoredRefreshToken();
   if (!refreshTokenValue) {
     return null;
