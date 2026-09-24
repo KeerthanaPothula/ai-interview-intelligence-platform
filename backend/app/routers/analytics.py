@@ -6,13 +6,12 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.constants import API_V1_PREFIX
 from app.core.deps import get_current_user
 from app.database import get_db
-from app.models.analysis import AudioResponse, InterviewAnalysis
 from app.models.documents import ResumeDocument
 from app.models.features import SessionReport
 from app.models.interview import InterviewSession
@@ -25,6 +24,7 @@ from app.schemas.features import (
     InsightsResponse,
     SessionTrendResponse,
 )
+from app.services import analytics_service
 
 router = APIRouter(prefix=f"{API_V1_PREFIX}/analytics", tags=["Analytics"])
 
@@ -49,25 +49,17 @@ def get_analytics_overview(
         .count()
     )
 
-    # Join through AudioResponse to reach InterviewAnalysis for this user.
-    analyses_query = (
-        db.query(InterviewAnalysis)
-        .join(AudioResponse, InterviewAnalysis.audio_response_id == AudioResponse.id)
-        .filter(AudioResponse.user_id == user_id)
-    )
-    total_responses_analyzed = analyses_query.count()
+    # Upload/audio answers + completed Live Interview answers.
+    sa = analytics_service.scored_answers(user_id)
 
-    avg_row = (
-        db.query(
-            func.avg(InterviewAnalysis.overall_score).label("overall"),
-            func.avg(InterviewAnalysis.communication_score).label("comm"),
-            func.avg(InterviewAnalysis.technical_score).label("tech"),
-            func.avg(InterviewAnalysis.problem_solving_score).label("ps"),
-        )
-        .join(AudioResponse, InterviewAnalysis.audio_response_id == AudioResponse.id)
-        .filter(AudioResponse.user_id == user_id)
-        .one()
-    )
+    avg_row = db.query(
+        func.count().label("n"),
+        func.avg(sa.c.overall).label("overall"),
+        func.avg(sa.c.comm).label("comm"),
+        func.avg(sa.c.tech).label("tech"),
+        func.avg(sa.c.ps).label("ps"),
+    ).one()
+    total_responses_analyzed = avg_row.n
 
     average_overall_score = (
         round(float(avg_row.overall), 1) if avg_row.overall is not None else None
@@ -90,17 +82,9 @@ def get_analytics_overview(
     # Improvement: latest overall score minus first overall score.
     # Two LIMIT 1 queries instead of loading all rows — O(1) instead of O(N).
     if total_responses_analyzed >= 2:
-        _base = (
-            db.query(InterviewAnalysis.overall_score)
-            .join(
-                AudioResponse, InterviewAnalysis.audio_response_id == AudioResponse.id
-            )
-            .filter(AudioResponse.user_id == user_id)
-        )
-        first_score_val = _base.order_by(InterviewAnalysis.created_at).limit(1).scalar()
-        last_score_val = (
-            _base.order_by(InterviewAnalysis.created_at.desc()).limit(1).scalar()
-        )
+        _base = db.query(sa.c.overall)
+        first_score_val = _base.order_by(sa.c.created_at).limit(1).scalar()
+        last_score_val = _base.order_by(sa.c.created_at.desc()).limit(1).scalar()
         if first_score_val is not None and last_score_val is not None:
             improvement_score = round(float(last_score_val) - float(first_score_val), 1)
 
@@ -126,32 +110,34 @@ def get_analytics_trends(
     def _f(v: object) -> float | None:
         return round(float(v), 1) if v is not None else None  # type: ignore[arg-type]
 
-    # Single GROUP BY query replaces the previous N+1 pattern (one query per
-    # session). OUTER JOINs preserve sessions that have no analyses yet so
-    # they appear in the trend with null scores rather than being silently
-    # dropped.
+    # Per-session averages over upload + completed live answers, OUTER
+    # JOINed so sessions with no scores yet still appear with null scores.
+    sa = analytics_service.scored_answers(user_id)
+    per_session = (
+        select(
+            sa.c.session_id,
+            func.avg(sa.c.overall).label("overall"),
+            func.avg(sa.c.comm).label("comm"),
+            func.avg(sa.c.tech).label("tech"),
+            func.avg(sa.c.ps).label("ps"),
+            func.avg(sa.c.conf).label("conf"),
+        )
+        .group_by(sa.c.session_id)
+        .subquery()
+    )
     rows = (
         db.query(
             InterviewSession.id.label("session_id"),
             InterviewSession.title.label("session_title"),
             InterviewSession.created_at.label("created_at"),
-            func.avg(InterviewAnalysis.overall_score).label("overall"),
-            func.avg(InterviewAnalysis.communication_score).label("comm"),
-            func.avg(InterviewAnalysis.technical_score).label("tech"),
-            func.avg(InterviewAnalysis.problem_solving_score).label("ps"),
-            func.avg(InterviewAnalysis.confidence_score).label("conf"),
+            per_session.c.overall,
+            per_session.c.comm,
+            per_session.c.tech,
+            per_session.c.ps,
+            per_session.c.conf,
         )
-        .outerjoin(AudioResponse, AudioResponse.session_id == InterviewSession.id)
-        .outerjoin(
-            InterviewAnalysis,
-            InterviewAnalysis.audio_response_id == AudioResponse.id,
-        )
+        .outerjoin(per_session, per_session.c.session_id == InterviewSession.id)
         .filter(InterviewSession.user_id == user_id)
-        .group_by(
-            InterviewSession.id,
-            InterviewSession.title,
-            InterviewSession.created_at,
-        )
         .order_by(InterviewSession.created_at)
         .all()
     )
@@ -262,13 +248,18 @@ def get_insights(
     user_id: uuid.UUID = current_user.id
     insights: list[InsightItem] = []
 
-    analyses_q = (
-        db.query(InterviewAnalysis)
-        .join(AudioResponse, InterviewAnalysis.audio_response_id == AudioResponse.id)
-        .filter(AudioResponse.user_id == user_id)
-    )
+    sa = analytics_service.scored_answers(user_id)
 
-    total = analyses_q.count()
+    avg = db.query(
+        func.count().label("n"),
+        func.avg(sa.c.overall).label("overall"),
+        func.avg(sa.c.comm).label("comm"),
+        func.avg(sa.c.tech).label("tech"),
+        func.avg(sa.c.ps).label("ps"),
+        func.avg(sa.c.conf).label("conf"),
+    ).one()
+
+    total = avg.n
     if total == 0:
         insights.append(
             InsightItem(
@@ -278,24 +269,16 @@ def get_insights(
         )
         return InsightsResponse(insights=insights)
 
-    avg = analyses_q.with_entities(
-        func.avg(InterviewAnalysis.overall_score).label("overall"),
-        func.avg(InterviewAnalysis.communication_score).label("comm"),
-        func.avg(InterviewAnalysis.technical_score).label("tech"),
-        func.avg(InterviewAnalysis.problem_solving_score).label("ps"),
-        func.avg(InterviewAnalysis.confidence_score).label("conf"),
-    ).one()
-
     now_utc = datetime.now(tz=timezone.utc)
     thirty_days_ago = now_utc - timedelta(days=30)
 
     recent_avg = (
-        analyses_q.filter(InterviewAnalysis.created_at >= thirty_days_ago)
-        .with_entities(
-            func.avg(InterviewAnalysis.overall_score).label("overall"),
-            func.avg(InterviewAnalysis.communication_score).label("comm"),
-            func.avg(InterviewAnalysis.confidence_score).label("conf"),
+        db.query(
+            func.avg(sa.c.overall).label("overall"),
+            func.avg(sa.c.comm).label("comm"),
+            func.avg(sa.c.conf).label("conf"),
         )
+        .filter(sa.c.created_at >= thirty_days_ago)
         .one()
     )
 

@@ -7,32 +7,24 @@ import uuid
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models.analysis import InterviewAnalysis, AudioResponse
-from app.models.interview import InterviewSession
-from app.services import prediction_service
+from app.services import analytics_service, prediction_service
 
 
 def get_user_benchmark(user_id: uuid.UUID, db: Session) -> dict:
     """Compute the current user's percentile rank vs all platform users.
 
     Uses SQL aggregates (COUNT/AVG) throughout instead of fetching every
-    InterviewAnalysis row in the platform into Python — this query's cost no
-    longer grows linearly with the total number of analyses on the platform.
+    scored answer on the platform into Python. Both the user's average and
+    the platform population come from analytics_service.scored_answers(), so
+    upload answers and completed Live Interview answers are ranked on the
+    same footing. Only aggregate counts leave this function.
     """
-    total_count = db.execute(
-        select(func.count(InterviewAnalysis.overall_score)).join(
-            AudioResponse, InterviewAnalysis.audio_response_id == AudioResponse.id
-        )
-    ).scalar_one()
+    platform = analytics_service.scored_answers()
+    total_count = db.execute(select(func.count()).select_from(platform)).scalar_one()
 
+    mine = analytics_service.scored_answers(user_id)
     user_avg_raw, user_count = db.execute(
-        select(
-            func.avg(InterviewAnalysis.overall_score),
-            func.count(InterviewAnalysis.overall_score),
-        )
-        .join(AudioResponse, InterviewAnalysis.audio_response_id == AudioResponse.id)
-        .join(InterviewSession, AudioResponse.session_id == InterviewSession.id)
-        .where(InterviewSession.user_id == user_id)
+        select(func.avg(mine.c.overall), func.count()).select_from(mine)
     ).one()
 
     if not user_count:
@@ -46,9 +38,7 @@ def get_user_benchmark(user_id: uuid.UUID, db: Session) -> dict:
     user_avg = round(float(user_avg_raw), 2)
 
     below_count = db.execute(
-        select(func.count(InterviewAnalysis.overall_score))
-        .join(AudioResponse, InterviewAnalysis.audio_response_id == AudioResponse.id)
-        .where(InterviewAnalysis.overall_score < user_avg)
+        select(func.count()).select_from(platform).where(platform.c.overall < user_avg)
     ).scalar_one()
 
     percentile = prediction_service.compute_percentile_from_counts(
