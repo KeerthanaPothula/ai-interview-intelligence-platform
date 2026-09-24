@@ -1,8 +1,14 @@
 import { type FormEvent, useEffect, useState } from 'react';
-import { KeyRound, Shield, Trash2, User } from 'lucide-react';
+import { Bell, Globe, KeyRound, Shield, Sun, Trash2, User } from 'lucide-react';
 import { ApiError, changePassword, logoutAllSessions, updateProfile } from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import { useTheme, type Theme } from '../context/ThemeContext';
 import { useToast } from '../context/ToastContext';
+
+const THEME_OPTIONS: { value: Theme; label: string }[] = [
+  { value: 'light', label: 'Light' },
+  { value: 'dark', label: 'Dark' },
+];
 
 type Tab = 'account' | 'security' | 'danger';
 
@@ -23,8 +29,15 @@ function initials(name: string | undefined): string {
 
 export function ProfilePage() {
   const { token, logout, user, userLoading, refreshUser } = useAuth();
+  const { theme, setTheme } = useTheme();
   const { showToast } = useToast();
   const [tab, setTab] = useState<Tab>('account');
+
+  function handleThemeChange(next: Theme) {
+    if (next === theme) return;
+    setTheme(next);
+    showToast(`Theme set to ${next === 'light' ? 'Light' : 'Dark'}.`, 'success');
+  }
 
   // Profile form state — seeded from the AuthContext user once it loads,
   // then edited locally. `user` only ever changes on mount and right after
@@ -229,7 +242,43 @@ export function ProfilePage() {
               </div>
 
               <div className="profile-section">
-                <h2 className="profile-section-title">Preferences</h2>
+                <h2 className="profile-section-title">
+                  <Sun size={16} style={{ display: 'inline', marginRight: 6 }} aria-hidden="true" />
+                  Appearance
+                </h2>
+                <div style={{ maxWidth: 420 }}>
+                  {/* A plain caption, not a <label>: it describes the whole
+                      radiogroup below (which already carries its own
+                      aria-label="Theme"), not one specific control — a
+                      htmlFor/id pairing here would override that option
+                      button's own accessible name instead of naming the
+                      group. */}
+                  <div style={{ marginBottom: '0.4rem' }}>Theme</div>
+                  <div className="li-turn-options" role="radiogroup" aria-label="Theme">
+                    {THEME_OPTIONS.map(({ value, label }) => (
+                      <button
+                        key={value}
+                        type="button"
+                        role="radio"
+                        aria-checked={theme === value}
+                        className={`li-turn-opt${theme === value ? ' selected' : ''}`}
+                        onClick={() => handleThemeChange(value)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <span className="field-hint">
+                    Applies immediately and is remembered on this device.
+                  </span>
+                </div>
+              </div>
+
+              <div className="profile-section">
+                <h2 className="profile-section-title">
+                  <Bell size={16} style={{ display: 'inline', marginRight: 6 }} aria-hidden="true" />
+                  Notifications
+                </h2>
                 <div
                   style={{
                     padding: '0.85rem 1rem',
@@ -239,7 +288,29 @@ export function ProfilePage() {
                     color: 'var(--muted)',
                   }}
                 >
-                  Theme, notification, and timezone preferences are coming soon.
+                  Notification preferences aren't available yet — there is no notification
+                  system in the app to configure. This will be added once real notifications
+                  (e.g. email or in-app alerts) exist to control.
+                </div>
+              </div>
+
+              <div className="profile-section">
+                <h2 className="profile-section-title">
+                  <Globe size={16} style={{ display: 'inline', marginRight: 6 }} aria-hidden="true" />
+                  Regional
+                </h2>
+                <div
+                  style={{
+                    padding: '0.85rem 1rem',
+                    background: 'var(--surface-2)',
+                    borderRadius: 'var(--radius-sm)',
+                    fontSize: '0.85rem',
+                    color: 'var(--muted)',
+                  }}
+                >
+                  Timezone preferences aren't available yet — every date and time shown in the
+                  app already uses your browser's local timezone automatically, so there is
+                  nothing to configure yet.
                 </div>
               </div>
             </>

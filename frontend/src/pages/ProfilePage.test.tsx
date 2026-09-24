@@ -34,6 +34,26 @@ vi.mock('../context/AuthContext', async (importOriginal) => {
   };
 });
 
+// Reused across tests rather than re-created per test so `mockSetTheme`
+// spy calls and the mocked current theme stay in sync with each other —
+// reset in beforeEach.
+let mockCurrentTheme: 'light' | 'dark' = 'dark';
+const mockSetTheme = vi.fn((next: 'light' | 'dark') => {
+  mockCurrentTheme = next;
+});
+
+vi.mock('../context/ThemeContext', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../context/ThemeContext')>();
+  return {
+    ...actual,
+    useTheme: vi.fn(() => ({
+      theme: mockCurrentTheme,
+      setTheme: mockSetTheme,
+      toggleTheme: vi.fn(),
+    })),
+  };
+});
+
 function renderPage() {
   return render(
     <ToastProvider>
@@ -47,6 +67,8 @@ describe('ProfilePage', () => {
     vi.restoreAllMocks();
     mockLogout.mockClear();
     mockRefreshUser.mockClear();
+    mockSetTheme.mockClear();
+    mockCurrentTheme = 'dark';
   });
 
   describe('Account tab', () => {
@@ -102,6 +124,51 @@ describe('ProfilePage', () => {
 
       expect(
         await screen.findByText('full_name cannot be blank or whitespace only.'),
+      ).toBeTruthy();
+    });
+  });
+
+  describe('Preferences (Account tab)', () => {
+    it('shows the current theme as selected', () => {
+      mockCurrentTheme = 'dark';
+      renderPage();
+
+      const darkOption = screen.getByRole('radio', { name: 'Dark' });
+      const lightOption = screen.getByRole('radio', { name: 'Light' });
+      expect(darkOption).toHaveAttribute('aria-checked', 'true');
+      expect(lightOption).toHaveAttribute('aria-checked', 'false');
+    });
+
+    it('switches the theme and shows success feedback', async () => {
+      mockCurrentTheme = 'dark';
+      renderPage();
+
+      await userEvent.click(screen.getByRole('radio', { name: 'Light' }));
+
+      expect(mockSetTheme).toHaveBeenCalledWith('light');
+      expect(await screen.findByText('Theme set to Light.')).toBeTruthy();
+    });
+
+    it('does not call setTheme when the already-selected option is clicked', async () => {
+      mockCurrentTheme = 'dark';
+      renderPage();
+
+      await userEvent.click(screen.getByRole('radio', { name: 'Dark' }));
+
+      expect(mockSetTheme).not.toHaveBeenCalled();
+    });
+
+    it('shows an honest coming-soon message for notifications', () => {
+      renderPage();
+      expect(
+        screen.getByText(/there is no notification system in the app to configure/i),
+      ).toBeTruthy();
+    });
+
+    it('shows an honest coming-soon message for timezone/regional settings', () => {
+      renderPage();
+      expect(
+        screen.getByText(/every date and time shown in the app already uses your browser/i),
       ).toBeTruthy();
     });
   });
