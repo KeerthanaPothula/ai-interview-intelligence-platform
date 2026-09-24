@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.constants import API_V1_PREFIX
@@ -17,7 +18,7 @@ from app.models.features import SessionReport, VoiceAnalysis
 from app.models.interview import Question
 from app.models.user import User
 from app.schemas.features import SessionReportResponse
-from app.services import interview_service, report_service
+from app.services import analytics_service, interview_service, report_service
 
 router = APIRouter(prefix=f"{API_V1_PREFIX}/interviews", tags=["Reports"])
 
@@ -61,13 +62,30 @@ def generate_report(
 
     if session.live_session_id is not None:
         # Live interview mirror: no AudioResponse/Transcript/InterviewAnalysis
-        # rows exist (no audio was ever uploaded, no per-answer Gemini scoring
-        # ever ran) — the Q&A comes directly from ConversationTurn text, and
-        # numeric scores stay empty rather than being invented.
+        # rows exist — the Q&A comes directly from ConversationTurn text, and
+        # scores are the genuine per-answer ConversationTurnAnalysis rows, read
+        # through the same source the Dashboard uses (owner-only, completed
+        # interviews only). Unanswered turns have no row and add nothing.
+        # There is no audio, so voice_analytics (and the report's voice-based
+        # confidence_score) stays empty rather than being invented.
         questions_and_transcripts = _collect_live_interview_qa(
             db, session.live_session_id
         )
-        analyses: list[dict] = []
+        sa = analytics_service.scored_answers(current_user.id)
+        live_rows = db.execute(
+            select(sa.c.overall, sa.c.comm, sa.c.tech, sa.c.ps).where(
+                sa.c.session_id == session.id
+            )
+        ).all()
+        analyses: list[dict] = [
+            {
+                "overall_score": float(r.overall),
+                "communication_score": float(r.comm),
+                "technical_score": float(r.tech),
+                "problem_solving_score": float(r.ps),
+            }
+            for r in live_rows
+        ]
         voice_analytics: list[dict] = []
     else:
         # Collect all questions and transcripts for the session.

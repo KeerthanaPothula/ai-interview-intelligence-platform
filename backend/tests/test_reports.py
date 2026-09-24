@@ -5,6 +5,7 @@ import uuid
 
 from app.models.analysis import RESPONSE_STATUS_COMPLETED, Transcript
 from app.models.interview import InterviewSession
+from tests.test_analytics_live import _live
 
 
 _MOCK_REPORT = {
@@ -218,7 +219,8 @@ def test_generate_report_for_live_session_uses_conversation_turns(
 ):
     """The live-interview report branch reads Q&A from ConversationTurn text,
     never from AudioResponse/Transcript/InterviewAnalysis (there are none),
-    and passes no per-answer scores through to report_service."""
+    and passes the genuine ConversationTurnAnalysis scores to report_service
+    (one answered turn scored 7.0; the unanswered final turn adds nothing)."""
     mirrored_id = _complete_live_interview_and_get_mirror_id(
         client, auth_headers, db, monkeypatch
     )
@@ -240,7 +242,14 @@ def test_generate_report_for_live_session_uses_conversation_turns(
     )
     assert resp.status_code == 201, resp.text
 
-    assert captured["analyses"] == []
+    assert captured["analyses"] == [
+        {
+            "overall_score": 7.0,
+            "communication_score": 7.0,
+            "technical_score": 7.0,
+            "problem_solving_score": 7.0,
+        }
+    ]
     assert captured["voice_analytics"] == []
     questions = [qt["question"] for qt in captured["questions_and_transcripts"]]
     transcripts = [qt["transcript"] for qt in captured["questions_and_transcripts"]]
@@ -248,35 +257,39 @@ def test_generate_report_for_live_session_uses_conversation_turns(
     assert "I rebuilt our ETL pipeline to cut latency by half." in transcripts
 
 
-def test_live_session_report_does_not_invent_numeric_scores(
-    client, auth_headers, db, monkeypatch
-):
-    """With no analyses/voice_analytics, report_service's own averaging
-    (_safe_mean on an empty list) yields None — this asserts the endpoint
-    surfaces that None rather than a fabricated number, using the real
-    (unmocked) report_service.generate_session_report."""
+class _FakeGemini:
+    """Mocks only the Gemini call, so report_service's real score averaging
+    runs; records the prompt it was sent."""
+
+    def __init__(self):
+        self.prompts = []
+        outer = self
+
+        class _Models:
+            def generate_content(self, model, contents):
+                outer.prompts.append(contents)
+
+                class _R:
+                    text = (
+                        '{"overall_performance": "Did fine.", '
+                        '"strengths": ["Clear communicator"], "weaknesses": [], '
+                        '"improvement_plan": [], "readiness_level": "Developing"}'
+                    )
+
+                return _R()
+
+        self.models = _Models()
+
+
+def test_live_session_report_uses_genuine_scores(client, auth_headers, db, monkeypatch):
+    """End to end through the live endpoints and the real report_service:
+    the report carries the answer's genuine score, and confidence_score (a
+    voice metric) stays None because live interviews have no audio."""
     mirrored_id = _complete_live_interview_and_get_mirror_id(
         client, auth_headers, db, monkeypatch
     )
-
-    # Only the Gemini call itself is mocked — report_service's own score
-    # aggregation logic runs for real.
-    class _FakeResponse:
-        text = (
-            '{"overall_performance": "Did fine.", "strengths": ["Clear communicator"], '
-            '"weaknesses": [], "improvement_plan": [], "readiness_level": "Developing"}'
-        )
-
-    class _FakeModels:
-        def generate_content(self, model, contents):
-            return _FakeResponse()
-
-    class _FakeClient:
-        models = _FakeModels()
-
-    monkeypatch.setattr(
-        "app.services.report_service._get_client", lambda: _FakeClient()
-    )
+    gemini = _FakeGemini()
+    monkeypatch.setattr("app.services.report_service._get_client", lambda: gemini)
 
     resp = client.post(
         f"/api/v1/interviews/{mirrored_id}/report/generate",
@@ -284,12 +297,94 @@ def test_live_session_report_does_not_invent_numeric_scores(
     )
     assert resp.status_code == 201, resp.text
     data = resp.json()
-    assert data["final_score"] is None
-    assert data["communication_score"] is None
-    assert data["technical_score"] is None
-    assert data["problem_solving_score"] is None
+    assert data["final_score"] == 7.0
+    assert data["communication_score"] == 7.0
+    assert data["technical_score"] == 7.0
+    assert data["problem_solving_score"] == 7.0
     assert data["confidence_score"] is None
-    assert data["readiness_level"] == "Developing"
+    assert "Overall: 7.0/10" in gemini.prompts[0]
+    assert "None/10" not in gemini.prompts[0]
+
+
+def test_live_report_averages_scored_answers_and_skips_unscored(
+    client, auth_headers, db, registered_user, monkeypatch
+):
+    mirrored = _live(
+        db,
+        registered_user["id"],
+        [(6.0, 9.0, 5.0, 6.0, 7.0), (9.0, 8.0, 6.0, 7.0, 8.0), None],
+    )
+    gemini = _FakeGemini()
+    monkeypatch.setattr("app.services.report_service._get_client", lambda: gemini)
+
+    resp = client.post(
+        f"/api/v1/interviews/{mirrored.id}/report/generate", headers=auth_headers
+    )
+    assert resp.status_code == 201, resp.text
+    data = resp.json()
+    assert data["final_score"] == 7.5
+    assert data["communication_score"] == 8.5
+    assert data["technical_score"] == 5.5
+    assert data["problem_solving_score"] == 6.5
+    assert data["confidence_score"] is None
+    assert (
+        "Overall: 7.5/10, Communication: 8.5/10, Technical: 5.5/10, "
+        "Problem Solving: 6.5/10" in gemini.prompts[0]
+    )
+
+
+def test_live_report_with_no_scored_answers_does_not_invent_scores(
+    client, auth_headers, db, registered_user, monkeypatch
+):
+    mirrored = _live(db, registered_user["id"], [None, None])
+    monkeypatch.setattr(
+        "app.services.report_service._get_client", lambda: _FakeGemini()
+    )
+
+    resp = client.post(
+        f"/api/v1/interviews/{mirrored.id}/report/generate", headers=auth_headers
+    )
+    assert resp.status_code == 201, resp.text
+    data = resp.json()
+    for key in (
+        "final_score",
+        "communication_score",
+        "technical_score",
+        "problem_solving_score",
+        "confidence_score",
+    ):
+        assert data[key] is None, key
+
+
+def test_upload_flow_report_scores_unchanged(
+    client, auth_headers, interview_session, interview_analysis, monkeypatch
+):
+    """The upload branch still averages InterviewAnalysis rows (fixture:
+    7.5 / 8.0 / 7.0 / 6.5) exactly as before."""
+    captured = {}
+
+    def _capturing_generate(**kwargs):
+        captured.update(kwargs)
+        return _MOCK_REPORT.copy()
+
+    monkeypatch.setattr(
+        "app.services.report_service.generate_session_report", _capturing_generate
+    )
+
+    resp = client.post(
+        f"/api/v1/interviews/{interview_session.id}/report/generate",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 201, resp.text
+    assert captured["analyses"] == [
+        {
+            "overall_score": 7.5,
+            "communication_score": 8.0,
+            "technical_score": 7.0,
+            "problem_solving_score": 6.5,
+        }
+    ]
+    assert captured["voice_analytics"] == []
 
 
 def test_upload_flow_report_generation_unchanged(
