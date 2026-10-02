@@ -100,6 +100,7 @@ EXPECTED_FKS = [
 EXPECTED_UNIQUE_CONSTRAINTS: dict[str, set[str]] = {
     "interview_sessions": {"uq_interview_sessions_live_session_id"},
     "conversation_turn_analyses": {"uq_conversation_turn_analyses_turn_id"},
+    "conversation_turns": {"uq_conversation_turns_session_turn"},
 }
 # autogenerate operations that mean the migrated schema and the ORM models
 # disagree about the shape of the data (as opposed to comments/index naming).

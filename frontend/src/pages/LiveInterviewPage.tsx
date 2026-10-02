@@ -5,6 +5,7 @@ import {
   ApiError,
   endLiveInterview,
   getActiveLiveInterview,
+  getLiveConversation,
   nextLiveQuestion,
   startLiveInterview,
 } from '../api/client';
@@ -152,20 +153,42 @@ export function LiveInterviewPage() {
   };
 
   const handleNext = async () => {
-    if (!token || !session) return;
+    if (!token || !session || !currentQuestion) return;
+    const turnNumber = currentQuestion.turn_number;
     setLoading(true);
     setError(null);
     try {
       const updated = await nextLiveQuestion(
         session.id,
-        { response_text: responseText || undefined },
+        { response_text: responseText || undefined, turn_number: turnNumber },
         token,
       );
       setSession(updated);
       setResponseText('');
       setTimeout(() => responseRef.current?.focus(), 80);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to get next question. Please try again.');
+      if (!(err instanceof ApiError)) {
+        setError('Failed to get next question. Please try again.');
+      } else if (err.status !== 409) {
+        setError(err.message);
+      } else {
+        // The server already moved past this question (e.g. an earlier
+        // attempt succeeded but its response was lost). Show the real
+        // state, and keep the unsent text in the box — never resubmit it.
+        let moved = false;
+        try {
+          const fresh = await getLiveConversation(session.id, token);
+          setSession(fresh);
+          moved = fresh.current_question?.turn_number !== turnNumber;
+        } catch {
+          // Keep the current view; the error below still explains.
+        }
+        setError(
+          moved
+            ? `${err.message} The interview has moved on to the question shown; your text below was not submitted, so review it before answering.`
+            : err.message,
+        );
+      }
     } finally {
       setLoading(false);
     }

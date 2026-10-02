@@ -28,6 +28,12 @@ class ConversationTurnResponse(BaseModel):
 class NextQuestionRequest(BaseModel):
     response_text: str | None = Field(default=None, max_length=5000)
     audio_response_id: uuid.UUID | None = None
+    # The turn this answer is for. Makes a retry safe: a stale turn_number
+    # (the turn already advanced) never attaches the answer to the newer
+    # question — see live_interview.next_question. Optional so a client
+    # that omits it (pre-fix frontend during a rolling deploy) keeps the
+    # old "answer the current turn" behavior.
+    turn_number: int | None = Field(default=None, ge=1)
 
 
 class EndInterviewRequest(BaseModel):

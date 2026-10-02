@@ -545,7 +545,9 @@ export function startLiveInterview(
 
 export function nextLiveQuestion(
   sessionId: string,
-  body: { response_text?: string; audio_response_id?: string },
+  // turn_number: the question this answer is for, so a retry can never
+  // land on a newer question.
+  body: { response_text?: string; audio_response_id?: string; turn_number: number },
   token: string,
 ): Promise<LiveInterviewSessionResponse> {
   return request<LiveInterviewSessionResponse>(

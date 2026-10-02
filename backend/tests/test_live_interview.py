@@ -894,3 +894,273 @@ def test_active_interview_is_latest_and_owner_only(
 
 def test_active_interview_requires_auth(client):
     assert client.get(ACTIVE).status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# next-question retry / idempotency (turn_number)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def live_mocks(monkeypatch):
+    """Mock every Gemini call; returns the list of answers sent for scoring."""
+    scored: list[str] = []
+
+    def _counting_evaluation(**kwargs):
+        scored.append(kwargs["transcript_text"])
+        return _MOCK_EVALUATION.copy()
+
+    monkeypatch.setattr(
+        "app.services.interview_conversation_service.generate_opening_question",
+        _mock_opening,
+    )
+    monkeypatch.setattr(
+        "app.services.interview_conversation_service.generate_follow_up_question",
+        lambda **kw: (f"Question {kw['current_turn'] + 1}?", 2),
+    )
+    monkeypatch.setattr(
+        "app.services.interview_conversation_service.generate_interview_summary",
+        _mock_summary,
+    )
+    monkeypatch.setattr(
+        "app.services.evaluation_service.generate_evaluation", _counting_evaluation
+    )
+    return scored
+
+
+def _start(client, auth_headers, max_turns=3) -> str:
+    return client.post(
+        "/api/v1/live-interviews/",
+        json={
+            "job_role": "Engineer",
+            "job_description": "Python backend engineering role.",
+            "max_turns": max_turns,
+        },
+        headers=auth_headers,
+    ).json()["id"]
+
+
+def _next(client, auth_headers, sid, **body):
+    return client.post(
+        f"/api/v1/live-interviews/{sid}/next-question", json=body, headers=auth_headers
+    )
+
+
+def _turns(db, sid):
+    from app.models.conversation import ConversationTurn
+
+    db.expire_all()
+    return (
+        db.query(ConversationTurn)
+        .filter(ConversationTurn.live_session_id == uuid.UUID(sid))
+        .order_by(ConversationTurn.turn_number)
+        .all()
+    )
+
+
+def _score_count(db):
+    from app.models.conversation import ConversationTurnAnalysis
+
+    return db.query(ConversationTurnAnalysis).count()
+
+
+def test_first_submission_creates_exactly_one_turn(
+    client, auth_headers, db, live_mocks
+):
+    sid = _start(client, auth_headers)
+    resp = _next(client, auth_headers, sid, response_text="Answer one.", turn_number=1)
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["current_turn"] == 2
+    assert [(t.turn_number, t.response_text) for t in _turns(db, sid)] == [
+        (1, "Answer one."),
+        (2, None),
+    ]
+    assert live_mocks == ["Answer one."]
+    assert _score_count(db) == 1
+
+
+def test_retry_of_a_submitted_answer_creates_no_turn_and_no_score(
+    client, auth_headers, db, live_mocks
+):
+    sid = _start(client, auth_headers)
+    first = _next(client, auth_headers, sid, response_text="Answer one.", turn_number=1)
+    # The response above was "lost": the client retries the identical request.
+    retry = _next(client, auth_headers, sid, response_text="Answer one.", turn_number=1)
+
+    assert retry.status_code == 200, retry.text
+    assert retry.json()["current_turn"] == 2
+    assert retry.json()["current_question"] == first.json()["current_question"]
+    assert len(_turns(db, sid)) == 2
+    assert live_mocks == ["Answer one."]  # already scored; never scored again
+    assert _score_count(db) == 1
+
+
+def test_retry_never_attaches_the_answer_to_the_next_question(
+    client, auth_headers, db, live_mocks
+):
+    sid = _start(client, auth_headers)
+    _next(client, auth_headers, sid, response_text="Answer one.", turn_number=1)
+
+    for text in ("Answer one.", "An edited answer one."):
+        _next(client, auth_headers, sid, response_text=text, turn_number=1)
+
+    turns = _turns(db, sid)
+    assert turns[0].response_text == "Answer one."
+    assert turns[1].response_text is None
+    assert _score_count(db) == 1
+
+
+def test_retry_with_a_different_answer_is_rejected_not_moved(
+    client, auth_headers, db, live_mocks
+):
+    sid = _start(client, auth_headers)
+    _next(client, auth_headers, sid, response_text="Answer one.", turn_number=1)
+    resp = _next(client, auth_headers, sid, response_text="Edited.", turn_number=1)
+
+    assert resp.status_code == 409
+    assert "already has a different saved answer" in resp.json()["detail"]
+
+
+def test_turn_number_ahead_of_the_interview_is_rejected(
+    client, auth_headers, db, live_mocks
+):
+    sid = _start(client, auth_headers)
+    resp = _next(client, auth_headers, sid, response_text="Answer.", turn_number=2)
+
+    assert resp.status_code == 409
+    assert [t.response_text for t in _turns(db, sid)] == [None]
+    assert live_mocks == []
+
+
+def test_retry_after_the_final_question_was_created_still_replays(
+    client, auth_headers, db, live_mocks
+):
+    sid = _start(client, auth_headers, max_turns=3)
+    _next(client, auth_headers, sid, response_text="A1.", turn_number=1)
+    _next(client, auth_headers, sid, response_text="A2.", turn_number=2)
+    retry = _next(client, auth_headers, sid, response_text="A2.", turn_number=2)
+
+    assert retry.status_code == 200, retry.text
+    assert retry.json()["current_turn"] == 3
+    assert len(_turns(db, sid)) == 3
+
+
+def _race(client, auth_headers, sid, monkeypatch, **body):
+    """Run a second, identical request to completion while the first is
+    mid-flight — after it saved/scored the answer, before it inserts the
+    next turn: the window in which both used to insert the same turn."""
+    racing = []
+
+    def _follow_up(**kwargs):
+        if not racing:
+            racing.append(None)  # before the call: the racer must not race too
+            racing[0] = _next(client, auth_headers, sid, **body)
+        return f"Question {kwargs['current_turn'] + 1}?", 2
+
+    monkeypatch.setattr(
+        "app.services.interview_conversation_service.generate_follow_up_question",
+        _follow_up,
+    )
+    first = _next(client, auth_headers, sid, **body)
+    return first, racing[0]
+
+
+def test_concurrent_submissions_for_the_same_turn_create_one_next_turn(
+    client, auth_headers, db, live_mocks, monkeypatch
+):
+    sid = _start(client, auth_headers)
+    a, b = _race(
+        client, auth_headers, sid, monkeypatch, response_text="Same.", turn_number=1
+    )
+
+    assert a.status_code == 200, a.text
+    assert b.status_code == 200, b.text
+    assert a.json()["current_question"]["id"] == b.json()["current_question"]["id"]
+    assert [t.turn_number for t in _turns(db, sid)] == [1, 2]
+    assert live_mocks == ["Same."]
+    assert _score_count(db) == 1
+
+
+def test_concurrent_submissions_without_turn_number_are_also_safe(
+    client, auth_headers, db, live_mocks, monkeypatch
+):
+    sid = _start(client, auth_headers)
+    a, b = _race(client, auth_headers, sid, monkeypatch, response_text="Same.")
+
+    assert (a.status_code, b.status_code) == (200, 200), a.text
+    assert [t.turn_number for t in _turns(db, sid)] == [1, 2]
+    assert _score_count(db) == 1
+
+
+def test_turn_numbers_are_unique_per_session_at_db_level(db, registered_user):
+    from app.models.conversation import ConversationTurn
+
+    live = LiveInterviewSession(
+        user_id=uuid.UUID(registered_user["id"]),
+        job_role="Engineer",
+        job_description="Python backend engineering role.",
+        current_turn=1,
+        max_turns=3,
+    )
+    db.add(live)
+    db.flush()
+    for _ in range(2):
+        db.add(
+            ConversationTurn(live_session_id=live.id, turn_number=1, question_text="Q")
+        )
+    with pytest.raises(sqlalchemy.exc.IntegrityError):
+        db.commit()
+    db.rollback()
+
+
+def test_each_question_in_an_interview_is_answered_in_turn(
+    client, auth_headers, db, live_mocks
+):
+    sid = _start(client, auth_headers, max_turns=3)
+    for n in (1, 2):
+        resp = _next(client, auth_headers, sid, response_text=f"A{n}.", turn_number=n)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["current_turn"] == n + 1
+    end = client.post(
+        f"/api/v1/live-interviews/{sid}/end",
+        json={"response_text": "A3."},
+        headers=auth_headers,
+    )
+    assert end.status_code == 200, end.text
+
+    assert [(t.turn_number, t.response_text) for t in _turns(db, sid)] == [
+        (1, "A1."),
+        (2, "A2."),
+        (3, "A3."),
+    ]
+    assert live_mocks == ["A1.", "A2.", "A3."]
+    assert _score_count(db) == 3
+
+
+def test_retry_after_failed_question_generation_still_advances(
+    client, auth_headers, db, live_mocks, monkeypatch
+):
+    """The answer is saved before generation, so the turn stays current; a
+    retry for it must proceed normally, not be treated as already answered."""
+    sid = _start(client, auth_headers)
+
+    def _boom(**kwargs):
+        raise RuntimeError("Gemini down")
+
+    monkeypatch.setattr(
+        "app.services.interview_conversation_service.generate_follow_up_question",
+        _boom,
+    )
+    with pytest.raises(RuntimeError):
+        _next(client, auth_headers, sid, response_text="Saved.", turn_number=1)
+    assert [t.response_text for t in _turns(db, sid)] == ["Saved."]
+
+    monkeypatch.setattr(
+        "app.services.interview_conversation_service.generate_follow_up_question",
+        _mock_follow_up,
+    )
+    resp = _next(client, auth_headers, sid, response_text="Saved.", turn_number=1)
+    assert resp.status_code == 200, resp.text
+    assert len(_turns(db, sid)) == 2
+    assert live_mocks == ["Saved."]

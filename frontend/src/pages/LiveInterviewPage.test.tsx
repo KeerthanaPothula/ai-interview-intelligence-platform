@@ -294,6 +294,95 @@ describe('LiveInterviewPage', () => {
     expect(container.querySelector('#main-content')).toBeNull();
   });
 
+  describe('Next question (retry safety)', () => {
+    const TURN_2 = {
+      ...MOCK_SESSION.turns[0],
+      id: 'turn-2',
+      turn_number: 2,
+      question_text: 'What would you do differently?',
+      difficulty_level: 2,
+    };
+    const ADVANCED = {
+      ...MOCK_SESSION,
+      current_turn: 2,
+      turns: [{ ...MOCK_SESSION.turns[0], response_text: 'My answer.' }, TURN_2],
+      current_question: TURN_2,
+    };
+
+    async function renderAtQuestion1(answer: string) {
+      vi.spyOn(client, 'getActiveLiveInterview').mockResolvedValue(MOCK_SESSION);
+      renderPage();
+      await screen.findByTestId('current-question');
+      await userEvent.type(screen.getByLabelText('Your answer'), answer);
+    }
+
+    const answerBox = () => screen.getByLabelText('Your answer') as HTMLTextAreaElement;
+
+    it('sends the question number and clears the answer after a successful Next', async () => {
+      const next = vi.spyOn(client, 'nextLiveQuestion').mockResolvedValue(ADVANCED);
+      await renderAtQuestion1('My answer.');
+
+      await userEvent.click(screen.getByText('Next Question →'));
+
+      await waitFor(() =>
+        expect(screen.getByTestId('current-question').textContent).toBe(
+          'What would you do differently?',
+        ),
+      );
+      expect(next).toHaveBeenCalledWith(
+        'sess-1',
+        { response_text: 'My answer.', turn_number: 1 },
+        'test-token',
+      );
+      expect(answerBox().value).toBe('');
+    });
+
+    it('retries a failed Next for the same question, keeping the answer meanwhile', async () => {
+      const next = vi
+        .spyOn(client, 'nextLiveQuestion')
+        .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+        .mockResolvedValueOnce(ADVANCED);
+      await renderAtQuestion1('My answer.');
+
+      await userEvent.click(screen.getByText('Next Question →'));
+      expect(await screen.findByText(/Failed to get next question/)).toBeTruthy();
+      expect(answerBox().value).toBe('My answer.');
+
+      await userEvent.click(screen.getByText('Next Question →'));
+      await waitFor(() => expect(answerBox().value).toBe(''));
+      expect(next).toHaveBeenCalledTimes(2);
+      for (const call of next.mock.calls) {
+        expect(call[1]).toEqual({ response_text: 'My answer.', turn_number: 1 });
+      }
+    });
+
+    it('on "already answered", shows the real question and keeps the unsent text without resubmitting it', async () => {
+      const next = vi
+        .spyOn(client, 'nextLiveQuestion')
+        .mockRejectedValue(
+          new client.ApiError(
+            409,
+            'Question 1 already has a different saved answer, so this answer was not saved.',
+          ),
+        );
+      const refresh = vi.spyOn(client, 'getLiveConversation').mockResolvedValue(ADVANCED);
+      await renderAtQuestion1('Edited answer.');
+
+      await userEvent.click(screen.getByText('Next Question →'));
+
+      expect(await screen.findByText(/your text below was not submitted/)).toBeTruthy();
+      await waitFor(() =>
+        expect(screen.getByTestId('current-question').textContent).toBe(
+          'What would you do differently?',
+        ),
+      );
+      expect(answerBox().value).toBe('Edited answer.');
+      expect(refresh).toHaveBeenCalledWith('sess-1', 'test-token');
+      expect(next).toHaveBeenCalledTimes(1);
+      expect(next.mock.calls[0][1]).toEqual({ response_text: 'Edited answer.', turn_number: 1 });
+    });
+  });
+
   describe('resuming an interview in progress', () => {
     const TURN_2 = {
       ...MOCK_SESSION.turns[0],

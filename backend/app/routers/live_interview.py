@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.constants import API_V1_PREFIX
@@ -81,6 +82,42 @@ def _owned_audio_response_id_or_404(
     return audio_response_id
 
 
+def _replay_answered_turn(
+    db: Session,
+    session: LiveInterviewSession,
+    turn_number: int,
+    body: NextQuestionRequest,
+    current_user: User,
+) -> LiveInterviewSessionResponse:
+    """Answer a next-question request for a turn that is no longer current.
+
+    Nothing is written or scored. If the request carries the answer already
+    stored on that turn (a retry after a lost response), it gets the
+    current conversation back, as if it had just succeeded. If it carries a
+    different answer, 409 — that answer is never moved onto a newer question.
+    """
+    turn = db.execute(
+        select(ConversationTurn).where(
+            ConversationTurn.live_session_id == session.id,
+            ConversationTurn.turn_number == turn_number,
+        )
+    ).scalar_one_or_none()
+    if turn is None or turn_number >= session.current_turn:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Question {turn_number} is not the current question.",
+        )
+    if (body.response_text and body.response_text != turn.response_text) or (
+        body.audio_response_id and body.audio_response_id != turn.audio_response_id
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Question {turn_number} already has a different saved "
+            "answer, so this answer was not saved.",
+        )
+    return get_conversation(session.id, db, current_user)
+
+
 @router.post("/", response_model=LiveInterviewSessionResponse, status_code=201)
 def start_live_interview(
     body: StartLiveInterviewRequest,
@@ -144,6 +181,12 @@ def next_question(
         raise HTTPException(
             status_code=409, detail="Interview session is already completed"
         )
+
+    # Checked before the max_turns guard: a retry whose original request
+    # created the final turn (but whose response was lost) must still replay.
+    answered_turn = session.current_turn
+    if body.turn_number is not None and body.turn_number != answered_turn:
+        return _replay_answered_turn(db, session, body.turn_number, body, current_user)
 
     if session.current_turn >= session.max_turns:
         raise HTTPException(
@@ -225,7 +268,16 @@ def next_question(
     )
     db.add(new_turn)
     session.current_turn = new_turn_number
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # uq_conversation_turns_session_turn: a concurrent request for the
+        # same turn created the next one first. Answer as a retry would.
+        db.rollback()
+        db.refresh(session)
+        if session.current_turn == answered_turn:
+            raise
+        return _replay_answered_turn(db, session, answered_turn, body, current_user)
 
     all_turns = (
         db.execute(

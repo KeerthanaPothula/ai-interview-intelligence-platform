@@ -82,6 +82,13 @@ class ConversationTurn(Base):
     __tablename__ = "conversation_turns"
     __table_args__ = (
         Index("ix_conversation_turns_audio_response_id", "audio_response_id"),
+        # Two concurrent next-question requests for the same turn must not
+        # both create the following turn — the loser's insert fails here.
+        UniqueConstraint(
+            "live_session_id",
+            "turn_number",
+            name="uq_conversation_turns_session_turn",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
