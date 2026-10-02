@@ -566,6 +566,14 @@ export function getLiveConversation(
   );
 }
 
+// The caller's most recent in-progress live interview, or null — used to
+// resume after a refresh or navigating away.
+export function getActiveLiveInterview(
+  token: string,
+): Promise<LiveInterviewSessionResponse | null> {
+  return request<LiveInterviewSessionResponse | null>('/api/v1/live-interviews/active', {}, token);
+}
+
 export function endLiveInterview(
   sessionId: string,
   token: string,

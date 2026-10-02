@@ -792,3 +792,105 @@ def test_mirror_completed_live_session_gives_up_after_max_attempts(
         .count()
         == 0
     )
+
+
+# ---------------------------------------------------------------------------
+# GET /live-interviews/active — resuming after a refresh / navigation away
+# ---------------------------------------------------------------------------
+
+ACTIVE = "/api/v1/live-interviews/active"
+
+
+def test_active_interview_is_null_when_none_in_progress(client, auth_headers):
+    resp = client.get(ACTIVE, headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.json() is None
+
+
+def test_active_interview_restores_turns_without_creating_any(
+    client, auth_headers, db, monkeypatch
+):
+    from app.models.conversation import ConversationTurn, ConversationTurnAnalysis
+
+    monkeypatch.setattr(
+        "app.services.interview_conversation_service.generate_opening_question",
+        _mock_opening,
+    )
+    monkeypatch.setattr(
+        "app.services.interview_conversation_service.generate_follow_up_question",
+        _mock_follow_up,
+    )
+    monkeypatch.setattr(
+        "app.services.evaluation_service.generate_evaluation", _mock_evaluation
+    )
+    sid = client.post(
+        "/api/v1/live-interviews/",
+        json={
+            "job_role": "Engineer",
+            "job_description": "Python backend engineering role.",
+            "max_turns": 3,
+        },
+        headers=auth_headers,
+    ).json()["id"]
+    client.post(
+        f"/api/v1/live-interviews/{sid}/next-question",
+        json={"response_text": "My first answer."},
+        headers=auth_headers,
+    )
+    turns_before = db.query(ConversationTurn).count()
+    scores_before = db.query(ConversationTurnAnalysis).count()
+
+    for _ in range(2):  # repeated reloads must stay read-only
+        data = client.get(ACTIVE, headers=auth_headers).json()
+        assert data["id"] == sid
+        assert data["status"] == "active"
+        assert [t["turn_number"] for t in data["turns"]] == [1, 2]
+        assert data["turns"][0]["response_text"] == "My first answer."
+        assert data["current_question"]["turn_number"] == 2
+
+    assert db.query(ConversationTurn).count() == turns_before == 2
+    assert db.query(ConversationTurnAnalysis).count() == scores_before == 1
+    live = db.get(LiveInterviewSession, uuid.UUID(sid))
+    db.refresh(live)
+    assert live.status == "active"  # resuming never completes the interview
+
+
+def test_completed_interview_is_not_active(client, auth_headers, monkeypatch):
+    _start_and_end_live_interview(client, auth_headers, monkeypatch)
+    assert client.get(ACTIVE, headers=auth_headers).json() is None
+
+
+def test_active_interview_is_latest_and_owner_only(
+    client, auth_headers, db, registered_user
+):
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.conversation import ConversationTurn
+    from tests.test_analytics_live import _bob_headers
+
+    now = datetime.now(timezone.utc)
+    ids = []
+    for age_days in (2, 1):
+        live = LiveInterviewSession(
+            user_id=uuid.UUID(registered_user["id"]),
+            job_role="Engineer",
+            job_description="Python backend engineering role.",
+            max_turns=3,
+            current_turn=1,
+            status="active",
+            created_at=now - timedelta(days=age_days),
+        )
+        db.add(live)
+        db.flush()
+        db.add(
+            ConversationTurn(live_session_id=live.id, turn_number=1, question_text="Q1")
+        )
+        ids.append(str(live.id))
+    db.commit()
+
+    assert client.get(ACTIVE, headers=auth_headers).json()["id"] == ids[1]
+    assert client.get(ACTIVE, headers=_bob_headers(client)).json() is None
+
+
+def test_active_interview_requires_auth(client):
+    assert client.get(ACTIVE).status_code == 401

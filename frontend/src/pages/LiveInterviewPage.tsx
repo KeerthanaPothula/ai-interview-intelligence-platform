@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import {
   ApiError,
   endLiveInterview,
+  getActiveLiveInterview,
   nextLiveQuestion,
   startLiveInterview,
 } from '../api/client';
@@ -11,6 +12,7 @@ import type {
   EndInterviewResponse,
   LiveInterviewSessionResponse,
 } from '../api/types';
+import { ErrorState } from '../components/StateMessage';
 import { useAuth } from '../context/AuthContext';
 
 const ease = [0.4, 0, 0.2, 1] as [number, number, number, number];
@@ -35,13 +37,13 @@ function formatTime(secs: number) {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
-type PageState = 'setup' | 'interviewing' | 'ended';
+type PageState = 'checking' | 'resumeError' | 'setup' | 'interviewing' | 'ended';
 
 export function LiveInterviewPage() {
   const { token } = useAuth();
   const navigate = useNavigate();
 
-  const [pageState, setPageState] = useState<PageState>('setup');
+  const [pageState, setPageState] = useState<PageState>('checking');
   const [jobRole, setJobRole] = useState('');
   const [jobDescription, setJobDescription] = useState('');
   const [maxTurns, setMaxTurns] = useState(5);
@@ -51,6 +53,9 @@ export function LiveInterviewPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [elapsedSecs, setElapsedSecs] = useState(0);
+  const [resumeError, setResumeError] = useState<string | null>(null);
+  const [resumed, setResumed] = useState(false);
+  const resumeCheckedRef = useRef(false);
 
   const responseRef = useRef<HTMLTextAreaElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -73,6 +78,53 @@ export function LiveInterviewPage() {
   }, []);
 
   useEffect(() => () => stopTimer(), [stopTimer]);
+
+  // Resume an interview still in progress (after a refresh or navigating
+  // away) instead of showing the setup form and silently starting a new one.
+  // Read-only on the backend: no turns are created, nothing is completed.
+  const checkForActive = useCallback(async () => {
+    if (!token) return;
+    setPageState('checking');
+    setResumeError(null);
+    try {
+      const active = await getActiveLiveInterview(token);
+      if (!active) {
+        setPageState('setup');
+        return;
+      }
+      setSession(active);
+      setJobRole(active.job_role);
+      setJobDescription(active.job_description);
+      // An answer saved before a failed next-question stays on the current turn.
+      setResponseText(active.current_question?.response_text ?? '');
+      setResumed(true);
+      setPageState('interviewing');
+      startTimer();
+    } catch (err) {
+      setResumeError(err instanceof ApiError ? err.message : 'Something went wrong.');
+      setPageState('resumeError');
+    }
+  }, [token, startTimer]);
+
+  // Once per mount: a later silent token refresh changes `token`, and must not
+  // re-restore over what the candidate is typing.
+  useEffect(() => {
+    if (resumeCheckedRef.current || !token) return;
+    resumeCheckedRef.current = true;
+    checkForActive();
+  }, [token, checkForActive]);
+
+  // Warn before a refresh / tab close while an interview is in progress.
+  // Removed as soon as it ends (or the page unmounts).
+  useEffect(() => {
+    if (pageState !== 'interviewing') return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = ''; // required by older Chromium to show the prompt
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [pageState]);
 
   const handleStart = async () => {
     if (!token) return;
@@ -160,7 +212,27 @@ export function LiveInterviewPage() {
     setJobRole('');
     setJobDescription('');
     setError(null);
+    setResumed(false);
   };
+
+  if (pageState === 'checking') {
+    return (
+      <div className="page-container live-interview-page">
+        <p className="li-thinking" role="status">Checking for an interview in progress…</p>
+      </div>
+    );
+  }
+
+  if (pageState === 'resumeError') {
+    return (
+      <div className="page-container live-interview-page">
+        <ErrorState
+          message={`We couldn't check for an interview in progress, so nothing was started or discarded. ${resumeError}`}
+          onRetry={checkForActive}
+        />
+      </div>
+    );
+  }
 
   /* ── SETUP ── */
   if (pageState === 'setup') {
@@ -320,6 +392,22 @@ export function LiveInterviewPage() {
   return (
     <div className="page-container live-interview-page">
       <div className="li-workspace">
+        {resumed && (
+          <p
+            role="status"
+            style={{
+              margin: 0,
+              padding: '0.6rem 0.875rem',
+              background: 'var(--surface-2)',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-sm)',
+              fontSize: '0.84rem',
+              color: 'var(--text-2)',
+            }}
+          >
+            Resumed your interview in progress. Your earlier answers are saved.
+          </p>
+        )}
         {/* Top bar: progress dots + timer + end button */}
         <div className="li-topbar-row">
           <div className="li-progress-dots" role="progressbar" aria-valuenow={currentTurn} aria-valuemax={totalTurns} aria-label={`Question ${currentTurn} of ${totalTurns}`}>

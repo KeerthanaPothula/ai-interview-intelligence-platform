@@ -268,6 +268,31 @@ def get_conversation(
     return data
 
 
+@router.get("/active", response_model=LiveInterviewSessionResponse | None)
+def get_active_interview(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """The caller's most recent still-active live interview, or null.
+
+    The client only learns a session id from the start response, so after a
+    refresh or navigating away it has no other way to find an interview in
+    progress. Read-only: never creates turns and never completes anything.
+    """
+    session_id = db.execute(
+        select(LiveInterviewSession.id)
+        .where(
+            LiveInterviewSession.user_id == current_user.id,
+            LiveInterviewSession.status == LIVE_SESSION_STATUS_ACTIVE,
+        )
+        .order_by(LiveInterviewSession.created_at.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if session_id is None:
+        return None
+    return get_conversation(session_id, db, current_user)
+
+
 @router.post("/{session_id}/end", response_model=EndInterviewResponse)
 def end_interview(
     session_id: uuid.UUID,
