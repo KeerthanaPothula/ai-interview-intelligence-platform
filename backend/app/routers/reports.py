@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.constants import API_V1_PREFIX
 from app.core.deps import get_current_user
-from app.core.exceptions import ResourceNotFound
+from app.core.exceptions import ResourceNotFound, ValidationError
 from app.database import get_db
 from app.models.analysis import AudioResponse, InterviewAnalysis, Transcript
 from app.models.conversation import ConversationTurn
@@ -150,6 +150,15 @@ def generate_report(
             .all()
         )
         voice_analytics = [{"confidence_score": v.confidence_score} for v in voice_rows]
+
+    # Without a single real answer Gemini would judge strengths, weaknesses
+    # and readiness from nothing. Unscored answers still count. Checked
+    # before any existing report is replaced, so that one stays intact.
+    if not any((qt["transcript"] or "").strip() for qt in questions_and_transcripts):
+        raise ValidationError(
+            "This interview needs at least one answered question before a "
+            "report can be generated."
+        )
 
     report_data = report_service.generate_session_report(
         job_role=session.job_role,
