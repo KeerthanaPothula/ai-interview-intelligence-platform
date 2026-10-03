@@ -521,3 +521,95 @@ def test_recruiter_access_is_read_only(client, db, org_candidate, recruiter_head
         headers=recruiter_headers,
     )
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Deactivating an organization blocks its recruiters
+# ---------------------------------------------------------------------------
+
+_ORG_DEACTIVATED = "Your organization has been deactivated."
+
+
+def _set_org_active(client, admin_headers, organization, active):
+    action = "activate" if active else "deactivate"
+    resp = client.patch(
+        f"/api/v1/admin/organizations/{organization.id}/{action}",
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200, resp.text
+
+
+def test_deactivating_an_organization_blocks_its_recruiters_until_reactivated(
+    client, db, organization, org_candidate, recruiter_headers, admin_headers
+):
+    session = _org_report_session(db, org_candidate)
+    candidates = client.get("/api/v1/recruiter/candidates", headers=recruiter_headers)
+    assert candidates.json()["total"] == 1  # access works while active
+
+    _set_org_active(client, admin_headers, organization, active=False)
+
+    # The recruiter's still-valid token no longer reaches candidate data.
+    for method, path, body in (
+        ("GET", "/api/v1/recruiter/candidates", None),
+        ("GET", f"/api/v1/interviews/{session.id}/report", None),
+        ("GET", f"/api/v1/interviews/{session.id}", None),
+        (
+            "PATCH",
+            f"/api/v1/recruiter/candidates/{session.id}/status",
+            {"status": "shortlisted"},
+        ),
+        ("GET", "/api/v1/auth/me", None),
+    ):
+        resp = client.request(method, path, json=body, headers=recruiter_headers)
+        assert resp.status_code == 403, (path, resp.text)
+        assert resp.json()["detail"] == _ORG_DEACTIVATED
+    db.refresh(session)
+    assert session.recruiter_status != "shortlisted"
+
+    _set_org_active(client, admin_headers, organization, active=True)
+
+    restored = client.get("/api/v1/recruiter/candidates", headers=recruiter_headers)
+    assert restored.status_code == 200
+    assert restored.json()["total"] == 1
+
+
+def test_other_organizations_recruiters_are_unaffected(
+    client, organization, other_org_recruiter_headers, admin_headers
+):
+    _set_org_active(client, admin_headers, organization, active=False)
+    resp = client.get(
+        "/api/v1/recruiter/candidates", headers=other_org_recruiter_headers
+    )
+    assert resp.status_code == 200
+
+
+def test_candidates_of_a_deactivated_organization_keep_their_own_access(
+    client, db, organization, org_candidate, admin_headers
+):
+    session = _org_report_session(db, org_candidate)
+    _set_org_active(client, admin_headers, organization, active=False)
+
+    own = {"Authorization": f"Bearer {_login(client, ORG_CANDIDATE_USER)}"}
+    assert client.get("/api/v1/auth/me", headers=own).status_code == 200
+    detail, report = _open_report(client, session.id, own)
+    assert (detail.status_code, report.status_code) == (200, 200)
+
+
+def test_admins_are_not_blocked_by_their_organizations_status(
+    client, db, organization, admin_user, admin_headers, org_candidate
+):
+    """Platform-wide roles must never lock themselves out by deactivating the
+    organization they happen to belong to."""
+    admin = db.get(User, uuid.UUID(admin_user["id"]))
+    admin.organization_id = organization.id
+    db.commit()
+    _org_report_session(db, org_candidate)
+
+    _set_org_active(client, admin_headers, organization, active=False)
+
+    assert (
+        client.get("/api/v1/admin/overview", headers=admin_headers).status_code == 200
+    )
+    candidates = client.get("/api/v1/recruiter/candidates", headers=admin_headers)
+    assert candidates.status_code == 200
+    _set_org_active(client, admin_headers, organization, active=True)

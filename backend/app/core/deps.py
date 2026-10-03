@@ -71,6 +71,20 @@ def get_current_user(
             detail="This account has been deactivated.",
         )
 
+    # A recruiter's access exists only through their organization, so
+    # deactivating the organization blocks its recruiters the same way, until
+    # it is reactivated. Admins/Super Admins are platform-wide and candidates
+    # own their data, so neither is blocked by their organization's status.
+    if (
+        user.role == Role.RECRUITER.value
+        and user.organization is not None
+        and not user.organization.is_active
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your organization has been deactivated.",
+        )
+
     return user
 
 
