@@ -23,6 +23,16 @@ vi.mock('../context/AuthContext', async (importOriginal) => {
   };
 });
 
+// delay: null — userEvent's default (delay: 0) awaits a real setTimeout(0)
+// after every keystroke. RegisterPage has no timer-driven behavior, so those
+// waits test nothing, yet at ~14ms each (Windows timer resolution) they were
+// most of each test's runtime and, stretched under full-suite CPU load, made
+// the longest test hit its 5s timeout. Every keystroke still dispatches its
+// full event sequence and re-renders.
+function setupUser() {
+  return userEvent.setup({ delay: null });
+}
+
 function renderRegisterPage() {
   return render(
     <MemoryRouter>
@@ -31,7 +41,7 @@ function renderRegisterPage() {
   );
 }
 
-async function fillValidForm(user: ReturnType<typeof userEvent.setup>) {
+async function fillValidForm(user: ReturnType<typeof setupUser>) {
   await user.type(screen.getByLabelText(/first name/i), 'Jane');
   await user.type(screen.getByLabelText(/last name/i), 'Smith');
   await user.type(screen.getByLabelText(/email/i), 'jane@example.com');
@@ -57,7 +67,7 @@ describe('RegisterPage', () => {
   });
 
   it('rejects mismatched passwords without calling register()', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderRegisterPage();
     await fillValidForm(user);
     await user.clear(screen.getByLabelText(/confirm password/i));
@@ -69,7 +79,7 @@ describe('RegisterPage', () => {
   });
 
   it('rejects a short password without calling register()', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderRegisterPage();
     await user.type(screen.getByLabelText(/first name/i), 'Jane');
     await user.type(screen.getByLabelText(/last name/i), 'Smith');
@@ -84,7 +94,7 @@ describe('RegisterPage', () => {
   });
 
   it('requires accepting the terms before submitting', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderRegisterPage();
     await user.type(screen.getByLabelText(/first name/i), 'Jane');
     await user.type(screen.getByLabelText(/last name/i), 'Smith');
@@ -99,7 +109,7 @@ describe('RegisterPage', () => {
 
   it('combines first and last name into full_name on submit', async () => {
     mockRegister.mockResolvedValue(undefined);
-    const user = userEvent.setup();
+    const user = setupUser();
     renderRegisterPage();
     await fillValidForm(user);
     await user.click(screen.getByRole('button', { name: /create account/i }));
@@ -115,7 +125,7 @@ describe('RegisterPage', () => {
 
   it('shows the manual sign-in success screen when auto-login did not happen', async () => {
     mockRegister.mockResolvedValue(undefined);
-    const user = userEvent.setup();
+    const user = setupUser();
     renderRegisterPage();
     await fillValidForm(user);
     await user.click(screen.getByRole('button', { name: /create account/i }));
@@ -128,7 +138,7 @@ describe('RegisterPage', () => {
     mockRegister.mockRejectedValue(
       new ApiError(409, 'An account with this email already exists.'),
     );
-    const user = userEvent.setup();
+    const user = setupUser();
     renderRegisterPage();
     await fillValidForm(user);
     await user.click(screen.getByRole('button', { name: /create account/i }));
