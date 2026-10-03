@@ -306,3 +306,97 @@ def test_health_check(client):
     assert data["status"] == "healthy"
     assert "environment" in data
     assert "version" in data
+
+
+# ---------------------------------------------------------------------------
+# Email addresses are matched case-insensitively
+# ---------------------------------------------------------------------------
+
+_TYPED = "Alice.Smith@Example.COM"  # stored as Alice.Smith@example.com
+_PW = "securepassword1"
+
+
+def _register_typed(client):
+    resp = client.post(
+        "/api/v1/auth/register",
+        json={"email": _TYPED, "password": _PW, "full_name": "Alice Smith"},
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+def _login_as(client, username, password=_PW):
+    return client.post(
+        "/api/v1/auth/login", data={"username": username, "password": password}
+    )
+
+
+class TestEmailCaseInsensitivity:
+    def test_login_with_the_address_exactly_as_registered(self, client):
+        _register_typed(client)
+        assert _login_as(client, _TYPED).status_code == 200
+
+    def test_login_with_a_different_case(self, client):
+        _register_typed(client)
+        for variant in ("alice.smith@example.com", " ALICE.SMITH@EXAMPLE.COM "):
+            assert _login_as(client, variant).status_code == 200, variant
+
+    def test_registering_a_case_variant_is_a_duplicate(self, client, db):
+        _register_typed(client)
+        dup = client.post(
+            "/api/v1/auth/register",
+            json={
+                "email": "alice.smith@example.com",
+                "password": "anotherpassword2",
+                "full_name": "Second Alice",
+            },
+        )
+        assert dup.status_code == 409
+        assert db.query(User).count() == 1
+
+    def test_wrong_password_with_a_case_variant_counts_against_the_account(
+        self, client, db
+    ):
+        created = _register_typed(client)
+        assert (
+            _login_as(client, "alice.smith@example.com", "wrongpass1").status_code
+            == 401
+        )
+        db.expire_all()
+        user = db.get(User, uuid.UUID(created["id"]))
+        assert user.failed_login_attempts == 1
+
+    def test_forgot_password_with_a_case_variant_reaches_the_account(self, client, db):
+        from app.models.password_reset_token import PasswordResetToken
+
+        created = _register_typed(client)
+        resp = client.post(
+            "/api/v1/auth/forgot-password", json={"email": "alice.smith@example.com"}
+        )
+        assert resp.status_code == 200
+        tokens = db.query(PasswordResetToken).filter_by(
+            user_id=uuid.UUID(created["id"])
+        )
+        assert tokens.count() == 1
+
+    def test_exact_match_wins_over_existing_case_variant_duplicates(self, client, db):
+        """Accounts that already differ only by case (created before this
+        check) each keep logging in with their own exact address."""
+        from app.core.security import get_password_hash
+
+        for email, pw in (
+            ("bob@example.com", "lowerpassword1"),
+            ("Bob@example.com", "upperpassword1"),
+        ):
+            db.add(
+                User(
+                    email=email,
+                    hashed_password=get_password_hash(pw),
+                    full_name="Bob",
+                )
+            )
+        db.commit()
+
+        assert _login_as(client, "bob@example.com", "lowerpassword1").status_code == 200
+        assert _login_as(client, "Bob@example.com", "upperpassword1").status_code == 200
+        assert _login_as(client, "bob@example.com", "upperpassword1").status_code == 401

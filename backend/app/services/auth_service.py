@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -29,8 +30,28 @@ def _as_aware_utc(dt: datetime) -> datetime:
 
 
 def get_user_by_email(db: Session, email: str) -> User | None:
-    """Return the User row with the given email, or None."""
-    return db.query(User).filter(User.email == email).first()
+    """Return the User row with the given email, matched case-insensitively.
+
+    Email addresses are case-insensitive in practice, but EmailStr only
+    lowercases the domain and the login form normalizes nothing: an exact
+    match let "Alice@Example.com" register but not log in as typed, and let
+    "alice@example.com" register as a second account for the same mailbox.
+    Every human-typed lookup (login, registration's duplicate check, forgot
+    password) goes through here. An exact match wins first, so accounts are
+    unaffected and any pre-existing case-variant duplicates stay distinct.
+    """
+    email = email.strip()
+    exact = db.query(User).filter(User.email == email).first()
+    if exact is not None:
+        return exact
+    # ponytail: lower(email) is unindexed, so a miss scans users; add a
+    # functional index on lower(email) if the table grows large.
+    return (
+        db.query(User)
+        .filter(func.lower(User.email) == email.lower())
+        .order_by(User.created_at)
+        .first()
+    )
 
 
 def register_user(db: Session, user_data: UserCreate) -> User:
