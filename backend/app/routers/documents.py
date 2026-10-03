@@ -274,20 +274,36 @@ def delete_current_resume(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Response:
-    """Delete the current user's resume and all associated chunks."""
-    stmt = (
-        select(ResumeDocument)
-        .where(ResumeDocument.user_id == current_user.id)
-        .order_by(ResumeDocument.created_at.desc())
-        .limit(1)
+    """Delete the current user's resume — every stored version — its chunks,
+    and the uploaded files.
+
+    Uploading a new resume keeps the previous rows, so deleting only the
+    newest would let an older resume reappear as "current" (and keep feeding
+    recruiter scoring and analytics) while its file stayed on disk.
+    """
+    docs = (
+        db.execute(
+            select(ResumeDocument).where(ResumeDocument.user_id == current_user.id)
+        )
+        .scalars()
+        .all()
     )
-    doc = db.execute(stmt).scalar_one_or_none()
-    if doc is None:
+    if not docs:
         raise HTTPException(status_code=404, detail="No resume uploaded yet")
 
+    file_paths = [doc.file_path for doc in docs]
     db.execute(delete(DocumentChunk).where(DocumentChunk.user_id == current_user.id))
-    db.delete(doc)
+    for doc in docs:
+        db.delete(doc)
     db.commit()
+
+    # Files only after the rows are gone, so a failed commit never leaves
+    # rows pointing at deleted files. Paths are server-generated at upload.
+    for path in file_paths:
+        try:
+            Path(path).unlink(missing_ok=True)
+        except OSError:
+            logger.warning("Could not delete resume file for user %s", current_user.id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

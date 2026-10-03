@@ -2,6 +2,7 @@
 
 import io
 import uuid
+from pathlib import Path
 
 from app.config import get_settings
 
@@ -284,3 +285,106 @@ def test_generate_rag_questions_requires_auth(client, interview_session):
         json={"count": 5},
     )
     assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# DELETE /api/v1/documents/resume/current
+# ---------------------------------------------------------------------------
+
+_DELETE = "/api/v1/documents/resume/current"
+
+
+def _upload(client, headers, monkeypatch, filename, text):
+    """Upload a resume whose extracted text is `text`; returns its JSON."""
+    monkeypatch.setattr(
+        "app.routers.documents.document_extraction_service.extract_text",
+        lambda file_path, mime_type: text,
+    )
+    monkeypatch.setattr(
+        "app.routers.documents.rag_service.chunk_text", lambda text, **kw: [text]
+    )
+    monkeypatch.setattr(
+        "app.routers.documents.rag_service.store_chunks", lambda **kw: 1
+    )
+    resp = client.post(
+        "/api/v1/documents/resume/upload",
+        files={"file": (filename, _make_pdf(), "application/pdf")},
+        headers=headers,
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+def _resume_rows(db, user_id):
+    from app.models.documents import ResumeDocument
+
+    db.expire_all()
+    return (
+        db.query(ResumeDocument)
+        .filter(ResumeDocument.user_id == uuid.UUID(str(user_id)))
+        .all()
+    )
+
+
+def _bob_headers(client):
+    from tests.conftest import OTHER_USER, _login
+
+    client.post("/api/v1/auth/register", json=OTHER_USER)
+    return {"Authorization": f"Bearer {_login(client, OTHER_USER)}"}
+
+
+def test_delete_resume_removes_every_version_and_file(
+    client, auth_headers, registered_user, db, upload_dir, monkeypatch
+):
+    """Uploading a new resume keeps the old row; deleting must not let that
+    older resume reappear as "current" or keep any file on disk."""
+    _upload(client, auth_headers, monkeypatch, "old.pdf", "Old resume text.")
+    _upload(client, auth_headers, monkeypatch, "new.pdf", "New resume text.")
+    files = [r.file_path for r in _resume_rows(db, registered_user["id"])]
+    assert len(files) == 2
+    assert all(Path(f).exists() for f in files)
+
+    assert client.delete(_DELETE, headers=auth_headers).status_code == 204
+
+    assert client.get(_DELETE, headers=auth_headers).status_code == 404
+    assert _resume_rows(db, registered_user["id"]) == []
+    assert [f for f in files if Path(f).exists()] == []
+
+
+def test_delete_resume_removes_chunks_and_leaves_other_users_alone(
+    client, auth_headers, registered_user, db, upload_dir, monkeypatch
+):
+    from app.models.documents import DocumentChunk
+
+    _upload(client, auth_headers, monkeypatch, "alice.pdf", "Alice resume.")
+    bob = _bob_headers(client)
+    bob_doc = _upload(client, bob, monkeypatch, "bob.pdf", "Bob resume.")
+    bob_rows = [r for r in _resume_rows(db, bob_doc["user_id"])]
+    alice_id = uuid.UUID(registered_user["id"])
+    db.add(DocumentChunk(user_id=alice_id, source_type="resume", chunk_text="Alice"))
+    db.commit()
+
+    assert client.delete(_DELETE, headers=auth_headers).status_code == 204
+
+    assert db.query(DocumentChunk).filter_by(user_id=alice_id).count() == 0
+    assert client.get(_DELETE, headers=bob).json()["filename"] == "bob.pdf"
+    assert len(_resume_rows(db, bob_doc["user_id"])) == 1
+    assert Path(bob_rows[0].file_path).exists()
+
+
+def test_delete_resume_succeeds_when_a_file_is_already_missing(
+    client, auth_headers, registered_user, db, upload_dir, monkeypatch
+):
+    _upload(client, auth_headers, monkeypatch, "cv.pdf", "Resume text.")
+    Path(_resume_rows(db, registered_user["id"])[0].file_path).unlink()
+
+    assert client.delete(_DELETE, headers=auth_headers).status_code == 204
+    assert _resume_rows(db, registered_user["id"]) == []
+
+
+def test_delete_resume_without_one_is_404(client, auth_headers):
+    assert client.delete(_DELETE, headers=auth_headers).status_code == 404
+
+
+def test_delete_resume_requires_auth(client):
+    assert client.delete(_DELETE).status_code == 401
