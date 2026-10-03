@@ -383,6 +383,76 @@ describe('LiveInterviewPage', () => {
       expect(next).toHaveBeenCalledTimes(1);
       expect(next.mock.calls[0][1]).toEqual({ response_text: 'Edited answer.', turn_number: 1 });
     });
+
+    describe('when an earlier answer to the same question is already saved', () => {
+      // Question generation failed after the answer was saved: still on Q1.
+      const SAVED_Q1 = { ...MOCK_SESSION.turns[0], response_text: 'Saved answer.' };
+      const SAVED = { ...MOCK_SESSION, turns: [SAVED_Q1], current_question: SAVED_Q1 };
+      const DIFFERENT = new client.ApiError(
+        409,
+        'Question 1 already has a different saved answer, so this answer was not saved.',
+      );
+
+      async function submitEdit() {
+        vi.spyOn(client, 'getActiveLiveInterview').mockResolvedValue(SAVED);
+        const refresh = vi.spyOn(client, 'getLiveConversation').mockResolvedValue(SAVED);
+        const next = vi.spyOn(client, 'nextLiveQuestion').mockRejectedValueOnce(DIFFERENT);
+        renderPage();
+        await screen.findByTestId('current-question');
+        await userEvent.clear(answerBox());
+        await userEvent.type(answerBox(), 'Edited answer.');
+        await userEvent.click(screen.getByText('Next Question →'));
+        await screen.findByText(/earlier answer to this question was already saved/);
+        return { next, refresh };
+      }
+
+      it("restores the server's saved answer, not the rejected edit", async () => {
+        const { refresh } = await submitEdit();
+
+        expect(answerBox().value).toBe('Saved answer.');
+        expect(screen.getByText(/edited answer was not submitted/)).toBeTruthy();
+        expect(screen.getByTestId('current-question').textContent).toBe('Tell me about yourself.');
+        expect(refresh).toHaveBeenCalledWith('sess-1', 'test-token');
+      });
+
+      it('does not resubmit anything automatically', async () => {
+        const { next } = await submitEdit();
+        await new Promise((r) => setTimeout(r, 200));
+
+        expect(next).toHaveBeenCalledTimes(1);
+        expect(next.mock.calls[0][1]).toEqual({ response_text: 'Edited answer.', turn_number: 1 });
+      });
+
+      it('continues with the saved answer only when the candidate presses Next', async () => {
+        const { next } = await submitEdit();
+        next.mockResolvedValueOnce(ADVANCED);
+
+        await userEvent.click(screen.getByText('Next Question →'));
+
+        await waitFor(() =>
+          expect(screen.getByTestId('current-question').textContent).toBe(
+            'What would you do differently?',
+          ),
+        );
+        expect(next).toHaveBeenCalledTimes(2);
+        expect(next.mock.calls[1][1]).toEqual({ response_text: 'Saved answer.', turn_number: 1 });
+        expect(answerBox().value).toBe('');
+      });
+    });
+
+    it('shows other 409s on the same question unchanged, keeping the typed text', async () => {
+      vi.spyOn(client, 'nextLiveQuestion').mockRejectedValue(
+        new client.ApiError(409, 'All questions have been asked. Call end-interview to finish.'),
+      );
+      vi.spyOn(client, 'getLiveConversation').mockResolvedValue(MOCK_SESSION);
+      await renderAtQuestion1('My answer.');
+
+      await userEvent.click(screen.getByText('Next Question →'));
+
+      expect(await screen.findByText('All questions have been asked. Call end-interview to finish.')).toBeTruthy();
+      expect(answerBox().value).toBe('My answer.');
+      expect(screen.queryByText(/already saved/)).toBeNull();
+    });
   });
 
   describe('End Interview after a lost response', () => {

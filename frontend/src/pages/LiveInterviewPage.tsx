@@ -164,12 +164,13 @@ export function LiveInterviewPage() {
   const handleNext = async () => {
     if (!token || !session || !currentQuestion) return;
     const turnNumber = currentQuestion.turn_number;
+    const submitted = responseText;
     setLoading(true);
     setError(null);
     try {
       const updated = await nextLiveQuestion(
         session.id,
-        { response_text: responseText || undefined, turn_number: turnNumber },
+        { response_text: submitted || undefined, turn_number: turnNumber },
         token,
       );
       setSession(updated);
@@ -185,18 +186,26 @@ export function LiveInterviewPage() {
         // attempt succeeded but its response was lost). Show the real
         // state, and keep the unsent text in the box — never resubmit it.
         let moved = false;
+        let saved: string | null = null;
         try {
           const fresh = await getLiveConversation(session.id, token);
           setSession(fresh);
           moved = fresh.current_question?.turn_number !== turnNumber;
+          saved = fresh.current_question?.response_text ?? null;
         } catch {
           // Keep the current view; the error below still explains.
         }
-        setError(
-          moved
-            ? `${err.message} The interview has moved on to the question shown; your text below was not submitted, so review it before answering.`
-            : err.message,
-        );
+        if (moved) {
+          setError(`${err.message} The interview has moved on to the question shown; your text below was not submitted, so review it before answering.`);
+        } else if (saved != null && saved !== submitted) {
+          // Same question, but an earlier answer is already saved (e.g.
+          // question generation failed after saving it): it stands. Show it
+          // instead of the rejected edit; Next then retries with it.
+          setResponseText(saved);
+          setError('Your earlier answer to this question was already saved, so your edited answer was not submitted. The saved answer is restored below; press Next to continue with it.');
+        } else {
+          setError(err.message);
+        }
       }
     } finally {
       setLoading(false);
