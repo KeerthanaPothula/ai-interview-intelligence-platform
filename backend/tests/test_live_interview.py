@@ -1046,16 +1046,17 @@ def test_retry_after_the_final_question_was_created_still_replays(
     assert len(_turns(db, sid)) == 3
 
 
-def _race(client, auth_headers, sid, monkeypatch, **body):
-    """Run a second, identical request to completion while the first is
-    mid-flight — after it saved/scored the answer, before it inserts the
-    next turn: the window in which both used to insert the same turn."""
+def _race(client, auth_headers, sid, monkeypatch, racer=None, **body):
+    """Run a second request (identical unless `racer` gives its body) to
+    completion while the first is mid-flight — after it saved/scored the
+    answer, before it inserts the next turn: the window in which both used
+    to insert the same turn."""
     racing = []
 
     def _follow_up(**kwargs):
         if not racing:
             racing.append(None)  # before the call: the racer must not race too
-            racing[0] = _next(client, auth_headers, sid, **body)
+            racing[0] = _next(client, auth_headers, sid, **(racer or body))
         return f"Question {kwargs['current_turn'] + 1}?", 2
 
     monkeypatch.setattr(
@@ -1078,8 +1079,123 @@ def test_concurrent_submissions_for_the_same_turn_create_one_next_turn(
     assert b.status_code == 200, b.text
     assert a.json()["current_question"]["id"] == b.json()["current_question"]["id"]
     assert [t.turn_number for t in _turns(db, sid)] == [1, 2]
+    assert _turns(db, sid)[0].response_text == "Same."
     assert live_mocks == ["Same."]
     assert _score_count(db) == 1
+
+
+def _race_before_claim(client, auth_headers, sid, racer, **body):
+    """Both requests read turn 1 as unanswered: the racer runs to completion
+    just as the first is about to execute its answer-claiming UPDATE."""
+    from sqlalchemy import event
+
+    from tests.conftest import TEST_ENGINE
+
+    racing = []
+
+    def _hook(conn, cursor, statement, params, context, executemany):
+        if not racing and statement.lstrip().upper().startswith(
+            "UPDATE CONVERSATION_TURNS"
+        ):
+            racing.append(None)
+            racing[0] = _next(client, auth_headers, sid, **racer)
+
+    event.listen(TEST_ENGINE, "before_cursor_execute", _hook)
+    try:
+        first = _next(client, auth_headers, sid, **body)
+    finally:
+        event.remove(TEST_ENGINE, "before_cursor_execute", _hook)
+    return first, racing[0]
+
+
+def _assert_only_accepted_answer_kept(db, sid, live_mocks, accepted, rejected):
+    """Exactly one winner; its answer is the one persisted and scored."""
+    assert accepted.status_code == 200, accepted.text
+    assert rejected.status_code == 409, rejected.text
+    assert "already has a different saved answer" in rejected.json()["detail"]
+    turns = _turns(db, sid)
+    assert [t.turn_number for t in turns] == [1, 2]
+    winner = accepted.json()["turns"][0]["response_text"]
+    assert turns[0].response_text == winner
+    assert live_mocks == [winner]  # the rejected answer was never scored
+    assert _score_count(db) == 1
+
+
+def test_concurrent_different_answer_after_the_first_was_saved_gets_409(
+    client, auth_headers, db, live_mocks, monkeypatch
+):
+    sid = _start(client, auth_headers)
+    a, b = _race(
+        client,
+        auth_headers,
+        sid,
+        monkeypatch,
+        racer={"response_text": "Second.", "turn_number": 1},
+        response_text="First.",
+        turn_number=1,
+    )
+    _assert_only_accepted_answer_kept(db, sid, live_mocks, accepted=a, rejected=b)
+    assert _turns(db, sid)[0].response_text == "First."
+
+
+def test_concurrent_different_answers_both_unanswered_first_claim_wins(
+    client, auth_headers, db, live_mocks
+):
+    """The racer claims the turn first, so the original request — which had
+    also read the turn as unanswered — must not overwrite it."""
+    sid = _start(client, auth_headers)
+    a, b = _race_before_claim(
+        client,
+        auth_headers,
+        sid,
+        racer={"response_text": "Second.", "turn_number": 1},
+        response_text="First.",
+        turn_number=1,
+    )
+    _assert_only_accepted_answer_kept(db, sid, live_mocks, accepted=b, rejected=a)
+    assert _turns(db, sid)[0].response_text == "Second."
+
+
+def test_concurrent_same_answer_both_unanswered_is_one_answer(
+    client, auth_headers, db, live_mocks
+):
+    sid = _start(client, auth_headers)
+    a, b = _race_before_claim(
+        client,
+        auth_headers,
+        sid,
+        racer={"response_text": "Same.", "turn_number": 1},
+        response_text="Same.",
+        turn_number=1,
+    )
+    assert (a.status_code, b.status_code) == (200, 200), (a.text, b.text)
+    assert [t.response_text for t in _turns(db, sid)] == ["Same.", None]
+    assert live_mocks == ["Same."]
+    assert _score_count(db) == 1
+
+
+def test_different_answer_for_the_still_current_turn_gets_409(
+    client, auth_headers, db, live_mocks, monkeypatch
+):
+    """After the answer is saved but question generation failed, the turn is
+    still current: an edited answer is rejected, the saved one kept."""
+    sid = _start(client, auth_headers)
+
+    def _boom(**kwargs):
+        raise RuntimeError("Gemini down")
+
+    monkeypatch.setattr(
+        "app.services.interview_conversation_service.generate_follow_up_question",
+        _boom,
+    )
+    with pytest.raises(RuntimeError):
+        _next(client, auth_headers, sid, response_text="Saved.", turn_number=1)
+
+    resp = _next(client, auth_headers, sid, response_text="Edited.", turn_number=1)
+
+    assert resp.status_code == 409, resp.text
+    assert [t.response_text for t in _turns(db, sid)] == ["Saved."]
+    assert live_mocks == ["Saved."]
 
 
 def test_concurrent_submissions_without_turn_number_are_also_safe(

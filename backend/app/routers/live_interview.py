@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
@@ -108,15 +108,24 @@ def _replay_answered_turn(
             status_code=409,
             detail=f"Question {turn_number} is not the current question.",
         )
+    _reject_different_answer(turn, body)
+    return get_conversation(session.id, db, current_user)
+
+
+def _reject_different_answer(turn: ConversationTurn, body: NextQuestionRequest) -> None:
+    """409 if body carries an answer other than the one saved on turn.
+
+    The first saved answer is authoritative: a request repeating it (or
+    sending none) is a retry, anything else must not replace it.
+    """
     if (body.response_text and body.response_text != turn.response_text) or (
         body.audio_response_id and body.audio_response_id != turn.audio_response_id
     ):
         raise HTTPException(
             status_code=409,
-            detail=f"Question {turn_number} already has a different saved "
+            detail=f"Question {turn.turn_number} already has a different saved "
             "answer, so this answer was not saved.",
         )
-    return get_conversation(session.id, db, current_user)
 
 
 @router.post(
@@ -217,19 +226,34 @@ def next_question(
 
     if current_turns and (body.response_text or body.audio_response_id):
         last_turn = current_turns[-1]
-        if body.response_text:
-            last_turn.response_text = body.response_text
-        if body.audio_response_id:
-            last_turn.audio_response_id = _owned_audio_response_id_or_404(
-                db, body.audio_response_id, current_user.id
-            )
+        audio_id = (
+            _owned_audio_response_id_or_404(db, body.audio_response_id, current_user.id)
+            if body.audio_response_id
+            else None
+        )
 
-        # Committed now, before the best-effort scoring attempt below —
-        # autoflush is off for this Session, so an uncommitted
-        # response_text is only a pending in-memory change. If scoring
-        # then fails and we roll back, that rollback must discard only the
-        # failed scoring attempt, never the candidate's answer.
+        # First accepted answer wins: one conditional UPDATE claims the turn
+        # only while it is still unanswered, so of two concurrent requests
+        # exactly one writes (the other's UPDATE waits on the row lock, then
+        # matches nothing). Everyone then re-reads what was persisted: the
+        # same answer carries on as a retry (which still lets a retry after
+        # failed question generation advance), a different one gets 409.
+        #
+        # Committed now, before the best-effort scoring attempt below, so a
+        # scoring failure's rollback can never discard the saved answer.
+        db.execute(
+            update(ConversationTurn)
+            .where(
+                ConversationTurn.id == last_turn.id,
+                ConversationTurn.response_text.is_(None),
+                ConversationTurn.audio_response_id.is_(None),
+            )
+            .values(response_text=body.response_text, audio_response_id=audio_id)
+            .execution_options(synchronize_session=False)
+        )
         db.commit()
+        db.refresh(last_turn)
+        _reject_different_answer(last_turn, body)
 
         # Score the answer just submitted so Readiness Assessment and
         # Coaching Plan have genuine per-turn data to average later (see
