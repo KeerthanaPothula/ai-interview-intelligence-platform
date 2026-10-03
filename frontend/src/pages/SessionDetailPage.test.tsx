@@ -14,6 +14,7 @@ vi.mock('../context/AuthContext', async (importOriginal) => {
 function mockSession(status: SessionStatus) {
   vi.spyOn(client, 'getSession').mockResolvedValue({
     id: 'sess-1',
+    user_id: 'user-1',
     title: 'Live Interview – Engineer',
     job_role: 'Engineer',
     job_description: 'A Python backend engineering role.',

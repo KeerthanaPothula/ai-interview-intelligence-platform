@@ -18,7 +18,12 @@ from app.models.features import SessionReport, VoiceAnalysis
 from app.models.interview import Question
 from app.models.user import User
 from app.schemas.features import SessionReportResponse
-from app.services import analytics_service, interview_service, report_service
+from app.services import (
+    analytics_service,
+    interview_service,
+    recruiter_service,
+    report_service,
+)
 
 router = APIRouter(prefix=f"{API_V1_PREFIX}/interviews", tags=["Reports"])
 
@@ -176,8 +181,13 @@ def get_report(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> SessionReportResponse:
-    """Retrieve the existing session report (404 if not yet generated)."""
-    interview_service.get_session_or_404(db, session_id, current_user.id)
+    """Retrieve the existing session report (404 if not yet generated).
+
+    Readable by the session's owner, or by a Recruiter/Admin/Super Admin
+    for a candidate inside their organization scope — see
+    recruiter_service.get_viewable_session_or_404.
+    """
+    recruiter_service.get_viewable_session_or_404(db, session_id, current_user)
 
     report = (
         db.query(SessionReport).filter(SessionReport.session_id == session_id).first()

@@ -34,6 +34,8 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.exceptions import ResourceNotFound
+from app.core.permissions import CANDIDATE_VIEWER_ROLES
 from app.models.documents import ResumeDocument
 from app.models.features import SessionReport
 from app.models.interview import (
@@ -44,6 +46,7 @@ from app.models.interview import (
 )
 from app.models.role import Role
 from app.models.user import User
+from app.services import interview_service
 from app.services.resume_scoring import estimate_ats_score
 
 VALID_SORT_KEYS = {
@@ -276,6 +279,57 @@ def list_candidates(
     return page, total, summary
 
 
+def _visible_candidate_session(
+    db: Session, session_id: uuid.UUID, current_user: User
+) -> InterviewSession | None:
+    """The session if it is a completed, reported candidate session inside
+    current_user's organization scope (the same rows the pipeline lists),
+    else None. Callers gate the role; this only applies the tenant scope."""
+    row = db.execute(
+        select(InterviewSession, User)
+        .join(SessionReport, SessionReport.session_id == InterviewSession.id)
+        .join(User, User.id == InterviewSession.user_id)
+        .where(
+            InterviewSession.id == session_id,
+            InterviewSession.status == SESSION_STATUS_COMPLETED,
+        )
+    ).first()
+    if row is None:
+        return None
+    session, candidate_user = row
+    org_scope = scope_organization_id(current_user)
+    if not has_candidate_access(current_user) or (
+        org_scope is not None and candidate_user.organization_id != org_scope
+    ):
+        return None
+    return session
+
+
+def get_viewable_session_or_404(
+    db: Session, session_id: uuid.UUID, current_user: User
+) -> InterviewSession:
+    """Read access for a session's report: its owner, or a candidate viewer.
+
+    The owner path is interview_service.get_session_or_404, unchanged — so
+    a Candidate keeps exactly owner-only access. Only if that 404s does a
+    caller holding a can_view_candidates role (Recruiter/Admin/Super Admin)
+    get the recruiter-pipeline check: completed + reported, and inside their
+    organization scope. Every failure re-raises the owner lookup's own 404,
+    so "another organization's session" and "no such session" look the same.
+
+    Read-only callers only: never use this to authorize writes.
+    """
+    try:
+        return interview_service.get_session_or_404(db, session_id, current_user.id)
+    except ResourceNotFound:
+        if current_user.role not in {r.value for r in CANDIDATE_VIEWER_ROLES}:
+            raise
+        session = _visible_candidate_session(db, session_id, current_user)
+        if session is None:
+            raise
+        return session
+
+
 def update_candidate_status(
     db: Session,
     *,
@@ -300,25 +354,10 @@ def update_candidate_status(
             detail=f"Invalid status. Must be one of: {', '.join(sorted(VALID_RECRUITER_STATUSES))}.",
         )
 
-    row = db.execute(
-        select(InterviewSession, User)
-        .join(SessionReport, SessionReport.session_id == InterviewSession.id)
-        .join(User, User.id == InterviewSession.user_id)
-        .where(
-            InterviewSession.id == session_id,
-            InterviewSession.status == SESSION_STATUS_COMPLETED,
-        )
-    ).first()
-
-    if row is None:
+    session = _visible_candidate_session(db, session_id, current_user)
+    if session is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Candidate not found.")
-
-    session, candidate_user = row
     org_scope = scope_organization_id(current_user)
-    if not has_candidate_access(current_user) or (
-        org_scope is not None and candidate_user.organization_id != org_scope
-    ):
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Candidate not found.")
 
     session.recruiter_status = new_status
     db.commit()

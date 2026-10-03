@@ -167,6 +167,10 @@ class SessionDetailResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID = Field(description="Unique session identifier.")
+    user_id: uuid.UUID = Field(
+        description="Owner of the session. Lets a client tell its own session "
+        "from a candidate's it is only viewing (recruiter report access)."
+    )
     title: str = Field(description="Session title.")
     job_role: str = Field(description="Role being interviewed for.")
     job_description: str = Field(

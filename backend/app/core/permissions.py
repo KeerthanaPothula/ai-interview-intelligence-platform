@@ -60,12 +60,16 @@ def can_generate_questions() -> Callable[..., User]:
 # ---------------------------------------------------------------------------
 
 
+CANDIDATE_VIEWER_ROLES = (Role.RECRUITER, Role.ADMIN, Role.SUPER_ADMIN)
+
+
 def can_view_candidates() -> Callable[..., User]:
     """View the candidate pipeline. Admin/Super Admin can view every
     organization's candidates (see recruiter_service's org-scoping —
     unscoped for these two roles); a Recruiter sees only their own
-    organization's."""
-    return require_any_role(Role.RECRUITER, Role.ADMIN, Role.SUPER_ADMIN)
+    organization's. Also what lets these roles read a pipeline
+    candidate's report — see recruiter_service.get_viewable_session_or_404."""
+    return require_any_role(*CANDIDATE_VIEWER_ROLES)
 
 
 def can_shortlist() -> Callable[..., User]:

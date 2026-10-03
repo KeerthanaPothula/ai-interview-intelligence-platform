@@ -168,7 +168,7 @@ function FadeUp({ delay = 0, children }: { delay?: number; children: React.React
 
 export function InterviewReportPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const { showToast } = useToast();
 
   const [session, setSession] = useState<SessionDetailResponse | null>(null);
@@ -270,6 +270,9 @@ export function InterviewReportPage() {
   const strengths = parseList(report?.strengths);
   const weaknesses = parseList(report?.weaknesses);
   const improvementPlan = parseList(report?.improvement_plan);
+  // A recruiter/admin viewing a candidate's report gets it read-only:
+  // generating, readiness and coaching stay owner-only on the backend.
+  const isOwner = session != null && session.user_id === user?.id;
 
   const scoreColors: Record<string, string> = {
     Overall: 'var(--primary)',
@@ -285,7 +288,7 @@ export function InterviewReportPage() {
       <FadeUp delay={0}>
         <div style={{ marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
           <div>
-            <BackLink sessionId={sessionId} />
+            <BackLink sessionId={sessionId} toPipeline={!isOwner} />
             <h1 style={{ margin: '0.75rem 0 0.2rem', fontSize: '1.4rem' }}>
               {session?.title ?? 'Interview Report'}
             </h1>
@@ -321,16 +324,18 @@ export function InterviewReportPage() {
                 <TrendingUp size={16} style={{ color: 'var(--primary)' }} aria-hidden="true" />
                 <h2 className="card-header-title">Performance Scores</h2>
               </div>
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm no-print"
-                onClick={handleGenerateReport}
-                disabled={generatingReport}
-                aria-label="Regenerate report"
-              >
-                <RefreshCw size={13} aria-hidden="true" />
-                {generatingReport ? 'Regenerating…' : 'Regenerate'}
-              </button>
+              {isOwner && (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm no-print"
+                  onClick={handleGenerateReport}
+                  disabled={generatingReport}
+                  aria-label="Regenerate report"
+                >
+                  <RefreshCw size={13} aria-hidden="true" />
+                  {generatingReport ? 'Regenerating…' : 'Regenerate'}
+                </button>
+              )}
             </div>
             <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', justifyContent: 'center' }}>
               <ScoreCircle label="Overall" value={report.final_score} color={scoreColors.Overall} />
@@ -347,10 +352,16 @@ export function InterviewReportPage() {
         ) : (
           <div className="section-panel" style={{ marginBottom: '1.25rem', textAlign: 'center', padding: '2.5rem' }}>
             <BookOpen size={32} style={{ color: 'var(--muted)', marginBottom: '0.75rem' }} aria-hidden="true" />
-            <p style={{ margin: '0 0 1rem', color: 'var(--muted)' }}>No report yet. Generate a comprehensive AI report for this session.</p>
-            <button type="button" className="btn btn-primary no-print" onClick={handleGenerateReport} disabled={generatingReport}>
-              {generatingReport ? 'Generating…' : 'Generate Report'}
-            </button>
+            {isOwner ? (
+              <>
+                <p style={{ margin: '0 0 1rem', color: 'var(--muted)' }}>No report yet. Generate a comprehensive AI report for this session.</p>
+                <button type="button" className="btn btn-primary no-print" onClick={handleGenerateReport} disabled={generatingReport}>
+                  {generatingReport ? 'Generating…' : 'Generate Report'}
+                </button>
+              </>
+            ) : (
+              <p style={{ margin: 0, color: 'var(--muted)' }}>No report is available for this session.</p>
+            )}
           </div>
         )}
       </FadeUp>
@@ -417,6 +428,7 @@ export function InterviewReportPage() {
         </FadeUp>
       )}
 
+      {isOwner && (<>
       {/* Readiness */}
       <FadeUp delay={0.34}>
         <div style={{ marginBottom: '1.25rem' }}>
@@ -481,18 +493,19 @@ export function InterviewReportPage() {
           </div>
         )}
       </FadeUp>
+      </>)}
     </div>
   );
 }
 
-function BackLink({ sessionId }: { sessionId: string | undefined }) {
+function BackLink({ sessionId, toPipeline = false }: { sessionId: string | undefined; toPipeline?: boolean }) {
   return (
     <Link
-      to={sessionId ? `/sessions/${sessionId}` : '/sessions'}
+      to={toPipeline ? '/recruiter' : sessionId ? `/sessions/${sessionId}` : '/sessions'}
       style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.85rem', color: 'var(--muted)', textDecoration: 'none' }}
     >
       <ArrowLeft size={14} aria-hidden="true" />
-      Back to session
+      {toPipeline ? 'Back to candidates' : 'Back to session'}
     </Link>
   );
 }

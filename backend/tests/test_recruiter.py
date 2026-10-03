@@ -5,6 +5,13 @@ from datetime import datetime, timezone
 
 from app.models.features import SessionReport
 from app.models.interview import SESSION_STATUS_COMPLETED, InterviewSession
+from app.models.user import User
+from tests.conftest import (
+    ORG_CANDIDATE_USER,
+    OTHER_USER,
+    _login,
+    _register_with_role,
+)
 
 
 def _make_completed_session(
@@ -363,3 +370,154 @@ def test_update_candidate_status_requires_recruiter_or_admin(
         headers=auth_headers,
     )
     assert response.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# "Open report": GET /interviews/{id} and GET /interviews/{id}/report
+# ---------------------------------------------------------------------------
+
+
+def _org_report_session(db, org_candidate):
+    return _make_completed_session(
+        db,
+        uuid.UUID(org_candidate["id"]),
+        job_role="Backend Engineer",
+        final_score=8.0,
+        communication=8.0,
+        technical=7.0,
+    )
+
+
+def _open_report(client, session_id, headers):
+    """The two reads the report page needs: session header + report."""
+    return (
+        client.get(f"/api/v1/interviews/{session_id}", headers=headers),
+        client.get(f"/api/v1/interviews/{session_id}/report", headers=headers),
+    )
+
+
+def _assert_hidden(client, session_id, headers):
+    """404 with exactly the body a nonexistent session gets — nothing leaks."""
+    for resp, missing in zip(
+        _open_report(client, session_id, headers),
+        _open_report(client, uuid.uuid4(), headers),
+    ):
+        assert resp.status_code == 404, resp.text
+        assert resp.json() == missing.json()
+
+
+def test_recruiter_opens_report_for_same_org_candidate(
+    client, db, org_candidate, recruiter_headers
+):
+    session = _org_report_session(db, org_candidate)
+
+    detail, report = _open_report(client, session.id, recruiter_headers)
+
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["user_id"] == org_candidate["id"]
+    assert report.status_code == 200, report.text
+    assert report.json()["session_id"] == str(session.id)
+    assert float(report.json()["final_score"]) == 8.0
+
+
+def test_recruiter_cannot_open_another_organizations_report(
+    client, db, org_candidate, other_org_recruiter_headers
+):
+    session = _org_report_session(db, org_candidate)
+    _assert_hidden(client, session.id, other_org_recruiter_headers)
+
+
+def test_recruiter_cannot_open_unaffiliated_candidates_report(
+    client, db, registered_user, recruiter_headers
+):
+    session = _make_completed_session(
+        db,
+        uuid.UUID(registered_user["id"]),
+        job_role="Backend Engineer",
+        final_score=8.0,
+        communication=8.0,
+        technical=8.0,
+    )
+    _assert_hidden(client, session.id, recruiter_headers)
+
+
+def test_recruiter_cannot_open_a_session_outside_the_pipeline(
+    client, db, org_candidate, recruiter_headers
+):
+    """Same org, but never completed + reported: not a pipeline candidate."""
+    draft = InterviewSession(
+        user_id=uuid.UUID(org_candidate["id"]),
+        title="Draft",
+        job_role="Backend Engineer",
+        job_description="A role description long enough to pass validation checks.",
+    )
+    db.add(draft)
+    db.commit()
+    _assert_hidden(client, draft.id, recruiter_headers)
+
+
+def test_recruiter_without_an_organization_cannot_open_reports(
+    client, db, org_candidate, recruiter_user, recruiter_headers
+):
+    session = _org_report_session(db, org_candidate)
+    user = db.get(User, uuid.UUID(recruiter_user["id"]))
+    user.organization_id = None
+    db.commit()
+    _assert_hidden(client, session.id, recruiter_headers)
+
+
+def test_candidate_keeps_owner_only_access(
+    client, db, org_candidate, organization, auth_headers
+):
+    session = _org_report_session(db, org_candidate)
+
+    own_headers = {"Authorization": f"Bearer {_login(client, ORG_CANDIDATE_USER)}"}
+    detail, report = _open_report(client, session.id, own_headers)
+    assert (detail.status_code, report.status_code) == (200, 200)
+
+    # Another candidate, even in the same organization, gets the owner 404.
+    _register_with_role(client, db, OTHER_USER, organization_id=organization.id)
+    mate_headers = {"Authorization": f"Bearer {_login(client, OTHER_USER)}"}
+    _assert_hidden(client, session.id, mate_headers)
+    _assert_hidden(client, session.id, auth_headers)
+
+
+def test_open_report_requires_authentication(client, db, org_candidate):
+    session = _org_report_session(db, org_candidate)
+    for resp in _open_report(client, session.id, {}):
+        assert resp.status_code == 401
+
+
+def test_admin_and_super_admin_open_reports_across_organizations(
+    client, db, org_candidate, admin_headers, super_admin_headers
+):
+    """Same platform-wide scope they already have on the candidate list."""
+    session = _org_report_session(db, org_candidate)
+    for headers in (admin_headers, super_admin_headers):
+        detail, report = _open_report(client, session.id, headers)
+        assert (detail.status_code, report.status_code) == (200, 200)
+
+
+def test_recruiter_access_is_read_only(client, db, org_candidate, recruiter_headers):
+    """Direct API: generating/regenerating and the candidate's readiness and
+    coaching stay owner-only — the recruiter gets the owner lookup's 404."""
+    session = _org_report_session(db, org_candidate)
+
+    assert (
+        client.post(
+            f"/api/v1/interviews/{session.id}/report/generate",
+            headers=recruiter_headers,
+        ).status_code
+        == 404
+    )
+    for path in ("readiness", "coaching-plan"):
+        resp = client.get(
+            f"/api/v1/interviews/{session.id}/{path}", headers=recruiter_headers
+        )
+        assert resp.status_code == 404, (path, resp.text)
+    resp = client.patch(
+        f"/api/v1/interviews/{session.id}",
+        json={"title": "Renamed"},
+        headers=recruiter_headers,
+    )
+    assert resp.status_code == 404

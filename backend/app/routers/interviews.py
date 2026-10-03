@@ -19,7 +19,7 @@ from app.schemas.interview import (
     SessionListResponse,
     SessionUpdate,
 )
-from app.services import interview_service, question_service
+from app.services import interview_service, question_service, recruiter_service
 
 router = APIRouter(
     prefix=f"{API_V1_PREFIX}/interviews",
@@ -95,9 +95,14 @@ def get_session(
     Authentication: Bearer token required.
     Ownership: returns HTTP 404 if the session does not exist or belongs to
     another user. HTTP 403 is never returned — ownership mismatch is
-    indistinguishable from non-existence to the caller.
+    indistinguishable from non-existence to the caller. Recruiter/Admin/
+    Super Admin may also read a pipeline candidate's session inside their
+    organization scope (it heads the "Open report" page) — see
+    recruiter_service.get_viewable_session_or_404.
     """
-    session = interview_service.get_session_or_404(db, session_id, current_user.id)
+    session = recruiter_service.get_viewable_session_or_404(
+        db, session_id, current_user
+    )
     response_count = len(session.audio_responses)
     return SessionDetailResponse.model_validate(session).model_copy(
         update={"response_count": response_count}

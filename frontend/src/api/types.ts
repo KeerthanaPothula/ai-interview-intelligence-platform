@@ -115,6 +115,7 @@ export interface SessionListResponse {
 
 export interface SessionDetailResponse {
   id: string;
+  user_id: string;
   title: string;
   job_role: string;
   job_description: string;
