@@ -127,9 +127,7 @@ def test_get_report_not_generated(client, auth_headers, interview_session):
     assert resp.status_code == 404
 
 
-def test_get_report_after_generate(
-    client, auth_headers, answered_session, monkeypatch
-):
+def test_get_report_after_generate(client, auth_headers, answered_session, monkeypatch):
     """GET /report returns the previously generated report."""
     monkeypatch.setattr(
         "app.services.report_service.generate_session_report",
@@ -412,7 +410,12 @@ def test_upload_flow_report_scores_unchanged(
 
 
 def test_upload_flow_report_generation_unchanged(
-    client, auth_headers, interview_session, interview_question, audio_response, db,
+    client,
+    auth_headers,
+    interview_session,
+    interview_question,
+    audio_response,
+    db,
     monkeypatch,
 ):
     """Regression check: a normal (non-live) session with a real Question +

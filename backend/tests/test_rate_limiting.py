@@ -98,7 +98,11 @@ def proxy_hops(monkeypatch):
 
 
 def _register_payload(email: str) -> dict:
-    return {"email": email, "password": "securepassword1", "full_name": "Rate Limit Test"}
+    return {
+        "email": email,
+        "password": "securepassword1",
+        "full_name": "Rate Limit Test",
+    }
 
 
 def test_register_allows_requests_within_limit(client, monkeypatch):
@@ -156,7 +160,9 @@ def test_register_within_limit_still_works_normally(client, monkeypatch):
     get_settings.cache_clear()
 
 
-def test_register_rate_limit_is_independent_of_login(client, registered_user, monkeypatch):
+def test_register_rate_limit_is_independent_of_login(
+    client, registered_user, monkeypatch
+):
     """Registration and login share the same limiter mechanism but are
     keyed separately by request.url.path — exhausting one endpoint's
     budget must not affect the other's."""

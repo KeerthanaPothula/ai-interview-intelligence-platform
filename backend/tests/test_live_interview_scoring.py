@@ -709,7 +709,9 @@ def test_end_interview_readiness_and_coaching_include_final_answer(
     assert captured["overall_score"] == pytest.approx((7.5 + 7.5 + 9.5) / 3)
 
 
-def test_end_interview_without_final_answer_still_works(client, auth_headers, monkeypatch):
+def test_end_interview_without_final_answer_still_works(
+    client, auth_headers, monkeypatch
+):
     """No body at all (the pre-fix frontend, or simply nothing left to
     answer) must keep working exactly as before."""
     monkeypatch.setattr(

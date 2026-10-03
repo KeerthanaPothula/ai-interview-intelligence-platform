@@ -29,9 +29,7 @@ from app.services import (
 router = APIRouter(prefix=f"{API_V1_PREFIX}/interviews", tags=["Reports"])
 
 
-def _collect_live_interview_qa(
-    db: Session, live_session_id: uuid.UUID
-) -> list[dict]:
+def _collect_live_interview_qa(db: Session, live_session_id: uuid.UUID) -> list[dict]:
     """Build questions_and_transcripts from a live interview's ConversationTurns.
 
     Live interviews have no AudioResponse/Transcript/InterviewAnalysis rows —
@@ -130,7 +128,9 @@ def generate_report(
         # Collect all analyses for this session.
         analyses_rows = (
             db.query(InterviewAnalysis)
-            .join(AudioResponse, InterviewAnalysis.audio_response_id == AudioResponse.id)
+            .join(
+                AudioResponse, InterviewAnalysis.audio_response_id == AudioResponse.id
+            )
             .filter(AudioResponse.session_id == session_id)
             .all()
         )

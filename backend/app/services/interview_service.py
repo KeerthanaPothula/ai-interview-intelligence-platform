@@ -281,9 +281,7 @@ def score_and_store_conversation_turn(
         overall_score=Decimal(str(evaluation_result["overall_score"])),
         communication_score=Decimal(str(evaluation_result["communication_score"])),
         technical_score=Decimal(str(evaluation_result["technical_score"])),
-        problem_solving_score=Decimal(
-            str(evaluation_result["problem_solving_score"])
-        ),
+        problem_solving_score=Decimal(str(evaluation_result["problem_solving_score"])),
         confidence_score=Decimal(str(evaluation_result["confidence_score"])),
         strengths=evaluation_result["strengths"],
         weaknesses=evaluation_result["weaknesses"],

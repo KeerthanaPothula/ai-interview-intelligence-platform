@@ -7,7 +7,11 @@ import sqlalchemy.exc
 
 from app.models.analysis import RESPONSE_STATUS_UPLOADED, AudioResponse
 from app.models.conversation import LiveInterviewSession
-from app.models.interview import QUESTION_SOURCE_AI_GENERATED, InterviewSession, Question
+from app.models.interview import (
+    QUESTION_SOURCE_AI_GENERATED,
+    InterviewSession,
+    Question,
+)
 from app.services import interview_service
 
 _FIRST_Q = "Tell me about your most challenging project."
@@ -372,22 +376,20 @@ def test_end_interview_creates_exactly_one_mirrored_interview_session(
     assert m.title == "Live Interview – Backend Engineer"
 
 
-def test_mirrored_session_appears_in_sessions_list(
-    client, auth_headers, monkeypatch
-):
+def test_mirrored_session_appears_in_sessions_list(client, auth_headers, monkeypatch):
     _start_and_end_live_interview(client, auth_headers, monkeypatch)
 
     resp = client.get("/api/v1/interviews/", headers=auth_headers)
     assert resp.status_code == 200
     titles = [s["title"] for s in resp.json()]
     assert "Live Interview – Backend Engineer" in titles
-    matching = [s for s in resp.json() if s["title"] == "Live Interview – Backend Engineer"]
+    matching = [
+        s for s in resp.json() if s["title"] == "Live Interview – Backend Engineer"
+    ]
     assert matching[0]["status"] == "completed"
 
 
-def test_repeated_mirroring_is_idempotent(
-    client, auth_headers, db, monkeypatch
-):
+def test_repeated_mirroring_is_idempotent(client, auth_headers, db, monkeypatch):
     """Simulates a backfill script re-processing an already-mirrored session."""
     live_session_id = _start_and_end_live_interview(client, auth_headers, monkeypatch)
     live_session = (

@@ -231,7 +231,9 @@ def test_expected_unique_constraints_exist(migrated):
     inspector = sa.inspect(engine)
     for table, expected in EXPECTED_UNIQUE_CONSTRAINTS.items():
         names = {c["name"] for c in inspector.get_unique_constraints(table)}
-        assert expected <= names, f"{table}: missing unique constraint {expected - names}"
+        assert (
+            expected <= names
+        ), f"{table}: missing unique constraint {expected - names}"
 
 
 def test_live_session_id_unique_constraint_is_enforced_by_postgresql(migrated):
@@ -263,9 +265,15 @@ def test_live_session_id_unique_constraint_is_enforced_by_postgresql(migrated):
                 "VALUES (:id, :user_id, 'Live Interview', 'Engineer', 'A role.', "
                 "'completed', :live_session_id)"
             ),
-            {"id": uuid.uuid4(), "user_id": user_id, "live_session_id": live_session_id},
+            {
+                "id": uuid.uuid4(),
+                "user_id": user_id,
+                "live_session_id": live_session_id,
+            },
         )
-    with pytest.raises(sa.exc.IntegrityError, match="uq_interview_sessions_live_session_id"):
+    with pytest.raises(
+        sa.exc.IntegrityError, match="uq_interview_sessions_live_session_id"
+    ):
         with engine.begin() as conn:
             conn.execute(
                 sa.text(

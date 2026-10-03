@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useState } from 'react';
+import { type FormEvent, useState } from 'react';
 import { Bell, Globe, KeyRound, Shield, Sun, User } from 'lucide-react';
 import { ApiError, changePassword, logoutAllSessions, updateProfile } from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -41,14 +41,16 @@ export function ProfilePage() {
   // Profile form state — seeded from the AuthContext user once it loads,
   // then edited locally. `user` only ever changes on mount and right after
   // our own save (via refreshUser), so this never clobbers an in-progress
-  // edit with a background refetch.
-  const [fullName, setFullName] = useState('');
+  // edit with a background refetch. Re-seeded during render when `user`
+  // changes (React's "adjust state on prop change" pattern), not in an effect.
+  const [fullName, setFullName] = useState(user?.full_name ?? '');
+  const [seededFrom, setSeededFrom] = useState(user);
+  if (user !== seededFrom) {
+    setSeededFrom(user);
+    if (user) setFullName(user.full_name);
+  }
   const [profileError, setProfileError] = useState<string | null>(null);
   const [profileSaving, setProfileSaving] = useState(false);
-
-  useEffect(() => {
-    if (user) setFullName(user.full_name);
-  }, [user]);
 
   async function handleSaveProfile(e: FormEvent) {
     e.preventDefault();

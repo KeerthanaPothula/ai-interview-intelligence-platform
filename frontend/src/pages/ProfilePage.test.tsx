@@ -1,9 +1,10 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { ProfilePage } from './ProfilePage';
 import { ToastProvider } from '../context/ToastContext';
 import * as client from '../api/client';
+import * as auth from '../context/AuthContext';
 
 const mockLogout = vi.fn();
 const mockRefreshUser = vi.fn().mockResolvedValue(undefined);
@@ -72,6 +73,35 @@ describe('ProfilePage', () => {
   });
 
   describe('Account tab', () => {
+    it('seeds the name once the user loads and re-seeds when it changes', async () => {
+      const useAuth = vi.mocked(auth.useAuth);
+      const original = useAuth.getMockImplementation()!;
+      const as = (user: typeof MOCK_USER | null) =>
+        useAuth.mockImplementation(() => ({ ...original(), user, userLoading: user === null }));
+      onTestFinished(() => {
+        useAuth.mockImplementation(original);
+      });
+
+      as(null);
+      const { rerender } = renderPage();
+      expect(screen.getByLabelText('Full name')).toHaveValue('');
+
+      as(MOCK_USER); // /auth/me resolved after mount
+      rerender(<ToastProvider><ProfilePage /></ToastProvider>);
+      expect(screen.getByLabelText('Full name')).toHaveValue('Jane Doe');
+
+      // A local edit survives re-renders while `user` is unchanged…
+      await userEvent.clear(screen.getByLabelText('Full name'));
+      await userEvent.type(screen.getByLabelText('Full name'), 'Jane Draft');
+      rerender(<ToastProvider><ProfilePage /></ToastProvider>);
+      expect(screen.getByLabelText('Full name')).toHaveValue('Jane Draft');
+
+      // …and a new user object (refreshUser after saving) re-seeds it.
+      as({ ...MOCK_USER, full_name: 'Jane Saved' });
+      rerender(<ToastProvider><ProfilePage /></ToastProvider>);
+      expect(screen.getByLabelText('Full name')).toHaveValue('Jane Saved');
+    });
+
     it('renders the profile form pre-filled with the current user', () => {
       renderPage();
       expect(screen.getByLabelText('Full name')).toHaveValue('Jane Doe');

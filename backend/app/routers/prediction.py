@@ -84,9 +84,7 @@ def _get_session_averages(session: InterviewSession, db: Session) -> dict:
             "overall_score": _avg([a.overall_score for a in analyses]),
             "communication_score": _avg([a.communication_score for a in analyses]),
             "technical_score": _avg([a.technical_score for a in analyses]),
-            "problem_solving_score": _avg(
-                [a.problem_solving_score for a in analyses]
-            ),
+            "problem_solving_score": _avg([a.problem_solving_score for a in analyses]),
         }
 
     analyses = (

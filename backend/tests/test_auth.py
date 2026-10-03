@@ -279,6 +279,7 @@ class TestLogoutAllSessions:
                 "full_name": "Unaffected User",
             },
         )
+        assert other.status_code == 201, other.text
         other_login = client.post(
             "/api/v1/auth/login",
             data={"username": "unaffected@example.com", "password": "securepassword1"},
