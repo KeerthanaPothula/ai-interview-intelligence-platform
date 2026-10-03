@@ -837,6 +837,70 @@ class TestSessionCompletionCriteria:
         db.refresh(interview_session)
         assert interview_session.status == SESSION_STATUS_COMPLETED
 
+    def test_rerecording_one_question_does_not_complete_session(
+        self,
+        db,
+        mock_transcription,
+        mock_evaluation,
+        interview_session,
+        registered_user,
+    ):
+        """Re-recording is allowed (the UI keeps the upload controls and
+        lists every response). Five completed recordings of question 1 are
+        not five answered questions: questions 2-5 are still unanswered."""
+        questions = _make_questions(db, interview_session, 5)
+        interview_session.status = SESSION_STATUS_IN_PROGRESS
+        db.commit()
+
+        for _ in range(5):
+            response = _make_response(
+                db,
+                interview_session,
+                questions[0],
+                registered_user,
+                RESPONSE_STATUS_UPLOADED,
+            )
+            processing_service.process_response(response.id)
+
+        db.refresh(interview_session)
+        assert interview_session.status == SESSION_STATUS_IN_PROGRESS
+
+    def test_session_completed_when_every_question_answered_despite_rerecords(
+        self,
+        db,
+        mock_transcription,
+        mock_evaluation,
+        interview_session,
+        registered_user,
+    ):
+        questions = _make_questions(db, interview_session, 3)
+        interview_session.status = SESSION_STATUS_IN_PROGRESS
+        db.commit()
+
+        for question in (questions[0], questions[0], questions[1]):
+            response = _make_response(
+                db,
+                interview_session,
+                question,
+                registered_user,
+                RESPONSE_STATUS_UPLOADED,
+            )
+            processing_service.process_response(response.id)
+        db.refresh(interview_session)
+        assert interview_session.status == SESSION_STATUS_IN_PROGRESS  # Q3 open
+
+        last = _make_response(
+            db,
+            interview_session,
+            questions[2],
+            registered_user,
+            RESPONSE_STATUS_UPLOADED,
+        )
+        processing_service.process_response(last.id)
+
+        db.refresh(interview_session)
+        assert interview_session.status == SESSION_STATUS_COMPLETED
+
     def test_failed_response_does_not_complete_session(
         self,
         db,

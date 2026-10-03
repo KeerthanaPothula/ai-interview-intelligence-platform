@@ -805,13 +805,17 @@ def process_response(response_id: uuid.UUID) -> None:
             # and eventually reaches 'completed' — it is never counted here.
             # Both counts are aggregate SQL queries; no rows are loaded into
             # memory.
+            #
+            # DISTINCT question_id, not response rows: a question can be
+            # re-recorded, so five completed recordings of question 1 must
+            # not complete a five-question session.
             completed_response_count = (
-                db.query(AudioResponse)
+                db.query(func.count(func.distinct(AudioResponse.question_id)))
                 .filter(
                     AudioResponse.session_id == session_id,
                     AudioResponse.status == RESPONSE_STATUS_COMPLETED,
                 )
-                .count()
+                .scalar()
             )
 
             total_question_count = (
