@@ -167,7 +167,9 @@ def refresh(
     """
     ip = _client_ip(request)
     try:
-        old_row = auth_service.get_refresh_token_for_use(db, body.refresh_token)
+        old_row = auth_service.get_refresh_token_for_use(
+            db, body.refresh_token, allow_rotation_grace=True
+        )
     except HTTPException:
         log_token_refresh_rejected(ip, "invalid_or_reused")
         raise

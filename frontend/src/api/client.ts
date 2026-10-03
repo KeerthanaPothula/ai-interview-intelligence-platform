@@ -138,8 +138,10 @@ export function registerTokenRefreshedHandler(
 // /auth/refresh call. Refresh tokens rotate and the backend treats reuse of
 // a rotated token as theft, revoking every session — so a second concurrent
 // redemption of the same token would log the user out everywhere.
-// ponytail: per-tab only; two tabs refreshing at once can still collide
-// (Web Locks API or a backend grace window would cover that).
+// This is per-tab only. Two tabs racing with the same stored token are
+// covered by the backend instead: a token rotated seconds ago whose successor
+// is still active is accepted once more (REFRESH_TOKEN_REUSE_GRACE_SECONDS in
+// auth_service.get_refresh_token_for_use).
 let refreshInFlight: Promise<string | null> | null = null;
 
 function performSilentRefresh(): Promise<string | null> {

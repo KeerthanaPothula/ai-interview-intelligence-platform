@@ -364,6 +364,13 @@ class Settings(BaseSettings):
     # refresh_tokens table so individual tokens can be revoked.
     REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=30, gt=0)
 
+    # Seconds after a refresh token is rotated during which presenting it
+    # again is treated as a second tab racing the first (both read the same
+    # stored token before either refresh returned) rather than as theft —
+    # but only while the token it was rotated into is still active. See
+    # auth_service.get_refresh_token_for_use. 0 disables the grace.
+    REFRESH_TOKEN_REUSE_GRACE_SECONDS: int = Field(default=10, ge=0, le=60)
+
     # ------------------------------------------------------------------
     # Phase 3 — Security headers middleware
     # Environment-aware: HSTS is meaningless (and actively harmful) over

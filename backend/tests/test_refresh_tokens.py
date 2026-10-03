@@ -1,6 +1,11 @@
 """Tests for Phase 3 refresh token issuance, rotation, revocation, logout,
 and token-version invalidation."""
 
+from datetime import timedelta
+
+from app.config import get_settings
+from app.core.security import hash_refresh_token
+from app.models.refresh_token import RefreshToken
 from app.models.user import User
 from tests.conftest import VALID_USER
 
@@ -12,6 +17,27 @@ def _login(client):
     )
     assert response.status_code == 200, response.text
     return response.json()
+
+
+def _refresh(client, raw):
+    return client.post("/api/v1/auth/refresh", json={"refresh_token": raw})
+
+
+def _row(db, raw) -> RefreshToken:
+    db.expire_all()
+    return (
+        db.query(RefreshToken)
+        .filter(RefreshToken.token_hash == hash_refresh_token(raw))
+        .one()
+    )
+
+
+def _age_rotation_past_grace(db, raw):
+    """Move `raw`'s rotation to just outside the two-tab grace window."""
+    row = _row(db, raw)
+    grace = get_settings().REFRESH_TOKEN_REUSE_GRACE_SECONDS
+    row.revoked_at = row.revoked_at - timedelta(seconds=grace + 1)
+    db.commit()
 
 
 class TestLoginIssuesRefreshToken:
@@ -53,26 +79,31 @@ class TestRefreshEndpoint:
         )
         assert me.status_code == 200
 
-    def test_old_refresh_token_rejected_after_rotation(self, client, registered_user):
+    def test_old_refresh_token_rejected_after_rotation(
+        self, client, registered_user, db
+    ):
         tokens = _login(client)
         client.post(
             "/api/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}
         )
+        _age_rotation_past_grace(db, tokens["refresh_token"])
         replay = client.post(
             "/api/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}
         )
         assert replay.status_code == 401
 
     def test_reusing_rotated_token_revokes_the_new_one_too(
-        self, client, registered_user
+        self, client, registered_user, db
     ):
-        """Replaying an already-rotated refresh token is treated as a
-        theft signal: every other active token for the user is revoked,
-        including the new one issued by the rotation."""
+        """Replaying an already-rotated refresh token (outside the two-tab
+        grace window) is treated as a theft signal: every other active token
+        for the user is revoked, including the new one issued by the
+        rotation."""
         tokens = _login(client)
         rotated = client.post(
             "/api/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}
         ).json()
+        _age_rotation_past_grace(db, tokens["refresh_token"])
 
         # Replay the original (already-rotated-away) token.
         client.post(
@@ -95,6 +126,104 @@ class TestRefreshEndpoint:
     def test_malformed_refresh_token_returns_422(self, client):
         response = client.post("/api/v1/auth/refresh", json={"refresh_token": "short"})
         assert response.status_code == 422
+
+
+class TestTwoTabRefreshRace:
+    """Two tabs that read the same stored refresh token before either's
+    refresh returned both redeem it, moments apart."""
+
+    def test_near_simultaneous_refreshes_both_succeed(
+        self, client, registered_user, db
+    ):
+        shared = _login(client)["refresh_token"]
+
+        tab_a = _refresh(client, shared)
+        tab_b = _refresh(client, shared)
+
+        assert tab_a.status_code == 200, tab_a.text
+        assert tab_b.status_code == 200, tab_b.text
+        a, b = tab_a.json(), tab_b.json()
+        assert a["refresh_token"] != b["refresh_token"]
+        for tokens in (a, b):  # neither tab was logged out
+            me = client.get(
+                "/api/v1/auth/me",
+                headers={"Authorization": f"Bearer {tokens['access_token']}"},
+            )
+            assert me.status_code == 200
+            assert _refresh(client, tokens["refresh_token"]).status_code == 200
+
+    def test_grace_redemptions_do_not_extend_the_window(
+        self, client, registered_user, db
+    ):
+        shared = _login(client)["refresh_token"]
+        _refresh(client, shared)
+        first_rotation = _row(db, shared).revoked_at
+
+        assert _refresh(client, shared).status_code == 200
+        assert _row(db, shared).revoked_at == first_rotation
+
+    def test_reuse_after_the_window_is_still_theft(self, client, registered_user, db):
+        shared = _login(client)["refresh_token"]
+        rotated = _refresh(client, shared).json()
+        _age_rotation_past_grace(db, shared)
+
+        assert _refresh(client, shared).status_code == 401
+        # Every session was revoked, including the legitimate rotation.
+        assert _refresh(client, rotated["refresh_token"]).status_code == 401
+
+    def test_no_grace_once_the_successor_is_logged_out(
+        self, client, registered_user, db
+    ):
+        """Inside the window, but the token it rotated into was revoked by a
+        logout: replaying the old token is not a racing tab, so it is theft."""
+        tokens = _login(client)
+        shared = tokens["refresh_token"]
+        rotated = _refresh(client, shared).json()
+        client.post(
+            "/api/v1/auth/logout",
+            json={"refresh_token": rotated["refresh_token"]},
+            headers={"Authorization": f"Bearer {rotated['access_token']}"},
+        )
+
+        assert _refresh(client, shared).status_code == 401
+
+    def test_no_grace_after_theft_response_revoked_everything(
+        self, client, registered_user, db
+    ):
+        older = _login(client)["refresh_token"]
+        newer = _refresh(client, older).json()["refresh_token"]
+        _age_rotation_past_grace(db, older)
+        assert _refresh(client, older).status_code == 401  # theft: revoke all
+
+        # `newer` was rotated into nothing; a fresh replay of it gets no grace.
+        assert _refresh(client, newer).status_code == 401
+
+    def test_logout_with_a_just_rotated_token_gets_no_grace(
+        self, client, registered_user, db
+    ):
+        """The grace is for /auth/refresh only; logout keeps the strict rule."""
+        tokens = _login(client)
+        shared = tokens["refresh_token"]
+        rotated = _refresh(client, shared).json()
+
+        resp = client.post(
+            "/api/v1/auth/logout",
+            json={"refresh_token": shared},
+            headers={"Authorization": f"Bearer {rotated['access_token']}"},
+        )
+
+        assert resp.status_code == 401
+        assert _refresh(client, rotated["refresh_token"]).status_code == 401
+
+    def test_zero_grace_disables_it(self, client, registered_user, monkeypatch):
+        monkeypatch.setenv("REFRESH_TOKEN_REUSE_GRACE_SECONDS", "0")
+        get_settings.cache_clear()
+        try:
+            shared = _login(client)["refresh_token"]
+            _refresh(client, shared)
+            assert _refresh(client, shared).status_code == 401
+        finally:
+            get_settings.cache_clear()
 
 
 class TestLogout:

@@ -198,13 +198,21 @@ def issue_refresh_token(
     return row
 
 
-def get_refresh_token_for_use(db: Session, raw_token: str) -> RefreshToken:
+def get_refresh_token_for_use(
+    db: Session, raw_token: str, allow_rotation_grace: bool = False
+) -> RefreshToken:
     """Validate a refresh token for redemption (refresh or logout).
 
     Raises HTTP 401 if the token is unknown, expired, or already revoked.
     Presenting an already-revoked-but-known token is treated as reuse of a
     rotated-away token — a signal of token theft or a stale client — and
     revokes every other active token for that user as a defensive measure.
+
+    allow_rotation_grace (refresh only): a token rotated within the last
+    REFRESH_TOKEN_REUSE_GRACE_SECONDS whose successor is still active is
+    accepted once more, so a second browser tab that read the same stored
+    token before the first tab's refresh returned is not mistaken for a
+    thief (which would revoke every session, logging both tabs out).
     """
     token_hash = hash_refresh_token(raw_token)
     row = db.query(RefreshToken).filter(RefreshToken.token_hash == token_hash).first()
@@ -218,6 +226,8 @@ def get_refresh_token_for_use(db: Session, raw_token: str) -> RefreshToken:
         raise invalid
 
     if row.revoked_at is not None:
+        if allow_rotation_grace and _in_rotation_grace(db, row):
+            return row
         revoke_all_refresh_tokens_for_user(db, row.user_id)
         raise invalid
 
@@ -227,11 +237,41 @@ def get_refresh_token_for_use(db: Session, raw_token: str) -> RefreshToken:
     return row
 
 
+def _in_rotation_grace(db: Session, row: RefreshToken) -> bool:
+    """True if `row` was rotated (not logged out or revoked) moments ago.
+
+    Rotation is told apart from every other revocation by its successor:
+    only rotation leaves a still-active token chained to `row`. Logout,
+    logout-all, password reset and theft response (revoke-all) leave none,
+    so those reuses are never excused. The window is anchored to the first
+    rotation (rotate_refresh_token never moves revoked_at), so repeated
+    grace redemptions cannot extend it.
+    """
+    grace = timedelta(seconds=get_settings().REFRESH_TOKEN_REUSE_GRACE_SECONDS)
+    if datetime.now(timezone.utc) - _as_aware_utc(row.revoked_at) > grace:
+        return False
+    live_successor = (
+        db.query(RefreshToken.id)
+        .filter(
+            RefreshToken.replaces_token_id == row.id,
+            RefreshToken.revoked_at.is_(None),
+        )
+        .first()
+    )
+    return live_successor is not None
+
+
 def rotate_refresh_token(
     db: Session, old_row: RefreshToken, raw_new_token: str
 ) -> RefreshToken:
-    """Revoke `old_row` and issue a new token chained to it. Single commit."""
-    old_row.revoked_at = datetime.now(timezone.utc)
+    """Revoke `old_row` and issue a new token chained to it. Single commit.
+
+    A grace redemption (see _in_rotation_grace) rotates an already-revoked
+    row again: it gets a second successor, and its revoked_at is left alone
+    so the grace window stays anchored to the first rotation.
+    """
+    if old_row.revoked_at is None:
+        old_row.revoked_at = datetime.now(timezone.utc)
     settings = get_settings()
     new_row = RefreshToken(
         user_id=old_row.user_id,
