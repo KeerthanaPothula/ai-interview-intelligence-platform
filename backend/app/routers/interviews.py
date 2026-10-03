@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from app.core.constants import API_V1_PREFIX
+from app.core.rate_limit import enforce_ai_rate_limit
 from app.core.deps import get_current_user
 from app.core.pagination import PaginationParams, pagination_params
 from app.core.permissions import can_create_interview, can_generate_questions
@@ -175,6 +176,7 @@ def delete_session(
     "/{session_id}/questions/generate",
     response_model=list[QuestionResponse],
     summary="Generate interview questions via Gemini",
+    dependencies=[Depends(enforce_ai_rate_limit)],
 )
 def generate_questions(
     session_id: uuid.UUID,

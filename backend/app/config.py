@@ -322,6 +322,14 @@ class Settings(BaseSettings):
     # Width of the fixed window (seconds) used by RATE_LIMIT_LOGIN_ATTEMPTS.
     RATE_LIMIT_LOGIN_WINDOW_SECONDS: int = Field(default=60, gt=0)
 
+    # Per-user cap on requests to Gemini-backed endpoints (one shared bucket
+    # per authenticated user across all of them — see enforce_ai_rate_limit).
+    # A full 10-question live interview plus report and coaching plan is
+    # ~13 requests, so 40 per 10 minutes leaves room for two back-to-back
+    # workflows while capping one account at ~240 AI requests an hour.
+    RATE_LIMIT_AI_REQUESTS: int = Field(default=40, ge=1)
+    RATE_LIMIT_AI_WINDOW_SECONDS: int = Field(default=600, gt=0)
+
     # Number of reverse proxies in front of the app that append to
     # X-Forwarded-For (e.g. 1 behind a single load balancer). 0 (default)
     # ignores the header entirely and uses the TCP peer address — correct

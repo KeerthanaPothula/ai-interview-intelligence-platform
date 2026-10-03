@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.constants import API_V1_PREFIX
+from app.core.rate_limit import enforce_ai_rate_limit
 from app.core.exceptions import ResourceNotFound, ValidationError
 from app.database import get_db
 from app.models.analysis import AudioResponse, InterviewAnalysis
@@ -257,6 +258,7 @@ def get_readiness_assessment(
     f"{API_V1_PREFIX}/interviews/{{session_id}}/coaching-plan",
     response_model=CoachingPlanResponse,
     status_code=201,
+    dependencies=[Depends(enforce_ai_rate_limit)],
 )
 def generate_coaching_plan(
     session_id: uuid.UUID,

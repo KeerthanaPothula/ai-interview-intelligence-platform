@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.core.client_ip import get_client_ip
 from app.core.constants import API_V1_PREFIX
+from app.core.rate_limit import enforce_ai_rate_limit
 from app.core.file_validation import (
     looks_like_declared_document_type,
     sanitize_filename,
@@ -195,6 +196,7 @@ def get_current_resume(
     "/interviews/{session_id}/generate-rag-questions",
     response_model=RAGQuestionsResponse,
     status_code=201,
+    dependencies=[Depends(enforce_ai_rate_limit)],
     tags=["Live Interviews"],
 )
 def generate_rag_questions(
@@ -289,7 +291,12 @@ def delete_current_resume(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.get("/resume/analysis", response_model=ResumeAnalysisResponse)
+# A GET, but it calls Gemini on every load — so it is AI-limited too.
+@router.get(
+    "/resume/analysis",
+    response_model=ResumeAnalysisResponse,
+    dependencies=[Depends(enforce_ai_rate_limit)],
+)
 def analyze_resume(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),

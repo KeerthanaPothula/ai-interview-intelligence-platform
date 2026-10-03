@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.constants import API_V1_PREFIX
+from app.core.rate_limit import enforce_ai_rate_limit
 from app.core.deps import get_current_user
 from app.core.exceptions import ResourceNotFound, ValidationError
 from app.database import get_db
@@ -56,6 +57,7 @@ def _collect_live_interview_qa(
     "/{session_id}/report/generate",
     response_model=SessionReportResponse,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(enforce_ai_rate_limit)],
 )
 def generate_report(
     session_id: uuid.UUID,

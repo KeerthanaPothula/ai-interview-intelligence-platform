@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.constants import API_V1_PREFIX
+from app.core.rate_limit import enforce_ai_rate_limit
 from app.core.exceptions import ResourceNotFound
 from app.database import get_db
 from app.models.analysis import AudioResponse
@@ -118,7 +119,12 @@ def _replay_answered_turn(
     return get_conversation(session.id, db, current_user)
 
 
-@router.post("/", response_model=LiveInterviewSessionResponse, status_code=201)
+@router.post(
+    "/",
+    response_model=LiveInterviewSessionResponse,
+    status_code=201,
+    dependencies=[Depends(enforce_ai_rate_limit)],
+)
 def start_live_interview(
     body: StartLiveInterviewRequest,
     db: Session = Depends(get_db),
@@ -167,7 +173,11 @@ def start_live_interview(
     return data
 
 
-@router.post("/{session_id}/next-question", response_model=LiveInterviewSessionResponse)
+@router.post(
+    "/{session_id}/next-question",
+    response_model=LiveInterviewSessionResponse,
+    dependencies=[Depends(enforce_ai_rate_limit)],
+)
 def next_question(
     session_id: uuid.UUID,
     body: NextQuestionRequest,
@@ -345,7 +355,11 @@ def get_active_interview(
     return get_conversation(session_id, db, current_user)
 
 
-@router.post("/{session_id}/end", response_model=EndInterviewResponse)
+@router.post(
+    "/{session_id}/end",
+    response_model=EndInterviewResponse,
+    dependencies=[Depends(enforce_ai_rate_limit)],
+)
 def end_interview(
     session_id: uuid.UUID,
     # Defaulted (not just Optional) so a client that sends no body at all —

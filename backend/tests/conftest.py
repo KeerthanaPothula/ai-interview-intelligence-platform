@@ -147,11 +147,13 @@ def _reset_login_rate_limiter():
     RATE_LIMIT_LOGIN_ATTEMPTS budget, eventually causing unrelated tests to
     fail with 429 instead of their expected status code.
     """
-    from app.core.rate_limit import login_rate_limiter
+    from app.core.rate_limit import ai_rate_limiter, login_rate_limiter
 
     login_rate_limiter.clear()
+    ai_rate_limiter.clear()  # same reason, for the per-user AI budget
     yield
     login_rate_limiter.clear()
+    ai_rate_limiter.clear()
 
 
 @pytest.fixture(scope="function", autouse=True)

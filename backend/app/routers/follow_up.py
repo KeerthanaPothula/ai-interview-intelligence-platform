@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.constants import API_V1_PREFIX
+from app.core.rate_limit import enforce_ai_rate_limit
 from app.core.deps import get_current_user
 from app.core.exceptions import ResourceNotFound
 from app.database import get_db
@@ -29,6 +30,7 @@ router = APIRouter(prefix=f"{API_V1_PREFIX}/interviews", tags=["Follow-Up"])
     "/{session_id}/follow-up-question",
     response_model=FollowUpQuestionResponse,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(enforce_ai_rate_limit)],
 )
 def generate_follow_up(
     session_id: uuid.UUID,
