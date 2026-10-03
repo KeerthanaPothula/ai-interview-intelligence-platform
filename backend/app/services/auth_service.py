@@ -268,8 +268,15 @@ def _in_rotation_grace(db: Session, row: RefreshToken) -> bool:
     rotation (rotate_refresh_token never moves revoked_at), so repeated
     grace redemptions cannot extend it.
     """
-    grace = timedelta(seconds=get_settings().REFRESH_TOKEN_REUSE_GRACE_SECONDS)
-    if datetime.now(timezone.utc) - _as_aware_utc(row.revoked_at) > grace:
+    grace_seconds = get_settings().REFRESH_TOKEN_REUSE_GRACE_SECONDS
+    # 0 must disable grace outright: with "elapsed > grace" alone, an
+    # immediate replay whose timestamps coincide (coarse clocks, e.g. ~15ms
+    # on Windows) or a revoked_at slightly ahead of this server's clock gives
+    # elapsed <= 0, which is not > 0, and would wrongly be excused.
+    if grace_seconds <= 0:
+        return False
+    elapsed = datetime.now(timezone.utc) - _as_aware_utc(row.revoked_at)
+    if elapsed > timedelta(seconds=grace_seconds):
         return False
     live_successor = (
         db.query(RefreshToken.id)

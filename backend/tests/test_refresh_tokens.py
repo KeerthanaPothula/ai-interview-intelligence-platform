@@ -1,7 +1,9 @@
 """Tests for Phase 3 refresh token issuance, rotation, revocation, logout,
 and token-version invalidation."""
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
+
+import pytest
 
 from app.config import get_settings
 from app.core.security import hash_refresh_token
@@ -38,6 +40,14 @@ def _age_rotation_past_grace(db, raw):
     grace = get_settings().REFRESH_TOKEN_REUSE_GRACE_SECONDS
     row.revoked_at = row.revoked_at - timedelta(seconds=grace + 1)
     db.commit()
+
+
+@pytest.fixture
+def zero_grace(monkeypatch):
+    monkeypatch.setenv("REFRESH_TOKEN_REUSE_GRACE_SECONDS", "0")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 class TestLoginIssuesRefreshToken:
@@ -215,15 +225,43 @@ class TestTwoTabRefreshRace:
         assert resp.status_code == 401
         assert _refresh(client, rotated["refresh_token"]).status_code == 401
 
-    def test_zero_grace_disables_it(self, client, registered_user, monkeypatch):
-        monkeypatch.setenv("REFRESH_TOKEN_REUSE_GRACE_SECONDS", "0")
-        get_settings.cache_clear()
-        try:
-            shared = _login(client)["refresh_token"]
-            _refresh(client, shared)
-            assert _refresh(client, shared).status_code == 401
-        finally:
-            get_settings.cache_clear()
+    def test_zero_grace_disables_it(self, client, registered_user, zero_grace):
+        shared = _login(client)["refresh_token"]
+        _refresh(client, shared)
+        assert _refresh(client, shared).status_code == 401
+
+    @pytest.mark.parametrize("offset", [timedelta(0), timedelta(seconds=1)])
+    def test_zero_grace_rejects_replay_at_the_same_or_a_later_instant(
+        self, client, registered_user, db, zero_grace, offset
+    ):
+        """An immediate replay can see elapsed == 0 (coarse clocks, e.g. on
+        Windows) or < 0 (revoked_at slightly ahead of this server's clock);
+        neither may be excused when grace is 0, and the replay is still theft.
+        The +1s case reproduces the bug deterministically on any OS; the 0
+        case covers near-identical timestamps."""
+        shared = _login(client)["refresh_token"]
+        rotated = _refresh(client, shared).json()
+        row = _row(db, shared)
+        row.revoked_at = datetime.now(timezone.utc) + offset
+        db.commit()
+
+        assert _refresh(client, shared).status_code == 401
+        # Theft response: the legitimate rotation was revoked too.
+        assert _refresh(client, rotated["refresh_token"]).status_code == 401
+
+    def test_zero_grace_keeps_normal_refreshes_working(
+        self, client, registered_user, zero_grace
+    ):
+        tokens = _login(client)
+        for _ in range(3):  # a single tab refreshing repeatedly
+            resp = _refresh(client, tokens["refresh_token"])
+            assert resp.status_code == 200, resp.text
+            tokens = resp.json()
+        me = client.get(
+            "/api/v1/auth/me",
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+        assert me.status_code == 200
 
 
 class TestLogout:
