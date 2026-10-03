@@ -400,3 +400,74 @@ class TestEmailCaseInsensitivity:
         assert _login_as(client, "bob@example.com", "lowerpassword1").status_code == 200
         assert _login_as(client, "Bob@example.com", "upperpassword1").status_code == 200
         assert _login_as(client, "bob@example.com", "upperpassword1").status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# POST /auth/change-password — current-password guessing is throttled
+# ---------------------------------------------------------------------------
+
+
+def _change_password(client, headers, current, new="a-brand-new-password-1"):
+    return client.post(
+        "/api/v1/auth/change-password",
+        json={"current_password": current, "new_password": new},
+        headers=headers,
+    )
+
+
+class TestChangePasswordBruteForce:
+    """A stolen access token must not allow unlimited online guessing of the
+    current password (which would turn a temporary token into a permanent
+    account takeover). Wrong guesses share login's per-account lockout."""
+
+    def _threshold(self):
+        from app.config import get_settings
+
+        return get_settings().ACCOUNT_LOCKOUT_THRESHOLD
+
+    def test_wrong_guesses_lock_the_account(self, client, auth_headers, db):
+        for _ in range(self._threshold()):
+            resp = _change_password(client, auth_headers, "wrong-guess-123")
+            assert resp.status_code == 400
+
+        # Locked: even the correct current password is refused, and the
+        # password is unchanged.
+        locked = _change_password(client, auth_headers, VALID_USER["password"])
+        assert locked.status_code == 423
+        db.expire_all()
+        user = db.query(User).filter(User.email == VALID_USER["email"]).one()
+        assert user.locked_until is not None
+
+    def test_lockout_also_blocks_login(self, client, auth_headers):
+        for _ in range(self._threshold()):
+            _change_password(client, auth_headers, "wrong-guess-123")
+        login = client.post(
+            "/api/v1/auth/login",
+            data={"username": VALID_USER["email"], "password": VALID_USER["password"]},
+        )
+        assert login.status_code == 423
+
+    def test_a_correct_change_resets_the_failure_count(self, client, auth_headers, db):
+        for _ in range(self._threshold() - 1):
+            _change_password(client, auth_headers, "wrong-guess-123")
+
+        ok = _change_password(client, auth_headers, VALID_USER["password"])
+        assert ok.status_code == 200, ok.text
+        db.expire_all()
+        user = db.query(User).filter(User.email == VALID_USER["email"]).one()
+        assert user.failed_login_attempts == 0
+        assert user.locked_until is None
+
+    def test_correct_current_password_still_works_first_time(
+        self, client, auth_headers
+    ):
+        ok = _change_password(client, auth_headers, VALID_USER["password"])
+        assert ok.status_code == 200, ok.text
+        relogin = client.post(
+            "/api/v1/auth/login",
+            data={
+                "username": VALID_USER["email"],
+                "password": "a-brand-new-password-1",
+            },
+        )
+        assert relogin.status_code == 200

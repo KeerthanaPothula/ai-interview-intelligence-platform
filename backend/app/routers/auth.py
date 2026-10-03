@@ -275,11 +275,24 @@ def change_password(
     """
     from app.core.security import get_password_hash, verify_password
 
+    # Same per-account lockout as /login: otherwise anyone holding a stolen
+    # access token could guess current_password without limit and turn a
+    # temporary token into a permanent takeover.
+    if auth_service.is_account_locked(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_423_LOCKED,
+            detail=(
+                "Account temporarily locked due to multiple failed password "
+                "attempts. Please try again later."
+            ),
+        )
     if not verify_password(body.current_password, current_user.hashed_password):
+        auth_service.record_failed_login(db, current_user)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Current password is incorrect.",
         )
+    auth_service.record_successful_login(db, current_user)
     current_user.hashed_password = get_password_hash(body.new_password)
     current_user.token_version = (current_user.token_version or 0) + 1
     db.commit()
