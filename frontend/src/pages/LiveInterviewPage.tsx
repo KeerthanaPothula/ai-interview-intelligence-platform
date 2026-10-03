@@ -46,6 +46,14 @@ function secondsSince(iso: string) {
   return Number.isNaN(ms) ? 0 : Math.max(0, Math.floor((Date.now() - ms) / 1000));
 }
 
+// The server's saved text answer for the current question when it differs
+// from what was just submitted — the first-answer-wins 409 case, where the
+// saved answer stands and the submitted edit was rejected.
+function savedAnswerDiffering(fresh: LiveInterviewSessionResponse, submitted: string) {
+  const saved = fresh.current_question?.response_text ?? null;
+  return saved != null && saved !== submitted ? saved : null;
+}
+
 type PageState = 'checking' | 'resumeError' | 'setup' | 'interviewing' | 'ended';
 
 export function LiveInterviewPage() {
@@ -191,13 +199,13 @@ export function LiveInterviewPage() {
           const fresh = await getLiveConversation(session.id, token);
           setSession(fresh);
           moved = fresh.current_question?.turn_number !== turnNumber;
-          saved = fresh.current_question?.response_text ?? null;
+          saved = savedAnswerDiffering(fresh, submitted);
         } catch {
           // Keep the current view; the error below still explains.
         }
         if (moved) {
           setError(`${err.message} The interview has moved on to the question shown; your text below was not submitted, so review it before answering.`);
-        } else if (saved != null && saved !== submitted) {
+        } else if (saved != null) {
           // Same question, but an earlier answer is already saved (e.g.
           // question generation failed after saving it): it stands. Show it
           // instead of the rejected edit; Next then retries with it.
@@ -214,6 +222,7 @@ export function LiveInterviewPage() {
 
   const handleEnd = async () => {
     if (!token || !session) return;
+    const submitted = responseText;
     setLoading(true);
     setError(null);
     try {
@@ -221,18 +230,20 @@ export function LiveInterviewPage() {
       // final) question — next-question is hidden once atLastTurn is
       // true, so this is the only chance to record that answer.
       const endResult = await endLiveInterview(session.id, token, {
-        response_text: responseText || undefined,
+        response_text: submitted || undefined,
       });
       stopTimer();
       setResult(endResult);
       setPageState('ended');
     } catch (err) {
-      // A 409 can mean an earlier End succeeded but its response was lost.
-      // Recover read-only, and only if the server confirms completion.
+      // A 409 can mean an earlier End succeeded but its response was lost,
+      // or that a different final answer is already saved. Re-read (never
+      // resubmit) and act only on what the server confirms.
       const fresh =
         err instanceof ApiError && err.status === 409
           ? await getLiveConversation(session.id, token).catch(() => null)
           : null;
+      const saved = fresh?.status === 'active' ? savedAnswerDiffering(fresh, submitted) : null;
       if (fresh?.status === 'completed') {
         stopTimer();
         setResult({
@@ -244,6 +255,13 @@ export function LiveInterviewPage() {
           turns: fresh.turns,
         });
         setPageState('ended');
+      } else if (fresh && saved != null) {
+        // Still active, but an earlier final answer is saved (e.g. summary
+        // generation failed after saving it): it stands. Show it instead of
+        // the rejected edit; ending again then retries with it.
+        setSession(fresh);
+        setResponseText(saved);
+        setError('Your earlier final answer was already saved, so your edited answer was not submitted. The saved answer is restored below; end the interview again to finish with it.');
       } else {
         setError(err instanceof ApiError ? err.message : 'Failed to end the interview. Please try again.');
       }

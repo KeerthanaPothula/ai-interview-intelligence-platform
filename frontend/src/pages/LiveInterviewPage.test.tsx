@@ -548,6 +548,90 @@ describe('LiveInterviewPage', () => {
       expect(conversation).not.toHaveBeenCalled();
       expect(screen.getByTestId('current-question')).toBeTruthy();
     });
+
+    describe('when a different final answer is already saved', () => {
+      // Summary generation failed after the final answer was saved: still active.
+      const SAVED_Q = { ...MOCK_SESSION.turns[0], response_text: 'Saved final answer.' };
+      const SAVED = { ...MOCK_SESSION, turns: [SAVED_Q], current_question: SAVED_Q };
+      const DIFFERENT = new client.ApiError(
+        409,
+        'Question 1 already has a different saved answer, so this answer was not saved.',
+      );
+      const answerBox = () => screen.getByLabelText('Your answer') as HTMLTextAreaElement;
+
+      async function endWithEdit() {
+        vi.spyOn(client, 'getActiveLiveInterview').mockResolvedValue(SAVED);
+        const spies = {
+          start: vi.spyOn(client, 'startLiveInterview'),
+          next: vi.spyOn(client, 'nextLiveQuestion'),
+          end: vi.spyOn(client, 'endLiveInterview').mockRejectedValueOnce(DIFFERENT),
+          conversation: vi.spyOn(client, 'getLiveConversation').mockResolvedValue(SAVED),
+        };
+        renderPage();
+        await screen.findByTestId('current-question');
+        await userEvent.clear(answerBox());
+        await userEvent.type(answerBox(), 'Edited final.');
+        await clickEnd();
+        await screen.findByText(/earlier final answer was already saved/);
+        return spies;
+      }
+
+      it("restores the server's saved final answer, not the rejected edit", async () => {
+        const { conversation, start, next } = await endWithEdit();
+
+        expect(answerBox().value).toBe('Saved final answer.');
+        expect(screen.getByText(/edited answer was not submitted/)).toBeTruthy();
+        expect(screen.getByTestId('current-question')).toBeTruthy();
+        expect(screen.queryByText('Interview Complete')).toBeNull();
+        expect(conversation).toHaveBeenCalledWith('sess-1', 'test-token');
+        expect(start).not.toHaveBeenCalled();
+        expect(next).not.toHaveBeenCalled();
+      });
+
+      it('does not call End again automatically', async () => {
+        const { end } = await endWithEdit();
+        await new Promise((r) => setTimeout(r, 200));
+
+        expect(end).toHaveBeenCalledTimes(1);
+        expect(end).toHaveBeenCalledWith('sess-1', 'test-token', { response_text: 'Edited final.' });
+      });
+
+      it('ending again with the restored answer completes normally', async () => {
+        const { end } = await endWithEdit();
+        end.mockResolvedValueOnce({
+          session_id: 'sess-1',
+          status: 'completed',
+          total_turns: 1,
+          summary: 'Great performance overall!',
+          turns: SAVED.turns,
+        });
+
+        await clickEnd();
+
+        expect(await screen.findByText('Great performance overall!')).toBeTruthy();
+        expect(end).toHaveBeenCalledTimes(2);
+        expect(end.mock.calls[1][2]).toEqual({ response_text: 'Saved final answer.' });
+      });
+
+      it('keeps the existing error when the saved answer is audio-only', async () => {
+        const AUDIO_Q = { ...MOCK_SESSION.turns[0], audio_response_id: 'audio-1' };
+        vi.spyOn(client, 'getActiveLiveInterview').mockResolvedValue(MOCK_SESSION);
+        vi.spyOn(client, 'endLiveInterview').mockRejectedValue(DIFFERENT);
+        vi.spyOn(client, 'getLiveConversation').mockResolvedValue({
+          ...MOCK_SESSION,
+          turns: [AUDIO_Q],
+          current_question: AUDIO_Q,
+        });
+        renderPage();
+        await screen.findByTestId('current-question');
+        await userEvent.type(answerBox(), 'Typed answer.');
+
+        await clickEnd();
+
+        expect(await screen.findByText(DIFFERENT.message)).toBeTruthy();
+        expect(answerBox().value).toBe('Typed answer.');
+      });
+    });
   });
 
   describe('interview timer', () => {
