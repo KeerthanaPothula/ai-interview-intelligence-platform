@@ -1,6 +1,6 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import { LiveInterviewPage } from './LiveInterviewPage';
 import * as client from '../api/client';
@@ -477,6 +477,91 @@ describe('LiveInterviewPage', () => {
       expect(await screen.findByText('The AI service is temporarily unavailable.')).toBeTruthy();
       expect(conversation).not.toHaveBeenCalled();
       expect(screen.getByTestId('current-question')).toBeTruthy();
+    });
+  });
+
+  describe('interview timer', () => {
+    // Exact clock control; setTimeout stays real for Testing Library.
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+      vi.setSystemTime(new Date('2026-06-18T10:12:30Z'));
+    });
+    afterEach(() => vi.useRealTimers());
+
+    const timer = () => screen.getByLabelText(/Elapsed time/).textContent;
+
+    async function resumeStartedAt(created_at: string) {
+      vi.spyOn(client, 'getActiveLiveInterview').mockResolvedValue({ ...MOCK_SESSION, created_at });
+      renderPage();
+      await screen.findByText(/Resumed your interview in progress/);
+    }
+
+    it('a resumed interview counts from the server start time, then keeps ticking', async () => {
+      await resumeStartedAt('2026-06-18T10:00:00Z');
+      expect(timer()).toBe('12:30');
+
+      await act(() => vi.advanceTimersByTimeAsync(2000));
+      expect(timer()).toBe('12:32');
+    });
+
+    it.each([
+      ['an explicit offset', '2026-06-18T12:00:00+02:00', '12:30'],
+      ['no zone suffix, read as UTC', '2026-06-18T10:00:00', '12:30'],
+      // 0.123s later than 10:00:00, so whole seconds floor to 12:29.
+      ['microseconds and a +00:00 offset', '2026-06-18T10:00:00.123456+00:00', '12:29'],
+    ])('parses a start time with %s', async (_label, created_at, expected) => {
+      await resumeStartedAt(created_at);
+      expect(timer()).toBe(expected);
+    });
+
+    it('never goes negative when the server clock is ahead', async () => {
+      await resumeStartedAt('2026-06-18T10:13:00Z'); // 30s in the client's future
+      expect(timer()).toBe('00:00');
+
+      await act(() => vi.advanceTimersByTimeAsync(1000));
+      expect(timer()).toBe('00:01');
+    });
+
+    it('falls back to 00:00 for an unparsable start time', async () => {
+      await resumeStartedAt('not a timestamp');
+      expect(timer()).toBe('00:00');
+    });
+
+    it('a newly started interview still starts at 00:00', async () => {
+      // created_at is irrelevant here: a fresh start is timed from the click.
+      vi.spyOn(client, 'startLiveInterview').mockResolvedValue({
+        ...MOCK_SESSION,
+        created_at: '2026-06-18T09:00:00Z',
+      });
+      await renderSetup();
+      await userEvent.type(screen.getByLabelText('Target Role'), 'Engineer');
+      await userEvent.type(
+        screen.getByLabelText('Job Description'),
+        'A Python backend engineering role with FastAPI.',
+      );
+      await userEvent.click(screen.getByText('Start Interview'));
+      await screen.findByTestId('current-question');
+      expect(timer()).toBe('00:00');
+
+      await act(() => vi.advanceTimersByTimeAsync(3000));
+      expect(timer()).toBe('00:03');
+    });
+
+    it('stops counting once the interview has ended', async () => {
+      vi.spyOn(client, 'endLiveInterview').mockResolvedValue({
+        session_id: 'sess-1',
+        status: 'completed',
+        total_turns: 1,
+        summary: 'Great performance overall!',
+        turns: MOCK_SESSION.turns,
+      });
+      await resumeStartedAt('2026-06-18T10:12:10Z'); // 20s ago
+      await userEvent.click(screen.getAllByText('End Interview')[0]);
+      await screen.findByText('Interview Complete');
+      expect(screen.getByText('20s')).toBeTruthy();
+
+      await act(() => vi.advanceTimersByTimeAsync(120_000));
+      expect(screen.getByText('20s')).toBeTruthy();
     });
   });
 

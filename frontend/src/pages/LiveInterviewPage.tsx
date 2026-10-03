@@ -38,6 +38,14 @@ function formatTime(secs: number) {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
+// Whole seconds since a server timestamp. Server times are UTC, so one with
+// no zone suffix (SQLite returns those) must not be read as local time.
+// Never negative: a client clock running behind the server clamps to 0.
+function secondsSince(iso: string) {
+  const ms = Date.parse(/(Z|[+-]\d\d:?\d\d)$/i.test(iso) ? iso : `${iso}Z`);
+  return Number.isNaN(ms) ? 0 : Math.max(0, Math.floor((Date.now() - ms) / 1000));
+}
+
 type PageState = 'checking' | 'resumeError' | 'setup' | 'interviewing' | 'ended';
 
 export function LiveInterviewPage() {
@@ -66,8 +74,8 @@ export function LiveInterviewPage() {
   const atLastTurn = session != null && session.current_turn >= session.max_turns;
   const wordCount = responseText.trim() ? responseText.trim().split(/\s+/).length : 0;
 
-  const startTimer = useCallback(() => {
-    setElapsedSecs(0);
+  const startTimer = useCallback((fromSecs = 0) => {
+    setElapsedSecs(fromSecs);
     timerRef.current = setInterval(() => setElapsedSecs((s) => s + 1), 1000);
   }, []);
 
@@ -100,7 +108,8 @@ export function LiveInterviewPage() {
       setResponseText(active.current_question?.response_text ?? '');
       setResumed(true);
       setPageState('interviewing');
-      startTimer();
+      // Count from when the interview really started, not from this resume.
+      startTimer(secondsSince(active.created_at));
     } catch (err) {
       setResumeError(err instanceof ApiError ? err.message : 'Something went wrong.');
       setPageState('resumeError');
