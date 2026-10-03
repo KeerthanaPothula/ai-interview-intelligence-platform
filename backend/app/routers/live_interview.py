@@ -112,7 +112,46 @@ def _replay_answered_turn(
     return get_conversation(session.id, db, current_user)
 
 
-def _reject_different_answer(turn: ConversationTurn, body: NextQuestionRequest) -> None:
+def _save_first_answer(
+    db: Session,
+    turn: ConversationTurn,
+    body: NextQuestionRequest | EndInterviewRequest,
+    user_id: uuid.UUID,
+) -> None:
+    """Save body's answer on turn unless one is already saved; 409 if the
+    saved answer differs from body's.
+
+    First accepted answer wins: one conditional UPDATE claims the turn only
+    while it is still unanswered, so of two concurrent requests exactly one
+    writes (the other's UPDATE waits on the row lock, then matches nothing).
+    Everyone then re-reads what was persisted: the same answer carries on as
+    a retry, a different one gets 409 and is never scored. Committed here,
+    before any best-effort scoring, so a scoring rollback can never discard
+    the saved answer. Afterwards `turn` holds exactly the persisted answer.
+    """
+    audio_id = (
+        _owned_audio_response_id_or_404(db, body.audio_response_id, user_id)
+        if body.audio_response_id
+        else None
+    )
+    db.execute(
+        update(ConversationTurn)
+        .where(
+            ConversationTurn.id == turn.id,
+            ConversationTurn.response_text.is_(None),
+            ConversationTurn.audio_response_id.is_(None),
+        )
+        .values(response_text=body.response_text, audio_response_id=audio_id)
+        .execution_options(synchronize_session=False)
+    )
+    db.commit()
+    db.refresh(turn)
+    _reject_different_answer(turn, body)
+
+
+def _reject_different_answer(
+    turn: ConversationTurn, body: NextQuestionRequest | EndInterviewRequest
+) -> None:
     """409 if body carries an answer other than the one saved on turn.
 
     The first saved answer is authoritative: a request repeating it (or
@@ -226,34 +265,9 @@ def next_question(
 
     if current_turns and (body.response_text or body.audio_response_id):
         last_turn = current_turns[-1]
-        audio_id = (
-            _owned_audio_response_id_or_404(db, body.audio_response_id, current_user.id)
-            if body.audio_response_id
-            else None
-        )
-
-        # First accepted answer wins: one conditional UPDATE claims the turn
-        # only while it is still unanswered, so of two concurrent requests
-        # exactly one writes (the other's UPDATE waits on the row lock, then
-        # matches nothing). Everyone then re-reads what was persisted: the
-        # same answer carries on as a retry (which still lets a retry after
-        # failed question generation advance), a different one gets 409.
-        #
-        # Committed now, before the best-effort scoring attempt below, so a
-        # scoring failure's rollback can never discard the saved answer.
-        db.execute(
-            update(ConversationTurn)
-            .where(
-                ConversationTurn.id == last_turn.id,
-                ConversationTurn.response_text.is_(None),
-                ConversationTurn.audio_response_id.is_(None),
-            )
-            .values(response_text=body.response_text, audio_response_id=audio_id)
-            .execution_options(synchronize_session=False)
-        )
-        db.commit()
-        db.refresh(last_turn)
-        _reject_different_answer(last_turn, body)
+        # A same-answer retry carries on, which still lets a retry after
+        # failed question generation advance.
+        _save_first_answer(db, last_turn, body, current_user.id)
 
         # Score the answer just submitted so Readiness Assessment and
         # Coaching Plan have genuine per-turn data to average later (see
@@ -415,22 +429,12 @@ def end_interview(
     # Persist and score the final answer — mirrors next_question's exact
     # pattern, because end_interview is the ONLY place the last question's
     # answer can ever be submitted (the frontend hides next-question once
-    # the candidate reaches the final turn). Mutating turns[-1] here means
-    # the history built below (for the summary) and the turns returned in
-    # the response both automatically reflect it — no re-query needed.
+    # the candidate reaches the final turn). turns[-1] is refreshed to the
+    # persisted answer, so the history built below (for the summary) and
+    # the turns returned in the response both reflect it — no re-query.
     if turns and (body.response_text or body.audio_response_id):
         last_turn = turns[-1]
-        if body.response_text:
-            last_turn.response_text = body.response_text
-        if body.audio_response_id:
-            last_turn.audio_response_id = _owned_audio_response_id_or_404(
-                db, body.audio_response_id, current_user.id
-            )
-
-        # Committed before the best-effort scoring attempt below, for the
-        # same reason as next_question: a scoring failure's rollback must
-        # discard only the failed scoring attempt, never this answer.
-        db.commit()
+        _save_first_answer(db, last_turn, body, current_user.id)
 
         try:
             interview_service.score_and_store_conversation_turn(
@@ -459,9 +463,23 @@ def end_interview(
         conversation_history=history,
     )
 
-    session.status = LIVE_SESSION_STATUS_COMPLETED
-    session.completed_at = datetime.now(timezone.utc)
+    # Conditional, like the answer: if a concurrent End (with the same
+    # answer — a different one got 409 above) completed it first, its
+    # completion stands and this request still succeeds idempotently.
+    db.execute(
+        update(LiveInterviewSession)
+        .where(
+            LiveInterviewSession.id == session.id,
+            LiveInterviewSession.status == LIVE_SESSION_STATUS_ACTIVE,
+        )
+        .values(
+            status=LIVE_SESSION_STATUS_COMPLETED,
+            completed_at=datetime.now(timezone.utc),
+        )
+        .execution_options(synchronize_session=False)
+    )
     db.commit()
+    db.refresh(session)
 
     # Built now, from data already loaded, so the response the candidate
     # sees does not depend on what happens to the DB session below — a

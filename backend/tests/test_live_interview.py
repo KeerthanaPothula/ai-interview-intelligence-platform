@@ -1084,9 +1084,11 @@ def test_concurrent_submissions_for_the_same_turn_create_one_next_turn(
     assert _score_count(db) == 1
 
 
-def _race_before_claim(client, auth_headers, sid, racer, **body):
+def _race_before_claim(client, auth_headers, sid, racer, send=None, **body):
     """Both requests read turn 1 as unanswered: the racer runs to completion
-    just as the first is about to execute its answer-claiming UPDATE."""
+    just as the first is about to execute its answer-claiming UPDATE.
+    `send` is the request both make (default: next-question)."""
+    send = send or _next
     from sqlalchemy import event
 
     from tests.conftest import TEST_ENGINE
@@ -1098,11 +1100,11 @@ def _race_before_claim(client, auth_headers, sid, racer, **body):
             "UPDATE CONVERSATION_TURNS"
         ):
             racing.append(None)
-            racing[0] = _next(client, auth_headers, sid, **racer)
+            racing[0] = send(client, auth_headers, sid, **racer)
 
     event.listen(TEST_ENGINE, "before_cursor_execute", _hook)
     try:
-        first = _next(client, auth_headers, sid, **body)
+        first = send(client, auth_headers, sid, **body)
     finally:
         event.remove(TEST_ENGINE, "before_cursor_execute", _hook)
     return first, racing[0]
@@ -1280,3 +1282,178 @@ def test_retry_after_failed_question_generation_still_advances(
     assert resp.status_code == 200, resp.text
     assert len(_turns(db, sid)) == 2
     assert live_mocks == ["Saved."]
+
+
+# ---------------------------------------------------------------------------
+# End Interview: first-write-wins for the final answer
+# ---------------------------------------------------------------------------
+
+
+def _end(client, auth_headers, sid, **body):
+    return client.post(
+        f"/api/v1/live-interviews/{sid}/end", json=body, headers=auth_headers
+    )
+
+
+def _live_session(db, sid):
+    db.expire_all()
+    return db.get(LiveInterviewSession, uuid.UUID(sid))
+
+
+def _race_end_during_summary(client, auth_headers, sid, monkeypatch, racer, **body):
+    """The racer End runs to completion while the first End is generating
+    its summary: after it saved/scored the final answer, before it
+    completes the session."""
+    racing = []
+
+    def _summary(**kwargs):
+        if not racing:
+            racing.append(None)
+            racing[0] = _end(client, auth_headers, sid, **racer)
+        return "Good interview."
+
+    monkeypatch.setattr(
+        "app.services.interview_conversation_service.generate_interview_summary",
+        _summary,
+    )
+    first = _end(client, auth_headers, sid, **body)
+    return first, racing[0]
+
+
+def _assert_one_final_answer(db, sid, live_mocks, accepted, rejected):
+    """Exactly one winner; its answer is the one persisted and scored, and
+    the interview is completed."""
+    assert accepted.status_code == 200, accepted.text
+    assert rejected.status_code == 409, rejected.text
+    assert "already has a different saved answer" in rejected.json()["detail"]
+    winner = accepted.json()["turns"][-1]["response_text"]
+    assert [t.response_text for t in _turns(db, sid)] == [winner]
+    assert live_mocks == [winner]  # the rejected answer was never scored
+    assert _score_count(db) == 1
+    assert _live_session(db, sid).status == "completed"
+
+
+def test_end_saves_scores_and_completes(client, auth_headers, db, live_mocks):
+    sid = _start(client, auth_headers)
+    resp = _end(client, auth_headers, sid, response_text="Final answer.")
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "completed"
+    assert resp.json()["turns"][-1]["response_text"] == "Final answer."
+    assert [t.response_text for t in _turns(db, sid)] == ["Final answer."]
+    assert live_mocks == ["Final answer."]
+    assert _live_session(db, sid).completed_at is not None
+
+
+def test_concurrent_ends_with_different_answers_one_gets_409(
+    client, auth_headers, db, live_mocks, monkeypatch
+):
+    sid = _start(client, auth_headers)
+    a, b = _race_end_during_summary(
+        client,
+        auth_headers,
+        sid,
+        monkeypatch,
+        racer={"response_text": "Second."},
+        response_text="First.",
+    )
+    _assert_one_final_answer(db, sid, live_mocks, accepted=a, rejected=b)
+    assert _turns(db, sid)[0].response_text == "First."
+
+
+def test_concurrent_ends_both_unanswered_first_claim_wins(
+    client, auth_headers, db, live_mocks
+):
+    sid = _start(client, auth_headers)
+    a, b = _race_before_claim(
+        client,
+        auth_headers,
+        sid,
+        racer={"response_text": "Second."},
+        send=_end,
+        response_text="First.",
+    )
+    _assert_one_final_answer(db, sid, live_mocks, accepted=b, rejected=a)
+    assert _turns(db, sid)[0].response_text == "Second."
+
+
+def test_concurrent_ends_with_the_same_answer_are_idempotent(
+    client, auth_headers, db, live_mocks
+):
+    """Both succeed; one saved answer, one score, one mirrored session, and
+    the first completion (its completed_at) is not rewritten."""
+    sid = _start(client, auth_headers)
+    completed_at = []
+
+    def _send(client, auth_headers, sid, **body):
+        resp = _end(client, auth_headers, sid, **body)
+        completed_at.append(_live_session(db, sid).completed_at)
+        return resp
+
+    a, b = _race_before_claim(
+        client,
+        auth_headers,
+        sid,
+        racer={"response_text": "Same."},
+        send=_send,
+        response_text="Same.",
+    )
+
+    assert (a.status_code, b.status_code) == (200, 200), (a.text, b.text)
+    assert [t.response_text for t in _turns(db, sid)] == ["Same."]
+    assert live_mocks == ["Same."]
+    assert _score_count(db) == 1
+    assert completed_at[0] is not None
+    assert completed_at[0] == completed_at[1]  # the racer's completion stands
+    mirrored = db.query(InterviewSession).filter(
+        InterviewSession.live_session_id == uuid.UUID(sid)
+    )
+    assert mirrored.count() == 1
+
+
+def test_later_end_with_a_different_final_answer_gets_409(
+    client, auth_headers, db, live_mocks, monkeypatch
+):
+    """The final answer was saved but summary generation failed, so the
+    interview is still active: a retry may not replace that answer, while a
+    retry with the same answer completes normally."""
+    sid = _start(client, auth_headers)
+
+    def _boom(**kwargs):
+        raise RuntimeError("Gemini down")
+
+    monkeypatch.setattr(
+        "app.services.interview_conversation_service.generate_interview_summary",
+        _boom,
+    )
+    with pytest.raises(RuntimeError):
+        _end(client, auth_headers, sid, response_text="Saved.")
+    assert _live_session(db, sid).status == "active"
+
+    different = _end(client, auth_headers, sid, response_text="Edited.")
+    assert different.status_code == 409, different.text
+    assert [t.response_text for t in _turns(db, sid)] == ["Saved."]
+
+    monkeypatch.setattr(
+        "app.services.interview_conversation_service.generate_interview_summary",
+        _mock_summary,
+    )
+    same = _end(client, auth_headers, sid, response_text="Saved.")
+    assert same.status_code == 200, same.text
+    assert live_mocks == ["Saved."]
+    assert _score_count(db) == 1
+    assert _live_session(db, sid).status == "completed"
+
+
+def test_end_after_completion_still_returns_already_completed(
+    client, auth_headers, db, live_mocks
+):
+    """The frontend's lost-End-response recovery keys off this 409."""
+    sid = _start(client, auth_headers)
+    assert _end(client, auth_headers, sid, response_text="A.").status_code == 200
+    for body in ({"response_text": "A."}, {"response_text": "B."}, {}):
+        resp = _end(client, auth_headers, sid, **body)
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == "Interview session is already completed"
+    assert [t.response_text for t in _turns(db, sid)] == ["A."]
+    assert live_mocks == ["A."]
