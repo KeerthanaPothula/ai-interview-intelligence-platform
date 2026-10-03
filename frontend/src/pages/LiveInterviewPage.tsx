@@ -209,7 +209,26 @@ export function LiveInterviewPage() {
       setResult(endResult);
       setPageState('ended');
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to end the interview. Please try again.');
+      // A 409 can mean an earlier End succeeded but its response was lost.
+      // Recover read-only, and only if the server confirms completion.
+      const fresh =
+        err instanceof ApiError && err.status === 409
+          ? await getLiveConversation(session.id, token).catch(() => null)
+          : null;
+      if (fresh?.status === 'completed') {
+        stopTimer();
+        setResult({
+          session_id: fresh.id,
+          status: fresh.status,
+          total_turns: fresh.turns.length,
+          // The AI summary is only returned by End itself and is not stored.
+          summary: 'Your interview was completed and saved. Its summary could not be shown because the connection dropped.',
+          turns: fresh.turns,
+        });
+        setPageState('ended');
+      } else {
+        setError(err instanceof ApiError ? err.message : 'Failed to end the interview. Please try again.');
+      }
     } finally {
       setLoading(false);
     }

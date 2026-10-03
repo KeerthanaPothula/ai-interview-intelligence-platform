@@ -256,6 +256,8 @@ describe('LiveInterviewPage', () => {
       vi.spyOn(client, 'endLiveInterview').mockRejectedValue(
         new client.ApiError(409, 'Interview session is already completed'),
       );
+      // The server says the interview is still active: a genuine error.
+      vi.spyOn(client, 'getLiveConversation').mockResolvedValue(MOCK_SESSION);
 
       await renderSetup();
       await userEvent.type(screen.getByLabelText('Target Role'), 'Engineer');
@@ -380,6 +382,101 @@ describe('LiveInterviewPage', () => {
       expect(refresh).toHaveBeenCalledWith('sess-1', 'test-token');
       expect(next).toHaveBeenCalledTimes(1);
       expect(next.mock.calls[0][1]).toEqual({ response_text: 'Edited answer.', turn_number: 1 });
+    });
+  });
+
+  describe('End Interview after a lost response', () => {
+    const COMPLETED = {
+      ...MOCK_SESSION,
+      status: 'completed' as const,
+      completed_at: '2026-06-18T10:20:00Z',
+      turns: [{ ...MOCK_SESSION.turns[0], response_text: 'My saved answer.' }],
+      current_question: { ...MOCK_SESSION.turns[0], response_text: 'My saved answer.' },
+    };
+    const ALREADY_COMPLETED = new client.ApiError(409, 'Interview session is already completed');
+
+    async function renderInterview() {
+      vi.spyOn(client, 'getActiveLiveInterview').mockResolvedValue(MOCK_SESSION);
+      const spies = {
+        start: vi.spyOn(client, 'startLiveInterview'),
+        next: vi.spyOn(client, 'nextLiveQuestion'),
+        end: vi.spyOn(client, 'endLiveInterview'),
+        conversation: vi.spyOn(client, 'getLiveConversation'),
+      };
+      renderPage();
+      await screen.findByTestId('current-question');
+      return spies;
+    }
+
+    const clickEnd = () => userEvent.click(screen.getAllByText('End Interview')[0]);
+
+    it('a normal End shows the summary without any recovery read', async () => {
+      const { end, conversation } = await renderInterview();
+      end.mockResolvedValue({
+        session_id: 'sess-1',
+        status: 'completed',
+        total_turns: 1,
+        summary: 'Great performance overall!',
+        turns: MOCK_SESSION.turns,
+      });
+
+      await clickEnd();
+
+      expect(await screen.findByText('Great performance overall!')).toBeTruthy();
+      expect(conversation).not.toHaveBeenCalled();
+    });
+
+    it('recovers the completed interview when End returns already-completed', async () => {
+      const { start, next, end, conversation } = await renderInterview();
+      end.mockRejectedValue(ALREADY_COMPLETED);
+      conversation.mockResolvedValue(COMPLETED);
+
+      await clickEnd();
+
+      expect(await screen.findByText('Interview Complete')).toBeTruthy();
+      expect(screen.getByText(/completed and saved/)).toBeTruthy();
+      expect(screen.getByText('My saved answer.')).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'View Sessions' })).toBeTruthy();
+      expect(screen.queryByRole('alert')).toBeNull();
+      expect(end).toHaveBeenCalledTimes(1);
+      expect(conversation).toHaveBeenCalledTimes(1);
+      expect(conversation).toHaveBeenCalledWith('sess-1', 'test-token');
+      expect(start).not.toHaveBeenCalled();
+      expect(next).not.toHaveBeenCalled();
+    });
+
+    it('shows the 409 normally when the interview is not actually completed', async () => {
+      const { end, conversation } = await renderInterview();
+      end.mockRejectedValue(new client.ApiError(409, 'Some other conflict'));
+      conversation.mockResolvedValue(MOCK_SESSION);
+
+      await clickEnd();
+
+      expect(await screen.findByText('Some other conflict')).toBeTruthy();
+      expect(screen.getByTestId('current-question')).toBeTruthy();
+      expect(screen.queryByText('Interview Complete')).toBeNull();
+    });
+
+    it('shows the original error when the recovery read itself fails', async () => {
+      const { end, conversation } = await renderInterview();
+      end.mockRejectedValue(ALREADY_COMPLETED);
+      conversation.mockRejectedValue(new client.ApiError(0, 'Cannot connect to the backend.'));
+
+      await clickEnd();
+
+      expect(await screen.findByText('Interview session is already completed')).toBeTruthy();
+      expect(screen.getByTestId('current-question')).toBeTruthy();
+    });
+
+    it('does not attempt recovery for non-409 errors', async () => {
+      const { end, conversation } = await renderInterview();
+      end.mockRejectedValue(new client.ApiError(502, 'The AI service is temporarily unavailable.'));
+
+      await clickEnd();
+
+      expect(await screen.findByText('The AI service is temporarily unavailable.')).toBeTruthy();
+      expect(conversation).not.toHaveBeenCalled();
+      expect(screen.getByTestId('current-question')).toBeTruthy();
     });
   });
 
