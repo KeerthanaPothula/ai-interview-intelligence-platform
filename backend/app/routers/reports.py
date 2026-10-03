@@ -101,7 +101,12 @@ def generate_report(
             .all()
         )
 
+        # One answer per question: its latest completed recording. A
+        # question can be re-recorded, and the transcript Gemini judges and
+        # the scores/voice metrics below must all describe that same answer
+        # — never a mix of attempts, and never whichever row comes first.
         questions_and_transcripts = []
+        reported_ids: list[uuid.UUID] = []
         for q in questions:
             resp = (
                 db.query(AudioResponse)
@@ -109,10 +114,12 @@ def generate_report(
                     AudioResponse.question_id == q.id,
                     AudioResponse.status == "completed",
                 )
+                .order_by(AudioResponse.created_at.desc(), AudioResponse.id.desc())
                 .first()
             )
             if resp is None:
                 continue
+            reported_ids.append(resp.id)
             transcript = (
                 db.query(Transcript)
                 .filter(Transcript.audio_response_id == resp.id)
@@ -125,13 +132,10 @@ def generate_report(
                 }
             )
 
-        # Collect all analyses for this session.
+        # Analyses of exactly the reported answers.
         analyses_rows = (
             db.query(InterviewAnalysis)
-            .join(
-                AudioResponse, InterviewAnalysis.audio_response_id == AudioResponse.id
-            )
-            .filter(AudioResponse.session_id == session_id)
+            .filter(InterviewAnalysis.audio_response_id.in_(reported_ids))
             .all()
         )
         analyses = [
@@ -144,11 +148,10 @@ def generate_report(
             for a in analyses_rows
         ]
 
-        # Collect voice analytics.
+        # Voice analytics of exactly the reported answers.
         voice_rows = (
             db.query(VoiceAnalysis)
-            .join(AudioResponse, VoiceAnalysis.audio_response_id == AudioResponse.id)
-            .filter(AudioResponse.session_id == session_id)
+            .filter(VoiceAnalysis.audio_response_id.in_(reported_ids))
             .all()
         )
         voice_analytics = [{"confidence_score": v.confidence_score} for v in voice_rows]

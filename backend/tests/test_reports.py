@@ -575,3 +575,112 @@ def test_rejected_regeneration_keeps_an_existing_report_readable(
     assert resp.status_code == 200, resp.text
     assert resp.json()["readiness_level"] == "Interview Ready"
     assert resp.json()["final_score"] == 7.5
+
+
+# ---------------------------------------------------------------------------
+# Re-recorded answers: the report uses one consistent answer per question
+# ---------------------------------------------------------------------------
+
+
+def _attempt(db, session, question, user_id, *, at, text, score, confidence):
+    """A completed recording of `question` with its transcript, analysis
+    and voice analysis, created at `at`."""
+    from decimal import Decimal
+
+    from app.models.analysis import AudioResponse, InterviewAnalysis
+    from app.models.features import VoiceAnalysis
+
+    rid = uuid.uuid4()
+    db.add(
+        AudioResponse(
+            id=rid,
+            session_id=session.id,
+            question_id=question.id,
+            user_id=uuid.UUID(str(user_id)),
+            file_path=f"{session.id}/{rid}.webm",
+            file_size_bytes=4096,
+            mime_type="audio/webm",
+            status=RESPONSE_STATUS_COMPLETED,
+            created_at=at,
+        )
+    )
+    db.flush()
+    t = Transcript(audio_response_id=rid, text=text, word_count=len(text.split()))
+    db.add(t)
+    db.flush()
+    db.add(
+        InterviewAnalysis(
+            audio_response_id=rid,
+            transcript_id=t.id,
+            overall_score=Decimal(score),
+            communication_score=Decimal(score),
+            technical_score=Decimal(score),
+            problem_solving_score=Decimal(score),
+            confidence_score=Decimal(score),
+            model_used="test",
+        )
+    )
+    db.add(VoiceAnalysis(audio_response_id=rid, confidence_score=confidence))
+    db.commit()
+    return rid
+
+
+@pytest.mark.parametrize("newest_inserted_first", [True, False])
+def test_rerecorded_question_reports_its_latest_answer_consistently(
+    client,
+    auth_headers,
+    db,
+    registered_user,
+    interview_session,
+    interview_question,
+    monkeypatch,
+    newest_inserted_first,
+):
+    """The candidate answered Q1, then re-recorded it. The report's written
+    assessment (Gemini sees the transcript) and its scores must describe the
+    same answer — the latest one — not a mix of attempts."""
+    from datetime import datetime, timedelta, timezone
+
+    first = datetime(2026, 9, 1, 10, 0, tzinfo=timezone.utc)
+    attempts = [
+        dict(at=first, text="My weak first attempt.", score="4.0", confidence=40),
+        dict(
+            at=first + timedelta(minutes=5),
+            text="My improved second attempt.",
+            score="8.0",
+            confidence=90,
+        ),
+    ]
+    # Storage order must not decide which attempt is reported.
+    for a in reversed(attempts) if newest_inserted_first else attempts:
+        _attempt(db, interview_session, interview_question, registered_user["id"], **a)
+    captured = {}
+
+    def _capturing_generate(**kwargs):
+        captured.update(kwargs)
+        return _MOCK_REPORT.copy()
+
+    monkeypatch.setattr(
+        "app.services.report_service.generate_session_report", _capturing_generate
+    )
+    resp = client.post(
+        f"/api/v1/interviews/{interview_session.id}/report/generate",
+        headers=auth_headers,
+    )
+
+    assert resp.status_code == 201, resp.text
+    assert captured["questions_and_transcripts"] == [
+        {
+            "question": interview_question.body,
+            "transcript": "My improved second attempt.",
+        }
+    ]
+    assert captured["analyses"] == [
+        {
+            "overall_score": 8.0,
+            "communication_score": 8.0,
+            "technical_score": 8.0,
+            "problem_solving_score": 8.0,
+        }
+    ]
+    assert captured["voice_analytics"] == [{"confidence_score": 90}]
