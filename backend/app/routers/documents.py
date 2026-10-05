@@ -25,9 +25,9 @@ from app.core.security_logging import log_upload_rejected
 from app.database import get_db
 from app.models.documents import DocumentChunk, ResumeDocument
 from app.models.interview import (
-    InterviewSession,
     Question,
     QUESTION_SOURCE_AI_GENERATED,
+    SESSION_STATUS_DRAFT,
 )
 from app.routers.auth import get_current_user
 from app.schemas.documents import (
@@ -37,7 +37,7 @@ from app.schemas.documents import (
     ResumeDocumentResponse,
     RAGQuestionItem,
 )
-from app.services import document_extraction_service, rag_service
+from app.services import document_extraction_service, interview_service, rag_service
 from app.models.user import User
 
 router = APIRouter(prefix=f"{API_V1_PREFIX}/documents", tags=["Documents"])
@@ -206,14 +206,15 @@ def generate_rag_questions(
     current_user: User = Depends(can_generate_questions()),
 ):
     """Generate personalised questions using the candidate's resume context."""
-    session = db.execute(
-        select(InterviewSession).where(
-            InterviewSession.id == session_id,
-            InterviewSession.user_id == current_user.id,
+    session = interview_service.get_session_or_404(db, session_id, current_user.id)
+
+    # Same draft gate as interviews.generate_questions: replacing questions
+    # cascade-deletes their recorded answers, so only drafts may be replaced.
+    if session.status != SESSION_STATUS_DRAFT:
+        raise HTTPException(
+            status_code=409,
+            detail="Questions can only be generated for draft sessions.",
         )
-    ).scalar_one_or_none()
-    if session is None:
-        raise HTTPException(status_code=404, detail="Interview session not found")
 
     relevant_chunks = rag_service.retrieve_relevant_chunks(
         query_text=f"{session.job_role} {session.job_description[:200]}",

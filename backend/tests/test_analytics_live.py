@@ -392,3 +392,99 @@ def test_live_interview_via_api_appears_in_dashboard(client, auth_headers, monke
     assert data["completed_sessions"] == 1
     assert data["total_responses_analyzed"] == 2
     assert data["average_overall_score"] == 7.0
+
+
+# Readiness/prediction and admin counts read the same scored_answers()
+# population as analytics and benchmarks.
+def _capture_readiness(monkeypatch):
+    from app.services import prediction_service
+
+    captured = {}
+    real = prediction_service.compute_readiness
+
+    def _capturing(**kwargs):
+        captured.update(kwargs)
+        return real(**kwargs)
+
+    monkeypatch.setattr(
+        "app.routers.prediction.prediction_service.compute_readiness", _capturing
+    )
+    return captured
+
+
+def test_readiness_percentile_ranks_against_live_answers(
+    client, auth_headers, db, registered_user
+):
+    bob = _bob_headers(client)
+    bob_id = client.get("/api/v1/auth/me", headers=bob).json()["id"]
+    mine = _live(db, registered_user["id"], [(9.0, 9.0, 9.0, 9.0, 9.0)])
+    _live(db, bob_id, [(5.0, 5.0, 5.0, 5.0, 5.0), (3.0, 3.0, 3.0, 3.0, 3.0)])
+
+    resp = client.post(f"/api/v1/interviews/{mine.id}/readiness", headers=auth_headers)
+
+    assert resp.status_code == 201, resp.text
+    # 2 of the platform's 3 scored answers are below 9.0. Counting only
+    # upload-flow answers (the old behaviour) saw 0 and fell back to 50.0.
+    assert resp.json()["percentile_rank"] == 66.7
+
+
+def test_readiness_live_session_averages_scores_without_voice(
+    client, auth_headers, db, registered_user, monkeypatch
+):
+    captured = _capture_readiness(monkeypatch)
+    mine = _live(
+        db,
+        registered_user["id"],
+        [(8.0, 6.0, 7.0, 5.0, 9.0), (6.0, 8.0, 5.0, 7.0, 9.0), None],
+    )
+
+    resp = client.post(f"/api/v1/interviews/{mine.id}/readiness", headers=auth_headers)
+
+    assert resp.status_code == 201, resp.text
+    assert captured == {
+        "overall_score": 7.0,
+        "communication_score": 7.0,
+        "technical_score": 6.0,
+        "problem_solving_score": 6.0,
+    }
+
+
+def test_readiness_upload_session_keeps_scores_and_voice_defaults(
+    client, auth_headers, interview_session, interview_analysis, monkeypatch
+):
+    captured = _capture_readiness(monkeypatch)
+
+    resp = client.post(
+        f"/api/v1/interviews/{interview_session.id}/readiness", headers=auth_headers
+    )
+
+    assert resp.status_code == 201, resp.text
+    # No VoiceAnalysis rows -> the existing neutral 5.0 defaults, unchanged.
+    assert captured == {
+        "overall_score": 7.5,
+        "communication_score": 8.0,
+        "technical_score": 7.0,
+        "problem_solving_score": 6.5,
+        "avg_confidence": 5.0,
+        "avg_speaking_rate": 5.0,
+        "avg_filler_words": 5.0,
+    }
+
+
+def test_admin_overview_counts_live_evaluations(
+    client, admin_headers, db, registered_user, interview_analysis
+):
+    _live(db, registered_user["id"], [(8.0,) * 5, (7.0,) * 5, None])
+    # In-progress live interviews have no mirrored session and don't count yet.
+    _live(
+        db,
+        registered_user["id"],
+        [(6.0,) * 5],
+        status=LIVE_SESSION_STATUS_ACTIVE,
+        mirror=False,
+    )
+
+    data = client.get("/api/v1/admin/overview", headers=admin_headers).json()
+
+    # 1 upload evaluation + 2 scored answers from the completed live interview.
+    assert data["ai_usage"]["evaluations_completed"] == 3

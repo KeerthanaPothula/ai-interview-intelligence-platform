@@ -4,33 +4,17 @@ from __future__ import annotations
 
 import logging
 
-from google import genai
-
 from app.config import get_settings
 from app.core.ai_reliability import call_gemini_with_retry
 from app.core.exceptions import AIServiceError
+from app.services.gemini_service import get_client
 
 logger = logging.getLogger(__name__)
 
 
-def _build_client() -> genai.Client:
-    settings = get_settings()
-    return genai.Client(
-        api_key=settings.GEMINI_API_KEY,
-        # google-genai's HttpOptions.timeout is in milliseconds, but
-        # GEMINI_TIMEOUT_SECONDS is (as its name says) seconds — convert here.
-        http_options={"timeout": settings.GEMINI_TIMEOUT_SECONDS * 1000},
-    )
-
-
-_client: genai.Client | None = None
-
-
-def _get_client() -> genai.Client:
-    global _client
-    if _client is None:
-        _client = _build_client()
-    return _client
+# Shared, thread-safe, lazily-built client (same config for every service).
+# Kept under this module's _get_client name so tests can patch it per service.
+_get_client = get_client
 
 
 def generate_follow_up_question(

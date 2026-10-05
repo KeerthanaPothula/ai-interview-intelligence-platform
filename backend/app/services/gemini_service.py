@@ -41,7 +41,7 @@ _client: genai.Client | None = None
 _client_lock = threading.Lock()
 
 
-def _get_client() -> genai.Client:
+def get_client() -> genai.Client:
     global _client
     if _client is None:
         with _client_lock:
@@ -77,7 +77,7 @@ Requirements:
 - Do not include a "sequence_order" field — ordering is handled by the application."""
 
 
-def _validate_and_normalize(raw: list[object], count: int) -> list[dict]:
+def normalize_questions(raw: list[object], count: int) -> list[dict]:
     """Validate each item from the parsed Gemini JSON response.
 
     Applies three rules:
@@ -174,7 +174,7 @@ def generate_questions(
     """
     prompt = _build_prompt(job_role, job_description, count)
     model = get_settings().GEMINI_MODEL
-    client = _get_client()
+    client = get_client()
 
     response = call_gemini_with_retry(
         lambda: client.models.generate_content(model=model, contents=prompt),
@@ -184,7 +184,7 @@ def generate_questions(
 
     parsed = parse_json_response(raw_text, operation="Question generation", expect=list)
 
-    questions = _validate_and_normalize(parsed, count)
+    questions = normalize_questions(parsed, count)
 
     if not questions:
         logger.error(
@@ -220,7 +220,7 @@ def generate_text(prompt: str) -> str:
     left to propagate.
     """
     model = get_settings().GEMINI_MODEL
-    client = _get_client()
+    client = get_client()
     try:
         response = call_gemini_with_retry(
             lambda: client.models.generate_content(model=model, contents=prompt),

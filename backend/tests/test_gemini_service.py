@@ -49,7 +49,7 @@ class _FakeClient:
 
 
 def _patch_client(monkeypatch, fn):
-    monkeypatch.setattr(gemini_service, "_get_client", lambda: _FakeClient(fn))
+    monkeypatch.setattr(gemini_service, "get_client", lambda: _FakeClient(fn))
 
 
 VALID_QUESTIONS_JSON = (

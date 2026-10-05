@@ -4,6 +4,12 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { RequireRole } from './RequireRole';
 import { RoleProvider } from '../context/RoleContext';
 import type { UserResponse } from '../api/types';
+import {
+  ADMIN_ROLES,
+  CANDIDATE_ROLES,
+  RECRUITER_ROLES,
+  REPORT_ROLES,
+} from '../utils/roleRoutes';
 
 let mockUser: UserResponse | null = null;
 let mockUserLoading = false;
@@ -92,5 +98,26 @@ describe('RequireRole', () => {
     mockUserLoading = false;
     renderProtected(['candidate', 'super_admin']);
     expect(screen.getByText('Protected content')).toBeInTheDocument();
+  });
+
+  // The real App.tsx gates must mirror app/core/permissions.py.
+  it.each([
+    ['admin', RECRUITER_ROLES, true],
+    ['admin', REPORT_ROLES, true],
+    ['recruiter', REPORT_ROLES, true],
+    ['candidate', REPORT_ROLES, true],
+    ['candidate', RECRUITER_ROLES, false],
+    ['recruiter', ADMIN_ROLES, false],
+    ['admin', CANDIDATE_ROLES, false],
+    ['recruiter', CANDIDATE_ROLES, false],
+  ] as const)('%s on the gate %j → allowed: %s', (role, roles, allowed) => {
+    mockUser = makeUser(role);
+    mockUserLoading = false;
+    renderProtected([...roles]);
+    if (allowed) {
+      expect(screen.getByText('Protected content')).toBeInTheDocument();
+    } else {
+      expect(screen.getByText('403 page')).toBeInTheDocument();
+    }
   });
 });

@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import json
 import logging
-import threading
-
-from google import genai
 
 from app.config import get_settings
 from app.core.ai_reliability import call_gemini_with_retry, parse_json_response
 from app.core.exceptions import AIServiceError
+from app.services.gemini_service import get_client
 
 logger = logging.getLogger(__name__)
 
@@ -27,32 +25,9 @@ _REQUIRED_KEYS: tuple[str, ...] = _SCORE_KEYS + (
 )
 
 
-def _build_client() -> genai.Client:
-    settings = get_settings()
-    return genai.Client(
-        api_key=settings.GEMINI_API_KEY,
-        # google-genai's HttpOptions.timeout is in milliseconds, but
-        # GEMINI_TIMEOUT_SECONDS is (as its name says) seconds — convert here.
-        http_options={"timeout": settings.GEMINI_TIMEOUT_SECONDS * 1000},
-    )
-
-
-# Lazy singleton — Gemini client is created on the first call to
-# _get_client(), not at module import time. This avoids reading the API key
-# and creating an HTTP connection pool during process startup (or test
-# collection), shaving ~50 ms off cold-start latency and preventing import
-# failures when GEMINI_API_KEY is not set in non-production environments.
-_client: genai.Client | None = None
-_client_lock = threading.Lock()
-
-
-def _get_client() -> genai.Client:
-    global _client
-    if _client is None:
-        with _client_lock:
-            if _client is None:
-                _client = _build_client()
-    return _client
+# Shared, thread-safe, lazily-built client (same config for every service).
+# Kept under this module's _get_client name so tests can patch it per service.
+_get_client = get_client
 
 
 def _build_prompt(

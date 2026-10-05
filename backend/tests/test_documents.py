@@ -4,6 +4,8 @@ import io
 import uuid
 from pathlib import Path
 
+import pytest
+
 from app.config import get_settings
 
 _EXTRACTED_TEXT = (
@@ -285,6 +287,117 @@ def test_generate_rag_questions_requires_auth(client, interview_session):
         json={"count": 5},
     )
     assert resp.status_code == 401
+
+
+def _forbid_rag_calls(monkeypatch):
+    """Fail the test if the endpoint reaches retrieval or Gemini."""
+
+    def _boom(**kwargs):
+        raise AssertionError("RAG pipeline must not run for a rejected request")
+
+    monkeypatch.setattr(
+        "app.routers.documents.rag_service.retrieve_relevant_chunks", _boom
+    )
+    monkeypatch.setattr(
+        "app.routers.documents.rag_service.generate_rag_questions", _boom
+    )
+
+
+def _assert_question_and_answer_intact(db, interview_question, audio_response):
+    from app.models.analysis import AudioResponse
+    from app.models.interview import Question
+
+    db.expire_all()
+    assert db.get(Question, interview_question.id) is not None
+    assert db.get(AudioResponse, audio_response.id) is not None
+
+
+@pytest.mark.parametrize("status", ["in_progress", "processing", "completed"])
+def test_generate_rag_questions_rejects_non_draft_session(
+    client,
+    auth_headers,
+    db,
+    interview_session,
+    interview_question,
+    audio_response,
+    monkeypatch,
+    status,
+):
+    """Replacing questions cascade-deletes recorded answers, so — like
+    POST /interviews/{id}/questions/generate — only drafts are allowed."""
+    interview_session.status = status
+    db.commit()
+    _forbid_rag_calls(monkeypatch)
+
+    resp = client.post(
+        f"/api/v1/documents/interviews/{interview_session.id}/generate-rag-questions",
+        json={"count": 5},
+        headers=auth_headers,
+    )
+
+    assert resp.status_code == 409
+    assert (
+        resp.json()["detail"] == "Questions can only be generated for draft sessions."
+    )
+    _assert_question_and_answer_intact(db, interview_question, audio_response)
+
+
+def test_generate_rag_questions_other_users_session_is_404(
+    client, db, interview_session, interview_question, audio_response, monkeypatch
+):
+    from tests.conftest import OTHER_USER, _login
+
+    client.post("/api/v1/auth/register", json=OTHER_USER)
+    other_headers = {"Authorization": f"Bearer {_login(client, OTHER_USER)}"}
+    _forbid_rag_calls(monkeypatch)
+
+    resp = client.post(
+        f"/api/v1/documents/interviews/{interview_session.id}/generate-rag-questions",
+        json={"count": 5},
+        headers=other_headers,
+    )
+
+    assert resp.status_code == 404
+    _assert_question_and_answer_intact(db, interview_question, audio_response)
+
+
+def test_generate_rag_questions_gemini_failure_keeps_existing_questions(
+    client, auth_headers, db, interview_session, interview_question, monkeypatch
+):
+    from app.core.exceptions import AIServiceError
+    from app.models.interview import Question
+
+    def _fail(**kwargs):
+        raise AIServiceError("RAG question generation produced no usable questions.")
+
+    monkeypatch.setattr(
+        "app.routers.documents.rag_service.retrieve_relevant_chunks", lambda **kw: []
+    )
+    monkeypatch.setattr(
+        "app.routers.documents.rag_service.generate_rag_questions", _fail
+    )
+
+    resp = client.post(
+        f"/api/v1/documents/interviews/{interview_session.id}/generate-rag-questions",
+        json={"count": 5},
+        headers=auth_headers,
+    )
+
+    assert resp.status_code == 502
+    db.expire_all()
+    assert db.get(Question, interview_question.id) is not None
+
+
+def test_generate_rag_questions_forbidden_for_recruiter(
+    client, recruiter_headers, interview_session, monkeypatch
+):
+    _forbid_rag_calls(monkeypatch)
+    resp = client.post(
+        f"/api/v1/documents/interviews/{interview_session.id}/generate-rag-questions",
+        json={"count": 5},
+        headers=recruiter_headers,
+    )
+    assert resp.status_code == 403
 
 
 # ---------------------------------------------------------------------------

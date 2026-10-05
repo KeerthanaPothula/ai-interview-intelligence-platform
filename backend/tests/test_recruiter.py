@@ -466,6 +466,60 @@ def test_recruiter_without_an_organization_cannot_open_reports(
     _assert_hidden(client, session.id, recruiter_headers)
 
 
+def test_recruiter_without_an_organization_sees_and_updates_nothing(
+    client, db, org_candidate, recruiter_user, recruiter_headers
+):
+    """Fail closed: scope_organization_id returns None for an org-less
+    recruiter, which has_candidate_access must not treat as platform-wide."""
+    session = _org_report_session(db, org_candidate)
+    user = db.get(User, uuid.UUID(recruiter_user["id"]))
+    user.organization_id = None
+    db.commit()
+
+    listing = client.get("/api/v1/recruiter/candidates", headers=recruiter_headers)
+    assert listing.status_code == 200
+    assert listing.json()["total"] == 0
+    assert listing.json()["items"] == []
+
+    update = client.patch(
+        f"/api/v1/recruiter/candidates/{session.id}/status",
+        json={"status": "shortlisted"},
+        headers=recruiter_headers,
+    )
+    assert update.status_code == 404
+    db.expire_all()
+    assert db.get(InterviewSession, session.id).recruiter_status is None
+
+
+def test_admin_updates_candidate_status_across_organizations(
+    client, db, org_candidate, admin_headers
+):
+    session = _org_report_session(db, org_candidate)
+
+    response = client.patch(
+        f"/api/v1/recruiter/candidates/{session.id}/status",
+        json={"status": "shortlisted"},
+        headers=admin_headers,
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "shortlisted"
+
+
+def test_readiness_and_coaching_stay_owner_only_for_pipeline_viewers(
+    client, db, org_candidate, recruiter_headers, admin_headers
+):
+    """Pipeline viewers can open the report, not the candidate's readiness or
+    coaching data (owner-only via interview_service.get_session_or_404)."""
+    session = _org_report_session(db, org_candidate)
+
+    for headers in (recruiter_headers, admin_headers):
+        for path in ("readiness", "coaching-plan"):
+            url = f"/api/v1/interviews/{session.id}/{path}"
+            assert client.get(url, headers=headers).status_code == 404
+            assert client.post(url, headers=headers).status_code == 404
+
+
 def test_candidate_keeps_owner_only_access(
     client, db, org_candidate, organization, auth_headers
 ):

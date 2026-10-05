@@ -22,7 +22,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.security import get_password_hash
-from app.models.analysis import AudioResponse, InterviewAnalysis, Transcript
+from app.models.analysis import AudioResponse, Transcript
 from app.models.documents import ResumeDocument
 from app.models.features import SessionReport
 from app.models.interview import InterviewSession, Question, VALID_SESSION_STATUSES
@@ -41,6 +41,7 @@ from app.schemas.admin import (
     OrganizationResponse,
     StorageStats,
 )
+from app.services import analytics_service
 
 
 def _as_aware_utc(dt: datetime) -> datetime:
@@ -112,7 +113,10 @@ def get_overview(db: Session) -> AdminOverviewResponse:
     ai_usage = AiUsageStats(
         questions_generated=db.query(Question).count(),
         transcriptions_completed=db.query(Transcript).count(),
-        evaluations_completed=db.query(InterviewAnalysis).count(),
+        # Upload + completed live answers — same population as analytics.
+        evaluations_completed=db.execute(
+            select(func.count()).select_from(analytics_service.scored_answers())
+        ).scalar_one(),
         reports_generated=total_reports,
         coaching_plans_generated=db.query(CoachingPlan).count(),
         predictions_generated=db.query(InterviewPrediction).count(),

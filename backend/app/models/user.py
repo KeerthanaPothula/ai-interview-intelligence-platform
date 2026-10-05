@@ -234,8 +234,8 @@ class User(Base):
     #
     # is_active: sits on User (not just Organization) so an Admin can
     # deactivate a single recruiter without touching their organization.
-    # Checked in get_current_user-adjacent authorization, not baked into
-    # get_current_user itself — see app.core.deps.require_active_user.
+    # Enforced centrally in app.core.deps.get_current_user (403 on every
+    # authenticated endpoint, even with a still-valid JWT).
     # ------------------------------------------------------------------
     role: Mapped[str] = mapped_column(
         String(20),

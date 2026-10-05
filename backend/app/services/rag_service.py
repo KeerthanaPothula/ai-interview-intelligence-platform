@@ -6,33 +6,22 @@ import json
 import logging
 import uuid
 
-import google.genai as genai
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.core.ai_reliability import call_gemini_with_retry, parse_json_response
+from app.core.exceptions import AIServiceError
 from app.core.tracing import get_tracer
 from app.models.documents import DocumentChunk
-from app.services import embedding_service
+from app.services import embedding_service, gemini_service
 
 logger = logging.getLogger(__name__)
 tracer = get_tracer(__name__)
 
-_client: genai.Client | None = None
-
-
-def _get_client() -> genai.Client:
-    global _client
-    if _client is None:
-        settings = get_settings()
-        _client = genai.Client(
-            api_key=settings.GEMINI_API_KEY,
-            # google-genai's HttpOptions.timeout is in milliseconds, but
-            # GEMINI_TIMEOUT_SECONDS is (as its name says) seconds — convert here.
-            http_options={"timeout": settings.GEMINI_TIMEOUT_SECONDS * 1000},
-        )
-    return _client
+# Shared, thread-safe, lazily-built client (same config for every service).
+# Kept under this module's _get_client name so tests can patch it per service.
+_get_client = gemini_service.get_client
 
 
 def chunk_text(
@@ -167,10 +156,16 @@ def generate_rag_questions(
         ),
         operation="RAG question generation",
     )
-    questions = parse_json_response(
+    parsed = parse_json_response(
         response.text, operation="RAG question generation", expect=list
     )
-    for i, q in enumerate(questions):
-        q["sequence_order"] = i + 1
-        q.setdefault("category", "behavioral")
-    return questions[:count]
+    # Same per-item validation as standard question generation: non-empty
+    # body, valid category (else "behavioral"), dense 1-based order, <= count.
+    # Fewer than `count` is accepted (unlike generate_questions), but none at
+    # all must fail here — before the caller replaces the existing questions.
+    questions = gemini_service.normalize_questions(parsed, count)
+    if not questions:
+        raise AIServiceError(
+            "RAG question generation produced no usable questions. Please try again."
+        )
+    return questions

@@ -21,3 +21,15 @@ export function homeRouteForRole(role: Role | null): string {
       return '/dashboard';
   }
 }
+
+// Route role gates (used by App.tsx). They follow the backend's permissions
+// (app/core/permissions.py), which stay the real security boundary.
+// Candidate pages: can_create_interview = Candidate + Super Admin.
+export const CANDIDATE_ROLES: Role[] = ['candidate', 'super_admin'];
+// Candidate pipeline: can_view_candidates = Recruiter + Admin + Super Admin.
+export const RECRUITER_ROLES: Role[] = ['recruiter', 'admin', 'super_admin'];
+export const ADMIN_ROLES: Role[] = ['admin', 'super_admin'];
+export const ANY_ROLE: Role[] = ['candidate', 'recruiter', 'admin', 'super_admin'];
+// A report is readable by its owner or by anyone who can view the pipeline
+// (recruiter_service.get_viewable_session_or_404).
+export const REPORT_ROLES: Role[] = [...new Set([...CANDIDATE_ROLES, ...RECRUITER_ROLES])];

@@ -14,8 +14,7 @@ from app.core.constants import API_V1_PREFIX
 from app.core.rate_limit import enforce_ai_rate_limit
 from app.core.exceptions import ResourceNotFound, ValidationError
 from app.database import get_db
-from app.models.analysis import AudioResponse, InterviewAnalysis
-from app.models.conversation import ConversationTurn, ConversationTurnAnalysis
+from app.models.analysis import AudioResponse
 from app.models.features import VoiceAnalysis, SessionReport
 from app.models.interview import InterviewSession
 from app.models.prediction import CoachingPlan, InterviewPrediction
@@ -26,6 +25,7 @@ from app.schemas.prediction import (
     InterviewReadinessResponse,
 )
 from app.services import (
+    analytics_service,
     benchmark_service,
     career_coach_service,
     interview_service,
@@ -45,62 +45,39 @@ def _get_session_averages(session: InterviewSession, db: Session) -> dict:
     """Aggregate score averages (and, for the upload flow, voice metrics)
     for a session.
 
-    Two independent, non-overlapping sources depending on how the
-    session's answers were scored:
+    Scores come from analytics_service.scored_answers() — the single source
+    that already combines upload-flow InterviewAnalysis rows and completed
+    live-interview ConversationTurnAnalysis rows (attributed to the live
+    session's mirrored InterviewSession), so readiness and coaching see
+    exactly the answers analytics and benchmarks see.
 
-    - Mirrored live-interview sessions (session.live_session_id is not
-      None): ConversationTurnAnalysis rows, joined through
-      ConversationTurn — the live-interview analogue of InterviewAnalysis,
-      produced by interview_service.score_and_store_conversation_turn.
-      Live interviews have no voice/audio signal at all, so
-      avg_confidence/avg_speaking_rate/avg_filler_words are omitted here
-      rather than fabricated — prediction_service.compute_readiness()
-      already has its own documented, neutral defaults for exactly this
-      "no voice signal available" case, so the caller degrades gracefully
-      without this function inventing a number itself.
-
-    - Normal upload/audio sessions (unchanged): InterviewAnalysis rows,
-      joined through AudioResponse, plus VoiceAnalysis metrics.
+    Voice metrics exist only for upload sessions. Live interviews have no
+    audio signal, so avg_confidence/avg_speaking_rate/avg_filler_words are
+    omitted rather than fabricated — prediction_service.compute_readiness()
+    has its own documented neutral defaults for that case.
     """
-    if session.live_session_id is not None:
-        analyses = (
-            db.execute(
-                select(ConversationTurnAnalysis)
-                .join(
-                    ConversationTurn,
-                    ConversationTurnAnalysis.conversation_turn_id
-                    == ConversationTurn.id,
-                )
-                .where(ConversationTurn.live_session_id == session.live_session_id)
-            )
-            .scalars()
-            .all()
-        )
+    sa = analytics_service.scored_answers(session.user_id)
+    count, overall, comm, tech, ps = db.execute(
+        select(
+            func.count(),
+            func.avg(sa.c.overall),
+            func.avg(sa.c.comm),
+            func.avg(sa.c.tech),
+            func.avg(sa.c.ps),
+        ).where(sa.c.session_id == session.id)
+    ).one()
 
-        if not analyses:
-            return {}
-
-        return {
-            "overall_score": _avg([a.overall_score for a in analyses]),
-            "communication_score": _avg([a.communication_score for a in analyses]),
-            "technical_score": _avg([a.technical_score for a in analyses]),
-            "problem_solving_score": _avg([a.problem_solving_score for a in analyses]),
-        }
-
-    analyses = (
-        db.execute(
-            select(InterviewAnalysis)
-            .join(
-                AudioResponse, InterviewAnalysis.audio_response_id == AudioResponse.id
-            )
-            .where(AudioResponse.session_id == session.id)
-        )
-        .scalars()
-        .all()
-    )
-
-    if not analyses:
+    if not count:
         return {}
+
+    metrics = {
+        "overall_score": float(overall),
+        "communication_score": float(comm),
+        "technical_score": float(tech),
+        "problem_solving_score": float(ps),
+    }
+    if session.live_session_id is not None:
+        return metrics
 
     voices = (
         db.execute(
@@ -111,16 +88,12 @@ def _get_session_averages(session: InterviewSession, db: Session) -> dict:
         .scalars()
         .all()
     )
-
-    return {
-        "overall_score": _avg([a.overall_score for a in analyses]),
-        "communication_score": _avg([a.communication_score for a in analyses]),
-        "technical_score": _avg([a.technical_score for a in analyses]),
-        "problem_solving_score": _avg([a.problem_solving_score for a in analyses]),
-        "avg_confidence": _avg([v.confidence_score for v in voices]),
-        "avg_speaking_rate": _avg([v.speaking_rate for v in voices]),
-        "avg_filler_words": _avg([v.filler_word_count for v in voices]),
-    }
+    metrics.update(
+        avg_confidence=_avg([v.confidence_score for v in voices]),
+        avg_speaking_rate=_avg([v.speaking_rate for v in voices]),
+        avg_filler_words=_avg([v.filler_word_count for v in voices]),
+    )
+    return metrics
 
 
 def _commit_upsert_or_existing(db: Session, new_row, model, session_id: uuid.UUID):
@@ -196,18 +169,15 @@ def generate_readiness_assessment(
 
     readiness_score, readiness_level = prediction_service.compute_readiness(**metrics)
 
-    # Compute percentile vs all platform users via COUNT aggregates instead of
-    # fetching every InterviewAnalysis row in the platform into Python.
+    # Percentile vs every scored answer on the platform (upload + completed
+    # live), via COUNT aggregates — same population as benchmark_service.
     user_score = metrics["overall_score"]
-    total_count = db.execute(
-        select(func.count(InterviewAnalysis.overall_score)).join(
-            AudioResponse, InterviewAnalysis.audio_response_id == AudioResponse.id
-        )
-    ).scalar_one()
+    platform = analytics_service.scored_answers()
+    total_count = db.execute(select(func.count()).select_from(platform)).scalar_one()
     below_count = db.execute(
-        select(func.count(InterviewAnalysis.overall_score))
-        .join(AudioResponse, InterviewAnalysis.audio_response_id == AudioResponse.id)
-        .where(InterviewAnalysis.overall_score < user_score)
+        select(func.count())
+        .select_from(platform)
+        .where(platform.c.overall < user_score)
     ).scalar_one()
     percentile = prediction_service.compute_percentile_from_counts(
         below_count, total_count

@@ -7,6 +7,13 @@ import { FeaturesProvider } from './context/FeaturesContext';
 import { RoleProvider } from './context/RoleContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { ToastProvider } from './context/ToastContext';
+import {
+  ADMIN_ROLES,
+  ANY_ROLE,
+  CANDIDATE_ROLES,
+  RECRUITER_ROLES,
+  REPORT_ROLES,
+} from './utils/roleRoutes';
 
 // Eagerly load the shell pages (tiny, used on first render)
 import { LandingPage } from './pages/LandingPage';
@@ -57,16 +64,6 @@ function PageFallback() {
   );
 }
 
-// Role gates, matching Phase 4's page-visibility spec exactly: Candidate
-// pages are also reachable by Super Admin ("Super Admin: Everything");
-// Recruiter's and Admin's own dashboards are not reachable by each other,
-// or by Super Admin's peers — only by Super Admin itself. Settings
-// (/profile) is common to every role.
-const CANDIDATE_ROLES = ['candidate', 'super_admin'] as const;
-const RECRUITER_ROLES = ['recruiter', 'super_admin'] as const;
-const ADMIN_ROLES = ['admin', 'super_admin'] as const;
-const ANY_ROLE = ['candidate', 'recruiter', 'admin', 'super_admin'] as const;
-
 export default function App() {
   return (
     <ThemeProvider>
@@ -86,7 +83,7 @@ export default function App() {
                     <Route
                       path="/sessions"
                       element={
-                        <RequireRole roles={[...CANDIDATE_ROLES]}>
+                        <RequireRole roles={CANDIDATE_ROLES}>
                           <Suspense fallback={<PageFallback />}><SessionsListPage /></Suspense>
                         </RequireRole>
                       }
@@ -94,7 +91,7 @@ export default function App() {
                     <Route
                       path="/sessions/:sessionId"
                       element={
-                        <RequireRole roles={[...CANDIDATE_ROLES]}>
+                        <RequireRole roles={CANDIDATE_ROLES}>
                           <Suspense fallback={<PageFallback />}><SessionDetailPage /></Suspense>
                         </RequireRole>
                       }
@@ -102,11 +99,9 @@ export default function App() {
                     <Route
                       path="/sessions/:sessionId/report"
                       element={
-                        // Reachable by Recruiter too — this is the "Open
-                        // report" link from the Recruiter dashboard's
-                        // candidate detail panel (Phase 8), not just a
-                        // candidate reviewing their own report.
-                        <RequireRole roles={[...CANDIDATE_ROLES, 'recruiter']}>
+                        // Owner, or the "Open report" link from the
+                        // candidate pipeline (Recruiter/Admin/Super Admin).
+                        <RequireRole roles={REPORT_ROLES}>
                           <Suspense fallback={<PageFallback />}><InterviewReportPage /></Suspense>
                         </RequireRole>
                       }
@@ -114,7 +109,7 @@ export default function App() {
                     <Route
                       path="/dashboard"
                       element={
-                        <RequireRole roles={[...CANDIDATE_ROLES]}>
+                        <RequireRole roles={CANDIDATE_ROLES}>
                           <Suspense fallback={<PageFallback />}><DashboardPage /></Suspense>
                         </RequireRole>
                       }
@@ -122,7 +117,7 @@ export default function App() {
                     <Route
                       path="/live-interview"
                       element={
-                        <RequireRole roles={[...CANDIDATE_ROLES]}>
+                        <RequireRole roles={CANDIDATE_ROLES}>
                           <Suspense fallback={<PageFallback />}><LiveInterviewPage /></Suspense>
                         </RequireRole>
                       }
@@ -130,7 +125,7 @@ export default function App() {
                     <Route
                       path="/analytics"
                       element={
-                        <RequireRole roles={[...CANDIDATE_ROLES]}>
+                        <RequireRole roles={CANDIDATE_ROLES}>
                           <Suspense fallback={<PageFallback />}><AnalyticsPage /></Suspense>
                         </RequireRole>
                       }
@@ -138,7 +133,7 @@ export default function App() {
                     <Route
                       path="/resume"
                       element={
-                        <RequireRole roles={[...CANDIDATE_ROLES]}>
+                        <RequireRole roles={CANDIDATE_ROLES}>
                           <Suspense fallback={<PageFallback />}><ResumePage /></Suspense>
                         </RequireRole>
                       }
@@ -146,7 +141,7 @@ export default function App() {
                     <Route
                       path="/profile"
                       element={
-                        <RequireRole roles={[...ANY_ROLE]}>
+                        <RequireRole roles={ANY_ROLE}>
                           <Suspense fallback={<PageFallback />}><ProfilePage /></Suspense>
                         </RequireRole>
                       }
@@ -154,7 +149,7 @@ export default function App() {
                     <Route
                       path="/recruiter"
                       element={
-                        <RequireRole roles={[...RECRUITER_ROLES]}>
+                        <RequireRole roles={RECRUITER_ROLES}>
                           <Suspense fallback={<PageFallback />}><RecruiterPage /></Suspense>
                         </RequireRole>
                       }
@@ -162,7 +157,7 @@ export default function App() {
                     <Route
                       path="/admin"
                       element={
-                        <RequireRole roles={[...ADMIN_ROLES]}>
+                        <RequireRole roles={ADMIN_ROLES}>
                           <Suspense fallback={<PageFallback />}><AdminPage /></Suspense>
                         </RequireRole>
                       }

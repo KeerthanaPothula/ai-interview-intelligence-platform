@@ -80,12 +80,13 @@ describe('Sidebar — role-based navigation (Phase 5)', () => {
     expect(screen.queryByRole('link', { name: /admin dashboard/i })).not.toBeInTheDocument();
   });
 
-  it('shows only the Admin Dashboard link for an admin — no candidate or recruiter links', () => {
+  it('shows Admin and Recruiter Dashboard links for an admin — no candidate links', () => {
     mockUser = makeUser('admin');
     renderSidebar();
     expect(screen.getByRole('link', { name: 'Admin Dashboard' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Recruiter Dashboard' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Dashboard' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'Recruiter Dashboard' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Live Interview' })).not.toBeInTheDocument();
   });
 
   it('shows every section for a super admin ("Everything")', () => {

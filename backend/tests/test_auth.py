@@ -146,6 +146,19 @@ class TestGetMe:
         )
         assert response.status_code == 401
 
+    def test_deactivated_user_valid_token_returns_403(
+        self, client, db, registered_user, auth_headers
+    ):
+        # is_active is enforced by get_current_user itself, so even a plain
+        # (non-role-gated) endpoint rejects a still-valid token.
+        user = db.get(User, uuid.UUID(registered_user["id"]))
+        user.is_active = False
+        db.commit()
+
+        response = client.get("/api/v1/auth/me", headers=auth_headers)
+        assert response.status_code == 403
+        assert response.json()["detail"] == "This account has been deactivated."
+
 
 # ---------------------------------------------------------------------------
 # PATCH /api/v1/auth/me

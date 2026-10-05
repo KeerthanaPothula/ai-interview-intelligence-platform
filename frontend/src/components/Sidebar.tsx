@@ -48,7 +48,8 @@ function navForRole(role: ReturnType<typeof useRole>['role']): NavItem[] {
     case 'recruiter':
       return RECRUITER_NAV;
     case 'admin':
-      return ADMIN_NAV;
+      // Admin can also view the candidate pipeline (can_view_candidates).
+      return [...RECRUITER_NAV, ...ADMIN_NAV];
     case 'super_admin':
       return SUPER_ADMIN_NAV;
     case 'candidate':
