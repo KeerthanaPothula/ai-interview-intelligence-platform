@@ -55,16 +55,20 @@ def store_chunks(
     db: Session,
 ) -> int:
     """Embed and persist text chunks. Returns the number of chunks stored."""
+    embeddings_enabled = get_settings().ENABLE_EMBEDDINGS
     stored = 0
     for idx, chunk_text_str in enumerate(chunks):
-        try:
-            embedding = embedding_service.encode_text(chunk_text_str)
-            embedding_json = json.dumps(embedding)
-        except Exception:
-            logger.warning(
-                "Embedding failed for chunk %d — storing without embedding", idx
-            )
-            embedding_json = None
+        embedding_json = None
+        if embeddings_enabled:
+            try:
+                embedding = embedding_service.encode_text(chunk_text_str)
+                embedding_json = json.dumps(embedding)
+            except Exception as exc:
+                logger.warning(
+                    "Embedding failed for chunk %d — storing without embedding: %s",
+                    idx,
+                    exc,
+                )
 
         chunk = DocumentChunk(
             user_id=user_id,
@@ -98,6 +102,9 @@ def retrieve_relevant_chunks(
         if not chunks:
             return []
 
+        if not get_settings().ENABLE_EMBEDDINGS:
+            return [c.chunk_text for c in chunks[:k]]
+
         chunk_embeddings = []
         for c in chunks:
             if c.embedding_json:
@@ -116,9 +123,11 @@ def retrieve_relevant_chunks(
                 query_embedding, chunk_embeddings, k=k
             )
             return [text for text, _ in top_k]
-        except Exception:
+        except Exception as exc:
             logger.warning(
-                "RAG retrieval embedding failed — returning first %d chunks", k
+                "RAG retrieval embedding failed — returning first %d chunks: %s",
+                k,
+                exc,
             )
             return [c.chunk_text for c in chunks[:k]]
 

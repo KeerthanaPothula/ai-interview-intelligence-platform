@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 import threading
 
+from app.config import get_settings
+
 logger = logging.getLogger(__name__)
 
 _MODEL_NAME = "all-MiniLM-L6-v2"
@@ -22,6 +24,10 @@ def _get_model():
     False) and return the already-loaded model without touching the lock.
     """
     global _model
+    # Checked before the import so a disabled deployment never loads torch
+    # or downloads the model (same pattern as transcription_service).
+    if not get_settings().ENABLE_EMBEDDINGS:
+        raise RuntimeError("Embeddings are disabled (ENABLE_EMBEDDINGS=false).")
     if _model is None:
         with _model_lock:
             if _model is None:

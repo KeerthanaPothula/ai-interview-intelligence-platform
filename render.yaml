@@ -95,6 +95,13 @@ services:
       - key: ENABLE_AUDIO_PROCESSING
         value: false
 
+      # Semantic resume embeddings load sentence-transformers + PyTorch
+      # (~350 MB) — too much for the 512 MB free instance. Disabled: chunks
+      # are stored without embeddings and RAG retrieval uses its first-k
+      # fallback. No UI flow uses semantic retrieval today.
+      - key: ENABLE_EMBEDDINGS
+        value: false
+
       - key: WHISPER_MODEL
         value: base
 

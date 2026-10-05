@@ -148,6 +148,15 @@ class Settings(BaseSettings):
     # RAG (Retrieval-Augmented Generation)  — resume-personalised questions
     # ------------------------------------------------------------------
 
+    # Master switch for semantic embeddings (sentence-transformers + PyTorch).
+    # True (default): resume chunks are embedded on upload and RAG retrieval
+    #   ranks them by cosine similarity.
+    # False: sentence-transformers/torch are never imported and no model is
+    #   downloaded; chunks are stored with embedding_json=None and retrieval
+    #   uses the existing first-k fallback. Set false on small instances
+    #   (Render free, 512 MB): loading the model alone needs ~350 MB.
+    ENABLE_EMBEDDINGS: bool = True
+
     # Word count per chunk when splitting resume/document text for embedding.
     RAG_CHUNK_SIZE: int = Field(default=200, gt=0)
 
