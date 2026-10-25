@@ -16,8 +16,19 @@ const PAGE_TITLES: Record<string, string> = {
 };
 
 export function Layout() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, userLoading } = useAuth();
   const { pathname } = useLocation();
+
+  // A stored token is still being verified against /auth/me — show nothing
+  // protected until the backend answers. Skipped when a verified user is
+  // already present (silent token refresh), so pages aren't unmounted.
+  if (userLoading && !isAuthenticated) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
+        <span className="spinner" style={{ width: 32, height: 32, borderWidth: 3 }} aria-label="Checking your session" />
+      </div>
+    );
+  }
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;

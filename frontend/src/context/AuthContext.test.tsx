@@ -41,17 +41,30 @@ describe('AuthContext', () => {
     expect(result.current.user).toBeNull();
   });
 
-  it('restores an authenticated session from stored tokens on mount', async () => {
+  it('restores an authenticated session from stored tokens only after the backend accepts them', async () => {
     vi.spyOn(api, 'readStoredAccessToken').mockReturnValue('stored-token');
     const { result } = renderHook(() => useAuth(), { wrapper });
 
-    expect(result.current.isAuthenticated).toBe(true);
+    // A stored token alone is not authentication — wait for /auth/me.
+    expect(result.current.isAuthenticated).toBe(false);
+    expect(result.current.userLoading).toBe(true);
     expect(result.current.token).toBe('stored-token');
 
     await waitFor(() => expect(result.current.user).toEqual(MOCK_USER));
+    expect(result.current.isAuthenticated).toBe(true);
   });
 
-  it('userLoading is true in the same update where isAuthenticated first becomes true after login()', async () => {
+  it('a stored token the backend rejects (stale/forged) never authenticates', async () => {
+    vi.spyOn(api, 'readStoredAccessToken').mockReturnValue('forged-token');
+    vi.spyOn(api, 'getMe').mockRejectedValue(new api.ApiError(401, 'Could not validate credentials.'));
+    const { result } = renderHook(() => useAuth(), { wrapper });
+
+    expect(result.current.isAuthenticated).toBe(false);
+    await waitFor(() => expect(result.current.userLoading).toBe(false));
+    expect(result.current.isAuthenticated).toBe(false);
+  });
+
+  it('userLoading is true in the same update where the token is first set after login()', async () => {
     // Regression test: userLoading must never be a plain useState flag
     // set from inside the getMe() effect, because that necessarily lags
     // one render behind the token change — RequireRole would briefly see
@@ -71,9 +84,11 @@ describe('AuthContext', () => {
       await result.current.login('jane@example.com', 'password123', true);
     });
 
-    // getMe() has not resolved yet — isAuthenticated is already true, and
-    // userLoading must already be true too, in this same state update.
-    expect(result.current.isAuthenticated).toBe(true);
+    // getMe() has not resolved yet — the token is set, userLoading must
+    // already be true in this same state update, and the session is not
+    // yet considered authenticated.
+    expect(result.current.token).toBe('access-123');
+    expect(result.current.isAuthenticated).toBe(false);
     expect(result.current.user).toBeNull();
     expect(result.current.userLoading).toBe(true);
 
@@ -83,6 +98,7 @@ describe('AuthContext', () => {
     });
     await waitFor(() => expect(result.current.userLoading).toBe(false));
     expect(result.current.user).toEqual(MOCK_USER);
+    expect(result.current.isAuthenticated).toBe(true);
   });
 
   it('userLoading becomes false even if getMe() fails for a non-401 reason (no stuck spinner)', async () => {
@@ -95,7 +111,7 @@ describe('AuthContext', () => {
     });
 
     await waitFor(() => expect(result.current.userLoading).toBe(false));
-    expect(result.current.isAuthenticated).toBe(true);
+    expect(result.current.isAuthenticated).toBe(false);
     expect(result.current.user).toBeNull();
   });
 
@@ -250,6 +266,6 @@ describe('AuthContext', () => {
     });
 
     expect(result.current.token).toBe('refreshed-access-token');
-    expect(result.current.isAuthenticated).toBe(true);
+    await waitFor(() => expect(result.current.isAuthenticated).toBe(true));
   });
 });

@@ -22,6 +22,9 @@ interface AuthContextValue {
   // flashes an unauthorized redirect during the gap between the token
   // being set and `user` (and therefore `user.role`) being known.
   userLoading: boolean;
+  // True only once the backend has accepted the token (/auth/me returned a
+  // user). A token merely present in storage — stale, revoked, or forged —
+  // must never unlock the app shell or the landing page's Dashboard link.
   isAuthenticated: boolean;
   login: (email: string, password: string, rememberMe?: boolean) => Promise<void>;
   register: (data: UserCreate) => Promise<void>;
@@ -142,7 +145,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       token,
       user,
       userLoading,
-      isAuthenticated: token !== null,
+      isAuthenticated: token !== null && user !== null,
       login,
       register,
       logout,

@@ -17,7 +17,7 @@ function passwordStrength(pw: string): 0 | 1 | 2 | 3 | 4 {
 const STRENGTH_LABEL = ['', 'Weak', 'Fair', 'Good', 'Strong'];
 
 export function RegisterPage() {
-  const { register, isAuthenticated } = useAuth();
+  const { register, isAuthenticated, userLoading } = useAuth();
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
@@ -33,6 +33,16 @@ export function RegisterPage() {
 
   if (isAuthenticated) {
     return <Navigate to="/dashboard" replace />;
+  }
+
+  // Auto-login after registration: token stored, /auth/me still in flight.
+  // Wait for it rather than flashing the manual "sign in" screen.
+  if (userLoading) {
+    return (
+      <div className="auth-page">
+        <span className="spinner" style={{ width: 32, height: 32, borderWidth: 3 }} aria-label="Loading" />
+      </div>
+    );
   }
 
   async function handleSubmit(event: FormEvent) {

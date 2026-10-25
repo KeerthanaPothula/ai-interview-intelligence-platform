@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { Layout } from './Layout';
 
 let mockIsAuthenticated = false;
+let mockUserLoading = false;
 
 vi.mock('../context/AuthContext', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../context/AuthContext')>();
@@ -12,6 +13,7 @@ vi.mock('../context/AuthContext', async (importOriginal) => {
     useAuth: vi.fn(() => ({
       token: mockIsAuthenticated ? 'test-token' : null,
       user: null,
+      userLoading: mockUserLoading,
       isAuthenticated: mockIsAuthenticated,
       login: vi.fn(),
       register: vi.fn(),
@@ -42,6 +44,7 @@ function renderAt(path: string) {
 
 beforeEach(() => {
   mockIsAuthenticated = false;
+  mockUserLoading = false;
 });
 
 describe('Layout (protected route guard)', () => {
@@ -49,6 +52,15 @@ describe('Layout (protected route guard)', () => {
     renderAt('/dashboard');
     expect(screen.getByText('Login page')).toBeInTheDocument();
     expect(screen.queryByText('Dashboard content')).not.toBeInTheDocument();
+  });
+
+  it('shows only a spinner, never the app shell, while a stored token is being verified', () => {
+    mockUserLoading = true;
+    renderAt('/dashboard');
+    expect(screen.getByLabelText('Checking your session')).toBeInTheDocument();
+    expect(screen.queryByText('Dashboard content')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('sidebar')).not.toBeInTheDocument();
+    expect(screen.queryByText('Login page')).not.toBeInTheDocument();
   });
 
   it('renders the protected content and app shell for authenticated users', () => {

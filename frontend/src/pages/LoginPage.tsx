@@ -16,7 +16,7 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  if (isAuthenticated && roleLoading) {
+  if (!isAuthenticated && roleLoading) {
     // Role isn't known yet — wait rather than redirecting to a guessed
     // default, since Phase 10 requires each role to land on its own
     // dashboard (Recruiter -> /recruiter, Admin -> /admin), not a
