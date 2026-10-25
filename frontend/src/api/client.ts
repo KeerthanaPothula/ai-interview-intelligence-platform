@@ -43,6 +43,7 @@ import type {
   SessionTrendResponse,
   Token,
   TranscriptResponse,
+  TextAnswerResponse,
   UpdateCandidateStatusRequest,
   UpdateUserRoleRequest,
   UserCreate,
@@ -403,6 +404,23 @@ export function generateQuestions(
   return request<QuestionResponse[]>(
     `/api/v1/interviews/${sessionId}/questions/generate`,
     { method: 'POST' },
+    token,
+  );
+}
+
+export function listTextAnswers(sessionId: string, token: string): Promise<TextAnswerResponse[]> {
+  return request<TextAnswerResponse[]>(`/api/v1/interviews/${sessionId}/answers`, {}, token);
+}
+
+export function submitTextAnswer(
+  sessionId: string,
+  questionId: string,
+  answerText: string,
+  token: string,
+): Promise<TextAnswerResponse> {
+  return request<TextAnswerResponse>(
+    `/api/v1/interviews/${sessionId}/questions/${questionId}/answers`,
+    { method: 'POST', body: JSON.stringify({ answer_text: answerText }) },
     token,
   );
 }

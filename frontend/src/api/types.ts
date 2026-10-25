@@ -104,6 +104,18 @@ export interface QuestionResponse {
   created_at: string;
 }
 
+export interface TextAnswerResponse {
+  id: string;
+  session_id: string;
+  question_id: string;
+  answer_text: string;
+  overall_score: number | null;
+  strengths: string[] | null;
+  weaknesses: string[] | null;
+  detailed_feedback: string | null;
+  created_at: string;
+}
+
 export interface SessionListResponse {
   id: string;
   title: string;

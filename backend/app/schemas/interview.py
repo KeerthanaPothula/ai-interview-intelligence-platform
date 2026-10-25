@@ -198,3 +198,21 @@ class SessionDetailResponse(BaseModel):
             "Provided by the service layer — not a DB column."
         ),
     )
+
+
+class TextAnswerCreate(BaseModel):
+    answer_text: str = Field(..., min_length=1, max_length=20000)
+
+
+class TextAnswerResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    session_id: uuid.UUID
+    question_id: uuid.UUID
+    answer_text: str
+    overall_score: float | None = None
+    strengths: list[str] | None = None
+    weaknesses: list[str] | None = None
+    detailed_feedback: str | None = None
+    created_at: datetime

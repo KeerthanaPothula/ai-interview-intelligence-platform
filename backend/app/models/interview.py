@@ -329,3 +329,32 @@ class Question(Base):
             f"<Question id={self.id} "
             f"seq={self.sequence_order} session_id={self.session_id}>"
         )
+
+
+class TextAnswer(Base):
+    """One durable typed answer per question in an owned interview session."""
+
+    __tablename__ = "text_answers"
+    __table_args__ = (
+        UniqueConstraint("question_id", name="uq_text_answers_question_id"),
+        Index("ix_text_answers_session_id", "session_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("interview_sessions.id", ondelete="CASCADE"), nullable=False
+    )
+    question_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("questions.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    answer_text: Mapped[str] = mapped_column(Text, nullable=False)
+    overall_score: Mapped[float | None] = mapped_column(nullable=True)
+    strengths: Mapped[str | None] = mapped_column(Text, nullable=True)
+    weaknesses: Mapped[str | None] = mapped_column(Text, nullable=True)
+    detailed_feedback: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

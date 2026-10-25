@@ -3,6 +3,8 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.constants import API_V1_PREFIX
@@ -11,7 +13,12 @@ from app.core.deps import get_current_user
 from app.core.pagination import PaginationParams, pagination_params
 from app.core.permissions import can_create_interview, can_generate_questions
 from app.database import get_db
-from app.models.interview import SESSION_STATUS_DRAFT
+from app.models.interview import (
+    SESSION_STATUS_DRAFT,
+    SESSION_STATUS_IN_PROGRESS,
+    Question,
+    TextAnswer,
+)
 from app.models.user import User
 from app.schemas.interview import (
     QuestionResponse,
@@ -19,7 +26,11 @@ from app.schemas.interview import (
     SessionDetailResponse,
     SessionListResponse,
     SessionUpdate,
+    TextAnswerCreate,
+    TextAnswerResponse,
 )
+from app.services import evaluation_service
+from app.core.exceptions import AIServiceError
 from app.services import interview_service, question_service, recruiter_service
 
 router = APIRouter(
@@ -240,3 +251,96 @@ def get_questions(
     interview_service.get_session_or_404(db, session_id, current_user.id)
     questions = question_service.get_questions(db, session_id)
     return [QuestionResponse.model_validate(q) for q in questions]
+
+
+def _answer_response(answer: TextAnswer) -> TextAnswerResponse:
+    import json
+
+    return TextAnswerResponse(
+        id=answer.id,
+        session_id=answer.session_id,
+        question_id=answer.question_id,
+        answer_text=answer.answer_text,
+        overall_score=answer.overall_score,
+        strengths=json.loads(answer.strengths) if answer.strengths else None,
+        weaknesses=json.loads(answer.weaknesses) if answer.weaknesses else None,
+        detailed_feedback=answer.detailed_feedback,
+        created_at=answer.created_at,
+    )
+
+
+@router.get("/{session_id}/answers", response_model=list[TextAnswerResponse])
+def list_text_answers(
+    session_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[TextAnswerResponse]:
+    interview_service.get_session_or_404(db, session_id, current_user.id)
+    answers = db.scalars(
+        select(TextAnswer).where(
+            TextAnswer.session_id == session_id,
+            TextAnswer.user_id == current_user.id,
+        )
+    ).all()
+    return [_answer_response(answer) for answer in answers]
+
+
+@router.post(
+    "/{session_id}/questions/{question_id}/answers",
+    response_model=TextAnswerResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def submit_text_answer(
+    session_id: uuid.UUID,
+    question_id: uuid.UUID,
+    data: TextAnswerCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> TextAnswerResponse:
+    session = interview_service.get_session_or_404(db, session_id, current_user.id)
+    question = db.scalar(
+        select(Question).where(
+            Question.id == question_id, Question.session_id == session.id
+        )
+    )
+    if question is None:
+        raise HTTPException(status_code=404, detail="Question not found.")
+    answer_text = data.answer_text.strip()
+    if not answer_text:
+        raise HTTPException(status_code=422, detail="Answer cannot be blank.")
+    if db.scalar(select(TextAnswer.id).where(TextAnswer.question_id == question_id)):
+        raise HTTPException(status_code=409, detail="An answer was already submitted for this question.")
+
+    answer = TextAnswer(
+        session_id=session.id,
+        question_id=question.id,
+        user_id=current_user.id,
+        answer_text=answer_text,
+    )
+    # Freeze the generated question set once a candidate has started answering;
+    # the existing draft-only regeneration flow would otherwise cascade-delete it.
+    session.status = SESSION_STATUS_IN_PROGRESS
+    # The existing evaluator accepts answer text directly. Evaluation is
+    # optional: evaluator outages never discard a candidate's answer.
+    try:
+        evaluation = evaluation_service.generate_evaluation(
+            transcript_text=answer_text,
+            question=question.body,
+            job_role=session.job_role,
+            job_description=session.job_description,
+        )
+        answer.overall_score = evaluation["overall_score"]
+        answer.strengths = evaluation["strengths"]
+        answer.weaknesses = evaluation["weaknesses"]
+        answer.detailed_feedback = evaluation["detailed_feedback"]
+    except AIServiceError:
+        pass
+
+    db.add(answer)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="An answer was already submitted for this question.")
+    db.refresh(answer)
+    return _answer_response(answer)

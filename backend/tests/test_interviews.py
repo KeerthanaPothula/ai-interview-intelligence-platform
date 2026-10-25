@@ -124,19 +124,62 @@ class TestListSessions:
         assert data[0]["id"] == str(interview_session.id)
 
     def test_list_respects_skip_and_limit(self, client, auth_headers):
-        # Create 3 sessions for the same user
         for i in range(3):
             _create_session(client, auth_headers, title=f"Session {i + 1}")
 
         response = client.get(
-            "/api/v1/interviews/",
-            params={"skip": 1, "limit": 1},
-            headers=auth_headers,
+            "/api/v1/interviews/", params={"skip": 1, "limit": 1}, headers=auth_headers
         )
-
         assert response.status_code == 200
         assert len(response.json()) == 1
 
+
+class TestTextAnswers:
+    def test_submit_and_restore_answer(self, client, auth_headers, interview_session, interview_question, monkeypatch):
+        monkeypatch.setattr(
+            "app.routers.interviews.evaluation_service.generate_evaluation",
+            lambda **kwargs: {
+                "overall_score": 8.0,
+                "strengths": '["Clear example"]',
+                "weaknesses": '["Add detail"]',
+                "detailed_feedback": "Strong response.",
+            },
+        )
+        path = f"/api/v1/interviews/{interview_session.id}/questions/{interview_question.id}/answers"
+        submitted = client.post(path, json={"answer_text": "  I solved the problem.  "}, headers=auth_headers)
+        assert submitted.status_code == 201
+        assert submitted.json()["answer_text"] == "I solved the problem."
+        assert submitted.json()["strengths"] == ["Clear example"]
+        assert submitted.json()["overall_score"] == 8.0
+        assert client.get(f"/api/v1/interviews/{interview_session.id}", headers=auth_headers).json()["status"] == "in_progress"
+
+        restored = client.get(f"/api/v1/interviews/{interview_session.id}/answers", headers=auth_headers)
+        assert restored.status_code == 200
+        assert restored.json()[0]["question_id"] == str(interview_question.id)
+        assert restored.json()[0]["answer_text"] == "I solved the problem."
+
+        duplicate = client.post(path, json={"answer_text": "Second submission"}, headers=auth_headers)
+        assert duplicate.status_code == 409
+
+    def test_answer_requires_auth_and_session_ownership(self, client, interview_session, interview_question):
+        path = f"/api/v1/interviews/{interview_session.id}/questions/{interview_question.id}/answers"
+        assert client.post(path, json={"answer_text": "answer"}).status_code == 401
+
+        other_headers = _register_and_get_headers(client, _USER_B)
+        assert client.post(path, json={"answer_text": "answer"}, headers=other_headers).status_code == 404
+
+    def test_evaluation_failure_does_not_lose_answer(self, client, auth_headers, interview_session, interview_question, monkeypatch):
+        from app.core.exceptions import AIServiceError
+
+        def unavailable(**kwargs):
+            raise AIServiceError("Unavailable")
+
+        monkeypatch.setattr("app.routers.interviews.evaluation_service.generate_evaluation", unavailable)
+        path = f"/api/v1/interviews/{interview_session.id}/questions/{interview_question.id}/answers"
+        response = client.post(path, json={"answer_text": "A durable answer."}, headers=auth_headers)
+        assert response.status_code == 201
+        assert response.json()["answer_text"] == "A durable answer."
+        assert response.json()["overall_score"] is None
 
 # ---------------------------------------------------------------------------
 # TestGetSession

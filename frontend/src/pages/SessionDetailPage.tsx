@@ -4,14 +4,14 @@ import { Link, useParams } from 'react-router-dom';
 import { FileBarChart2, Sparkles } from 'lucide-react';
 
 const ease = [0.4, 0, 0.2, 1] as [number, number, number, number];
-import { ApiError, generateQuestions, getSession, listResponses } from '../api/client';
+import { ApiError, generateQuestions, getSession, listResponses, listTextAnswers } from '../api/client';
 import { QuestionCard } from '../components/QuestionCard';
 import { SessionReportCard } from '../components/SessionReportCard';
 import { Skeleton } from '../components/Skeleton';
 import { EmptyState, ErrorState } from '../components/StateMessage';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-import type { AudioResponseResponse, SessionDetailResponse, SessionReportResponse } from '../api/types';
+import type { AudioResponseResponse, SessionDetailResponse, SessionReportResponse, TextAnswerResponse } from '../api/types';
 
 export function SessionDetailPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
@@ -20,6 +20,7 @@ export function SessionDetailPage() {
 
   const [session, setSession] = useState<SessionDetailResponse | null>(null);
   const [responses, setResponses] = useState<AudioResponseResponse[]>([]);
+  const [answers, setAnswers] = useState<TextAnswerResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -48,10 +49,11 @@ export function SessionDetailPage() {
 
     setLoading(true);
     setLoadError(null);
-    Promise.all([getSession(sessionId, token), listResponses(sessionId, token)])
-      .then(([sessionData, responseData]) => {
+    Promise.all([getSession(sessionId, token), listResponses(sessionId, token), listTextAnswers(sessionId, token)])
+      .then(([sessionData, responseData, answerData]) => {
         setSession(sessionData);
         setResponses(responseData);
+        setAnswers(answerData);
       })
       .catch(() => setLoadError('Unable to load this interview session right now.'))
       .finally(() => setLoading(false));
@@ -85,6 +87,11 @@ export function SessionDetailPage() {
   function handleUploaded(response: AudioResponseResponse) {
     setResponses((prev) => [response, ...prev]);
     showToast('Recording uploaded.', 'success');
+  }
+
+  function handleAnswerSubmitted(answer: TextAnswerResponse) {
+    setAnswers((prev) => [...prev, answer]);
+    showToast('Answer submitted.', 'success');
   }
 
   if (loading) {
@@ -171,6 +178,12 @@ export function SessionDetailPage() {
                 sessionId={session.id}
                 responses={responsesByQuestion.get(question.id) ?? []}
                 onUploaded={handleUploaded}
+                answer={answers.find((answer) => answer.question_id === question.id)}
+                onAnswerSubmitted={handleAnswerSubmitted}
+                onNext={() => {
+                  const next = session.questions.find((item) => item.sequence_order === question.sequence_order + 1);
+                  if (next) document.getElementById(`question-${next.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }}
               />
             ))}
           </section>
