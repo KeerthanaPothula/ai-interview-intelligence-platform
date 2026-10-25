@@ -68,4 +68,19 @@ describe('ResumePage', () => {
     expect(del).not.toHaveBeenCalled();
     expect(screen.getByText('cv.pdf')).toBeTruthy();
   });
+
+  it('forces a fresh analysis only when the user selects Re-analyze', async () => {
+    vi.spyOn(client, 'getCurrentResume').mockResolvedValue(RESUME);
+    const analyze = vi.spyOn(client, 'analyzeResume').mockResolvedValue({
+      ats_score: 88, skills: ['Python'], missing_skills: [], keywords: ['SQL'],
+      suggestions: [], word_count: 2,
+    });
+    renderPage();
+
+    const button = await screen.findByRole('button', { name: 'Re-analyze resume' });
+    await screen.findByText('88');
+    expect(analyze).toHaveBeenNthCalledWith(1, 'test-token', false);
+    await userEvent.click(button);
+    expect(analyze).toHaveBeenNthCalledWith(2, 'test-token', true);
+  });
 });

@@ -2,6 +2,7 @@
 
 import io
 import uuid
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -194,6 +195,76 @@ def test_get_current_resume_after_upload(client, auth_headers, upload_dir, monke
 def test_get_current_resume_requires_auth(client):
     resp = client.get("/api/v1/documents/resume/current")
     assert resp.status_code == 401
+
+
+def test_resume_analysis_is_cached_until_explicitly_forced(
+    client, auth_headers, upload_dir, monkeypatch
+):
+    _upload(client, auth_headers, monkeypatch, "cv.pdf", "Python and SQL experience.")
+    calls = []
+
+    def fake_analysis(prompt):
+        calls.append(prompt)
+        score = 88 if len(calls) == 1 else 90
+        return f'{{"ats_score": {score}, "skills": ["Python"], "missing_skills": [], "keywords": ["SQL"], "suggestions": []}}'
+
+    monkeypatch.setattr("app.services.gemini_service.generate_text", fake_analysis)
+    path = "/api/v1/documents/resume/analysis"
+    first = client.get(path, headers=auth_headers)
+    second = client.get(path, headers=auth_headers)
+    forced = client.get(f"{path}?force=true", headers=auth_headers)
+
+    assert first.status_code == second.status_code == forced.status_code == 200
+    assert first.json()["ats_score"] == second.json()["ats_score"] == 88
+    assert forced.json()["ats_score"] == 90
+    assert len(calls) == 2
+
+
+def test_new_resume_gets_a_separate_analysis_cache(
+    client, auth_headers, upload_dir, db, monkeypatch
+):
+    from app.models.documents import ResumeDocument
+
+    first_resume = _upload(client, auth_headers, monkeypatch, "old.pdf", "Python resume.")
+    first_row = db.get(ResumeDocument, uuid.UUID(first_resume["id"]))
+    first_row.created_at = datetime(2000, 1, 1)
+    db.commit()
+    calls = []
+
+    def fake_analysis(prompt):
+        calls.append(prompt)
+        score = 80 + len(calls)
+        return f'{{"ats_score": {score}, "skills": [], "missing_skills": [], "keywords": [], "suggestions": []}}'
+
+    monkeypatch.setattr("app.services.gemini_service.generate_text", fake_analysis)
+    path = "/api/v1/documents/resume/analysis"
+    assert client.get(path, headers=auth_headers).json()["ats_score"] == 81
+
+    second_resume = _upload(client, auth_headers, monkeypatch, "new.pdf", "SQL resume.")
+    assert second_resume["id"] != first_resume["id"]
+    assert client.get(path, headers=auth_headers).json()["ats_score"] == 82
+    assert len(calls) == 2
+
+
+def test_failed_forced_analysis_preserves_previous_cache(
+    client, auth_headers, upload_dir, monkeypatch
+):
+    _upload(client, auth_headers, monkeypatch, "cv.pdf", "Python resume.")
+    monkeypatch.setattr(
+        "app.services.gemini_service.generate_text",
+        lambda prompt: '{"ats_score": 91, "skills": [], "missing_skills": [], "keywords": [], "suggestions": []}',
+    )
+    path = "/api/v1/documents/resume/analysis"
+    assert client.get(path, headers=auth_headers).json()["ats_score"] == 91
+
+    def unavailable(prompt):
+        raise RuntimeError("provider unavailable")
+
+    monkeypatch.setattr("app.services.gemini_service.generate_text", unavailable)
+    forced = client.get(f"{path}?force=true", headers=auth_headers)
+    cached = client.get(path, headers=auth_headers)
+    assert forced.status_code == cached.status_code == 200
+    assert forced.json()["ats_score"] == cached.json()["ats_score"] == 91
 
 
 # ---------------------------------------------------------------------------

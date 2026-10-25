@@ -709,8 +709,9 @@ export function getInsights(token: string): Promise<InsightsResponse> {
 // Resume Analysis
 // ---------------------------------------------------------------------------
 
-export function analyzeResume(token: string): Promise<ResumeAnalysisResponse> {
-  return request<ResumeAnalysisResponse>('/api/v1/documents/resume/analysis', {}, token);
+export function analyzeResume(token: string, force = false): Promise<ResumeAnalysisResponse> {
+  const query = force ? '?force=true' : '';
+  return request<ResumeAnalysisResponse>(`/api/v1/documents/resume/analysis${query}`, {}, token);
 }
 
 // ---------------------------------------------------------------------------

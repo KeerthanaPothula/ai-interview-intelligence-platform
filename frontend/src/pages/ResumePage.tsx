@@ -88,12 +88,12 @@ export function ResumePage() {
     }
   }, [token]);
 
-  const runAnalysis = useCallback(async () => {
+  const runAnalysis = useCallback(async (force = false) => {
     if (!token) return;
     setLoadingAnalysis(true);
     setAnalysisError(null);
     try {
-      const a = await analyzeResume(token);
+      const a = await analyzeResume(token, force);
       setAnalysis(a);
     } catch (err) {
       setAnalysisError(
@@ -273,7 +273,7 @@ export function ResumePage() {
             <button
               type="button"
               className="btn btn-ghost btn-sm"
-              onClick={runAnalysis}
+              onClick={() => runAnalysis(true)}
               disabled={loadingAnalysis}
               aria-label="Re-analyze resume"
             >

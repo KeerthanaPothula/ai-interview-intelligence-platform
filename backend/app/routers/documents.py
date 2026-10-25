@@ -6,9 +6,9 @@ import logging
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import Response
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -179,16 +179,14 @@ def get_current_resume(
     if doc is None:
         raise HTTPException(status_code=404, detail="No resume uploaded yet")
 
-    chunk_count = (
-        db.execute(
-            select(DocumentChunk).where(DocumentChunk.resume_document_id == doc.id)
+    chunk_count = db.scalar(
+        select(func.count()).select_from(DocumentChunk).where(
+            DocumentChunk.resume_document_id == doc.id
         )
-        .scalars()
-        .all()
-    )
+    ) or 0
 
     resp = ResumeDocumentResponse.model_validate(doc)
-    resp.chunk_count = len(chunk_count)
+    resp.chunk_count = chunk_count
     return resp
 
 
@@ -312,9 +310,9 @@ def delete_current_resume(
 @router.get(
     "/resume/analysis",
     response_model=ResumeAnalysisResponse,
-    dependencies=[Depends(enforce_ai_rate_limit)],
 )
 def analyze_resume(
+    force: bool = Query(default=False),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ResumeAnalysisResponse:
@@ -331,7 +329,21 @@ def analyze_resume(
     if doc is None:
         raise HTTPException(status_code=404, detail="No resume uploaded yet")
 
+    if doc.analysis_json and not force:
+        return ResumeAnalysisResponse.model_validate(_json.loads(doc.analysis_json))
+
+    doc_id = doc.id
+    user_id = current_user.id
     text = doc.extracted_text or ""
+    previous_analysis = doc.analysis_json
+
+    # Cached reads do not spend the user's AI request budget. Enforce the
+    # existing per-user limit immediately before any provider call.
+    enforce_ai_rate_limit(current_user)
+    # Release the database transaction/connection while Gemini runs. The row
+    # is reloaded by both IDs before caching so a concurrent delete or owner
+    # change cannot attach results to a different user's resume.
+    db.rollback()
     word_count = len(text.split()) if text else 0
 
     # Call Gemini for structured resume analysis
@@ -354,7 +366,7 @@ def analyze_resume(
         )
         raw = gemini_service.generate_text(prompt)
         data = _json.loads(raw)
-        return ResumeAnalysisResponse(
+        result = ResumeAnalysisResponse(
             ats_score=int(data.get("ats_score", 70)),
             skills=data.get("skills", [])[:20],
             missing_skills=data.get("missing_skills", [])[:10],
@@ -363,6 +375,10 @@ def analyze_resume(
             word_count=word_count,
         )
     except Exception:
+        if force and previous_analysis:
+            # A failed refresh must not replace a previously useful result.
+            return ResumeAnalysisResponse.model_validate(_json.loads(previous_analysis))
+
         # Graceful fallback: extract skills via regex, return basic analysis
         from app.services.resume_scoring import estimate_ats_score
 
@@ -379,7 +395,7 @@ def analyze_resume(
             "REST API",
         ]
         found = [s for s in common_skills if s.lower() in text.lower()]
-        return ResumeAnalysisResponse(
+        result = ResumeAnalysisResponse(
             ats_score=estimate_ats_score(word_count),
             skills=found,
             missing_skills=[s for s in common_skills if s not in found][:5],
@@ -390,3 +406,14 @@ def analyze_resume(
             ],
             word_count=word_count,
         )
+
+    current_doc = db.scalar(
+        select(ResumeDocument).where(
+            ResumeDocument.id == doc_id,
+            ResumeDocument.user_id == user_id,
+        )
+    )
+    if current_doc is not None:
+        current_doc.analysis_json = _json.dumps(result.model_dump())
+        db.commit()
+    return result

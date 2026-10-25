@@ -25,7 +25,6 @@ AI_ENDPOINTS = [
     ("POST", "/api/v1/interviews/{sid}/questions/generate"),
     ("POST", "/api/v1/interviews/{sid}/follow-up-question"),
     ("POST", "/api/v1/documents/interviews/{sid}/generate-rag-questions"),
-    ("GET", "/api/v1/documents/resume/analysis"),
 ]
 
 
@@ -163,6 +162,27 @@ def test_only_gemini_endpoints_carry_the_limiter():
         for method in route.methods
     }
     assert limited == {(m, p.replace("{sid}", "{session_id}")) for m, p in AI_ENDPOINTS}
+
+
+def test_resume_analysis_limits_provider_calls_but_not_cached_reads(
+    client, auth_headers, ai_limit, upload_dir, monkeypatch
+):
+    from tests.test_documents import _upload
+
+    ai_limit(1)
+    _upload(client, auth_headers, monkeypatch, "cv.pdf", "Python backend experience.")
+    calls = []
+
+    def fake_analysis(prompt):
+        calls.append(prompt)
+        return '{"ats_score": 88, "skills": ["Python"], "missing_skills": [], "keywords": [], "suggestions": []}'
+
+    monkeypatch.setattr("app.services.gemini_service.generate_text", fake_analysis)
+    path = "/api/v1/documents/resume/analysis"
+    assert client.get(path, headers=auth_headers).status_code == 200
+    assert client.get(path, headers=auth_headers).status_code == 200
+    assert len(calls) == 1
+    assert client.get(f"{path}?force=true", headers=auth_headers).status_code == 429
 
 
 def test_reads_are_not_limited(client, auth_headers, ai_limit, opening_calls):

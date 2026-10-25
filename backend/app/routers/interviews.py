@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -19,6 +19,7 @@ from app.models.interview import (
     Question,
     TextAnswer,
 )
+from app.models.analysis import AudioResponse
 from app.models.user import User
 from app.schemas.interview import (
     QuestionResponse,
@@ -115,7 +116,11 @@ def get_session(
     session = recruiter_service.get_viewable_session_or_404(
         db, session_id, current_user
     )
-    response_count = len(session.audio_responses)
+    response_count = db.scalar(
+        select(func.count()).select_from(AudioResponse).where(
+            AudioResponse.session_id == session_id
+        )
+    ) or 0
     return SessionDetailResponse.model_validate(session).model_copy(
         update={"response_count": response_count}
     )
@@ -143,7 +148,11 @@ def update_session(
     """
     session = interview_service.get_session_or_404(db, session_id, current_user.id)
     session = interview_service.update_session(db, session, data)
-    response_count = len(session.audio_responses)
+    response_count = db.scalar(
+        select(func.count()).select_from(AudioResponse).where(
+            AudioResponse.session_id == session_id
+        )
+    ) or 0
     return SessionDetailResponse.model_validate(session).model_copy(
         update={"response_count": response_count}
     )

@@ -105,32 +105,42 @@ def generate_report(
         # question can be re-recorded, and the transcript Gemini judges and
         # the scores/voice metrics below must all describe that same answer
         # — never a mix of attempts, and never whichever row comes first.
-        questions_and_transcripts = []
-        reported_ids: list[uuid.UUID] = []
-        for q in questions:
-            resp = (
-                db.query(AudioResponse)
-                .filter(
-                    AudioResponse.question_id == q.id,
-                    AudioResponse.status == "completed",
-                )
-                .order_by(AudioResponse.created_at.desc(), AudioResponse.id.desc())
-                .first()
+        responses = (
+            db.query(AudioResponse)
+            .filter(
+                AudioResponse.question_id.in_([q.id for q in questions]),
+                AudioResponse.status == "completed",
             )
-            if resp is None:
-                continue
-            reported_ids.append(resp.id)
-            transcript = (
-                db.query(Transcript)
-                .filter(Transcript.audio_response_id == resp.id)
-                .first()
+            .order_by(
+                AudioResponse.question_id,
+                AudioResponse.created_at.desc(),
+                AudioResponse.id.desc(),
             )
-            questions_and_transcripts.append(
-                {
-                    "question": q.body,
-                    "transcript": transcript.text if transcript else "",
-                }
-            )
+            .all()
+        )
+        latest_by_question: dict[uuid.UUID, AudioResponse] = {}
+        for response in responses:
+            latest_by_question.setdefault(response.question_id, response)
+
+        reported_ids = [
+            latest_by_question[q.id].id
+            for q in questions
+            if q.id in latest_by_question
+        ]
+        transcripts = (
+            db.query(Transcript)
+            .filter(Transcript.audio_response_id.in_(reported_ids))
+            .all()
+        )
+        transcript_by_response = {t.audio_response_id: t.text for t in transcripts}
+        questions_and_transcripts = [
+            {
+                "question": q.body,
+                "transcript": transcript_by_response.get(latest_by_question[q.id].id, ""),
+            }
+            for q in questions
+            if q.id in latest_by_question
+        ]
 
         # Analyses of exactly the reported answers.
         analyses_rows = (

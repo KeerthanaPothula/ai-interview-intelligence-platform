@@ -36,6 +36,7 @@ class ResumeDocument(Base):
     filename: Mapped[str] = mapped_column(String(500), nullable=False)
     file_path: Mapped[str] = mapped_column(Text, nullable=False)
     extracted_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    analysis_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { ApiError, submitTextAnswer, uploadResponse } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useFeatures } from '../context/FeaturesContext.shared';
@@ -24,10 +24,6 @@ export function QuestionCard({ question, sessionId, responses, onUploaded, answe
   const [answerText, setAnswerText] = useState(answer?.answer_text ?? '');
   const [submitting, setSubmitting] = useState(false);
   const [answerError, setAnswerError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (answer) setAnswerText(answer.answer_text);
-  }, [answer]);
 
   async function handleSubmitAnswer() {
     if (!token || !answerText.trim() || submitting || answer) return;
@@ -73,7 +69,7 @@ export function QuestionCard({ question, sessionId, responses, onUploaded, answe
         <label htmlFor={`answer-${question.id}`}>Your answer</label>
         <textarea
           id={`answer-${question.id}`}
-          value={answerText}
+          value={answer?.answer_text ?? answerText}
           onChange={(event) => setAnswerText(event.target.value)}
           placeholder="Write your answer here…"
           rows={5}
