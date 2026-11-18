@@ -11,6 +11,7 @@ import io
 import json
 import logging
 import smtplib
+import ssl
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
@@ -414,7 +415,8 @@ def _reset_email_settings(environment: str):
     )
 
 
-def test_reset_url_is_never_logged_in_production(caplog):
+@pytest.mark.parametrize("environment", ["production", "development"])
+def test_reset_url_is_never_logged_when_email_is_unconfigured(caplog, environment):
     url = "https://app.example.com/reset-password/SECRET-TOKEN-123"
 
     with caplog.at_level(logging.DEBUG):
@@ -422,33 +424,176 @@ def test_reset_url_is_never_logged_in_production(caplog):
             "victim@example.com",
             url,
             logging.getLogger("t"),
-            _reset_email_settings("production"),
+            _reset_email_settings(environment),
         )
 
     assert "SECRET-TOKEN-123" not in caplog.text
+    assert "reset-password/" not in caplog.text
+    assert "victim@example.com" not in caplog.text
     assert "NOT" in caplog.text  # operators are told the email was not sent
 
 
-def test_reset_url_is_still_logged_in_development(caplog):
-    url = "http://localhost:5173/reset-password/DEV-TOKEN-456"
+class _FakeSMTP:
+    """Records the session; `starttls_offered` mimics the server's EHLO."""
+
+    starttls_offered = True
+    events: list = []
+
+    def __init__(self, host, port, timeout=None):
+        self.events.append(("timeout", timeout))
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def ehlo(self):
+        pass
+
+    def has_extn(self, name):
+        return name == "starttls" and self.starttls_offered
+
+    def starttls(self, context=None):
+        if not self.starttls_offered:
+            raise smtplib.SMTPNotSupportedError("STARTTLS extension not supported")
+        self.events.append(("starttls", context))
+
+    def login(self, *a):
+        pass
+
+    def send_message(self, msg):
+        self.events.append(("sent", msg.get_content()))
+
+
+def _smtp_settings(environment, host="smtp.example.com"):
+    return SimpleNamespace(
+        ENVIRONMENT=environment,
+        SMTP_HOST=host,
+        SMTP_PORT=587,
+        SMTP_USER="",
+        SMTP_PASSWORD="",
+        SMTP_FROM="noreply@example.com",
+    )
+
+
+@pytest.mark.parametrize(
+    "environment, host, offered, expect_tls, expect_sent",
+    [
+        # Production: STARTTLS always, even for local hosts.
+        ("production", "smtp.example.com", True, True, True),
+        ("production", "smtp.example.com", False, False, False),
+        ("production", "localhost", False, False, False),
+        ("production", "mailpit", False, False, False),
+        # Development, trusted local catcher without STARTTLS: plaintext OK.
+        ("development", "localhost", False, False, True),
+        ("development", "127.0.0.1", False, False, True),
+        ("development", "::1", False, False, True),
+        ("development", "mailpit", False, False, True),
+        ("development", "LocalHost", False, False, True),
+        # Development, local host that offers STARTTLS: still uses it.
+        ("development", "localhost", True, True, True),
+        # Development, external or lookalike hosts: never plaintext.
+        ("development", "smtp.example.com", True, True, True),
+        ("development", "smtp.example.com", False, False, False),
+        ("development", "localhost.evil.com", False, False, False),
+        ("development", "mailpit.example.com", False, False, False),
+        ("development", "127.0.0.2", False, False, False),
+        ("development", "10.0.0.5", False, False, False),
+    ],
+)
+def test_plaintext_smtp_only_for_trusted_local_hosts_outside_production(
+    monkeypatch, caplog, environment, host, offered, expect_tls, expect_sent
+):
+    monkeypatch.setattr(_FakeSMTP, "starttls_offered", offered)
+    monkeypatch.setattr(_FakeSMTP, "events", [])
+    monkeypatch.setattr(smtplib, "SMTP", _FakeSMTP)
+    url = "http://localhost:5173/reset-password/TOKEN-ABC"
 
     with caplog.at_level(logging.DEBUG):
         auth_router._send_reset_email(
-            "dev@example.com",
+            "a@example.com",
             url,
             logging.getLogger("t"),
-            _reset_email_settings("development"),
+            _smtp_settings(environment, host),
         )
 
-    assert "DEV-TOKEN-456" in caplog.text
+    kinds = [e[0] for e in _FakeSMTP.events]
+    assert ("starttls" in kinds) is expect_tls
+    for event in _FakeSMTP.events:
+        if event[0] == "starttls":  # certificate + hostname are verified
+            assert event[1].verify_mode == ssl.CERT_REQUIRED
+            assert event[1].check_hostname
+    assert ("sent" in kinds) is expect_sent
+    if expect_sent:  # the link travels only inside the email body
+        assert any(e[0] == "sent" and url in e[1] for e in _FakeSMTP.events)
+    assert "TOKEN-ABC" not in caplog.text
 
 
 def test_smtp_connection_has_a_timeout(monkeypatch):
-    captured = {}
+    monkeypatch.setattr(_FakeSMTP, "events", [])
+    monkeypatch.setattr(smtplib, "SMTP", _FakeSMTP)
 
-    class _FakeSMTP:
-        def __init__(self, host, port, timeout=None):
-            captured["timeout"] = timeout
+    auth_router._send_reset_email(
+        "a@example.com",
+        "https://x/reset-password/t",
+        logging.getLogger("t"),
+        _smtp_settings("production"),
+    )
+
+    timeout = dict(e for e in _FakeSMTP.events if e[0] == "timeout")["timeout"]
+    assert timeout and timeout <= 30
+
+
+def test_brevo_api_is_used_and_failures_never_log_the_token(monkeypatch, caplog):
+    """Render's free plan blocks SMTP ports, so BREVO_API_KEY must send over HTTPS."""
+    import httpx
+
+    calls = []
+
+    def _fake_post(url, headers, json, timeout):
+        calls.append((url, headers, json, timeout))
+        return SimpleNamespace(status_code=status_code, text='{"message":"bad sender"}')
+
+    monkeypatch.setattr(httpx, "post", _fake_post)
+    monkeypatch.setattr(smtplib, "SMTP", lambda *a, **k: pytest.fail("SMTP used"))
+    settings = SimpleNamespace(
+        ENVIRONMENT="production",
+        BREVO_API_KEY="xkeysib-test",
+        SMTP_HOST="smtp.example.com",
+        SMTP_USER="",
+        SMTP_FROM="sender@example.com",
+    )
+    url = "https://app.example.com/reset-password/SECRET-TOKEN-789"
+
+    status_code = 201
+    with caplog.at_level(logging.INFO):
+        auth_router._send_reset_email("alice@example.com", url, logging.getLogger("t"), settings)
+    sent_url, headers, payload, timeout = calls[0]
+    assert sent_url == "https://api.brevo.com/v3/smtp/email"
+    assert headers["api-key"] == "xkeysib-test"
+    assert payload["to"] == [{"email": "alice@example.com"}]
+    assert payload["sender"]["email"] == "sender@example.com"
+    assert url in payload["textContent"]
+    assert timeout <= 30
+    assert "accepted by brevo" in caplog.text
+
+    caplog.clear()
+    status_code = 400
+    with caplog.at_level(logging.INFO):
+        auth_router._send_reset_email("alice@example.com", url, logging.getLogger("t"), settings)
+    assert "NOT sent" in caplog.text and "bad sender" in caplog.text
+    assert "SECRET-TOKEN-789" not in caplog.text
+    assert "alice@example.com" not in caplog.text  # masked: a***@example.com
+
+
+def test_smtp_port_465_uses_implicit_tls(monkeypatch):
+    used = []
+
+    class _FakeSSL:
+        def __init__(self, host, port, timeout=None, context=None):
+            assert context.verify_mode == ssl.CERT_REQUIRED and context.check_hostname
+            used.append(port)
 
         def __enter__(self):
             return self
@@ -456,8 +601,8 @@ def test_smtp_connection_has_a_timeout(monkeypatch):
         def __exit__(self, *exc):
             return False
 
-        def starttls(self):
-            pass
+        def starttls(self, context=None):
+            pytest.fail("STARTTLS on an implicit-TLS port")
 
         def login(self, *a):
             pass
@@ -465,21 +610,15 @@ def test_smtp_connection_has_a_timeout(monkeypatch):
         def send_message(self, msg):
             pass
 
-    monkeypatch.setattr(smtplib, "SMTP", _FakeSMTP)
+    monkeypatch.setattr(smtplib, "SMTP_SSL", _FakeSSL)
     settings = SimpleNamespace(
-        ENVIRONMENT="production",
-        SMTP_HOST="smtp.example.com",
-        SMTP_PORT=587,
-        SMTP_USER="",
-        SMTP_PASSWORD="",
-        SMTP_FROM="noreply@example.com",
+        ENVIRONMENT="production", SMTP_HOST="smtp.example.com", SMTP_PORT=465,
+        SMTP_USER="u", SMTP_PASSWORD="p", SMTP_FROM="noreply@example.com",
     )
-
     auth_router._send_reset_email(
         "a@example.com", "https://x/reset-password/t", logging.getLogger("t"), settings
     )
-
-    assert captured["timeout"] and captured["timeout"] <= 30
+    assert used == [465]
 
 
 # ---------------------------------------------------------------------------

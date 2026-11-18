@@ -487,9 +487,13 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "http://localhost:5173"
 
     # ------------------------------------------------------------------
-    # SMTP — optional; if SMTP_HOST is not set, password-reset tokens are
-    # logged at WARNING level instead of emailed (development fallback).
+    # Password-reset email. BREVO_API_KEY (HTTPS API, port 443) wins over
+    # SMTP_* — required on Render's free plan, which blocks outbound SMTP
+    # ports 25/465/587. SMTP_FROM is the sender for both and must be a
+    # sender verified with the provider. With neither configured, nothing is
+    # sent and the reset link is never logged. Local dev: Mailpit (compose).
     # ------------------------------------------------------------------
+    BREVO_API_KEY: str = ""
     SMTP_HOST: str | None = None
     SMTP_PORT: int = Field(default=587, gt=0)
     SMTP_USER: str = ""

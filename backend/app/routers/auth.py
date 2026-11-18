@@ -35,6 +35,11 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 # Bounded so an unreachable SMTP server cannot pin a worker thread forever.
 _SMTP_TIMEOUT_SECONDS = 10
 
+# The only SMTP hosts that may be used without STARTTLS, and only outside
+# production: a local mail catcher (Mailpit, see docker-compose.yml). Exact
+# match only — never a suffix/prefix check ("localhost.evil.com").
+_LOCAL_SMTP_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "mailpit"})
+
 
 def _client_ip(request: Request) -> str:
     return get_client_ip(request)
@@ -347,11 +352,9 @@ def forgot_password(
     Always returns HTTP 200 with the same message regardless of whether the
     email is registered — this prevents user enumeration attacks.
 
-    In production, configure SMTP via the SMTP_* environment variables and the
-    token will be sent as an email link. Without SMTP config outside production,
-    the reset URL is logged at WARNING level so it can be retrieved from server
-    logs during development/testing; in production it is never logged (a log
-    reader could otherwise take over any account).
+    The token is emailed via BREVO_API_KEY or SMTP_*. The reset URL is never
+    logged in any environment (a log reader could otherwise take over any
+    account); locally, emails go to the Mailpit catcher in docker-compose.yml.
 
     The email is sent from a background task so the response time does not
     depend on the SMTP server (which would both hang the request and leak,
@@ -364,7 +367,14 @@ def forgot_password(
     raw_token = auth_service.create_password_reset_token(db, body.email)
 
     if raw_token is not None:
-        reset_url = f"{settings.FRONTEND_URL}/reset-password/{raw_token}"
+        frontend_url = settings.FRONTEND_URL.rstrip("/")
+        if settings.ENVIRONMENT == "production" and "localhost" in frontend_url:
+            logger.error(
+                "FRONTEND_URL is %s in production — reset links will be dead. "
+                "Set FRONTEND_URL to the deployed frontend URL.",
+                frontend_url,
+            )
+        reset_url = f"{frontend_url}/reset-password/{raw_token}"
         background_tasks.add_task(
             _send_reset_email, body.email, reset_url, logger, settings
         )
@@ -407,58 +417,115 @@ def reset_password(
 # ---------------------------------------------------------------------------
 
 
+def _mask_email(email: str) -> str:
+    """'alice@example.com' -> 'a***@example.com' — enough to correlate, not PII."""
+    local, _, domain = email.partition("@")
+    return f"{local[:1]}***@{domain}"
+
+
 def _send_reset_email(
     email: str, reset_url: str, logger: object, settings: Settings
 ) -> None:
-    """Send a password-reset email, or log the URL if SMTP is not configured."""
+    """Send a password-reset email via the Brevo HTTPS API, or SMTP.
+
+    Brevo goes over HTTPS (443) — Render's free plan blocks outbound SMTP
+    ports, so SMTP there just times out. Failures are logged (never the
+    reset URL/token) and not re-raised: the generic, enumeration-safe
+    response has already been sent. A success log means the provider
+    *accepted* the message, not that it reached the inbox.
+    """
     import logging
     import smtplib
+    import ssl
     from email.message import EmailMessage
 
     _logger = (
         logger if isinstance(logger, logging.Logger) else logging.getLogger(__name__)
     )
+    masked = _mask_email(email)
 
+    brevo_key = getattr(settings, "BREVO_API_KEY", "")
     smtp_host = getattr(settings, "SMTP_HOST", None)
-    if not smtp_host:
-        if settings.ENVIRONMENT == "production":
-            # Never write a live reset token to production logs.
-            _logger.error(
-                "SMTP is not configured — password reset email for %s was NOT "
-                "sent. Set SMTP_HOST (and SMTP_USER/SMTP_PASSWORD) to enable it.",
-                email,
-            )
-        else:
-            _logger.warning(
-                "SMTP not configured — password reset URL for %s: %s",
-                email,
-                reset_url,
-            )
+    if not brevo_key and not smtp_host:
+        # Never log the reset URL/token, in any environment — a log reader
+        # could take over the account. Locally, use the Mailpit catcher
+        # (docker-compose.yml) instead.
+        _logger.error(
+            "Email is not configured — password reset email for %s was NOT "
+            "sent. Set BREVO_API_KEY or SMTP_HOST (local dev: SMTP_HOST=localhost, "
+            "SMTP_PORT=1025 with Mailpit, inbox at http://localhost:8025).",
+            masked,
+        )
         return
 
+    smtp_user = getattr(settings, "SMTP_USER", "")
+    from_email = getattr(settings, "SMTP_FROM", "") or smtp_user
+    subject = "Reset your password — AI Interview Intelligence Platform"
+    body = (
+        f"You requested a password reset.\n\n"
+        f"Click the link below to set a new password (valid for 30 minutes):\n\n"
+        f"{reset_url}\n\n"
+        f"If you did not request this, you can safely ignore this email."
+    )
+    provider = "brevo" if brevo_key else "smtp"
+
     try:
-        smtp_port = getattr(settings, "SMTP_PORT", 587)
-        smtp_user = getattr(settings, "SMTP_USER", "")
-        smtp_password = getattr(settings, "SMTP_PASSWORD", "")
-        from_email = getattr(settings, "SMTP_FROM", smtp_user)
+        if brevo_key:
+            import httpx
 
-        msg = EmailMessage()
-        msg["Subject"] = "Reset your password — AI Interview Intelligence Platform"
-        msg["From"] = from_email
-        msg["To"] = email
-        msg.set_content(
-            f"You requested a password reset.\n\n"
-            f"Click the link below to set a new password (valid for 30 minutes):\n\n"
-            f"{reset_url}\n\n"
-            f"If you did not request this, you can safely ignore this email."
-        )
-
-        with smtplib.SMTP(
-            smtp_host, smtp_port, timeout=_SMTP_TIMEOUT_SECONDS
-        ) as server:
-            server.starttls()
-            if smtp_user and smtp_password:
-                server.login(smtp_user, smtp_password)
-            server.send_message(msg)
+            resp = httpx.post(
+                "https://api.brevo.com/v3/smtp/email",
+                headers={"api-key": brevo_key, "accept": "application/json"},
+                json={
+                    "sender": {"email": from_email, "name": "AI Interview Platform"},
+                    "to": [{"email": email}],
+                    "subject": subject,
+                    "textContent": body,
+                },
+                timeout=_SMTP_TIMEOUT_SECONDS,
+            )
+            if resp.status_code >= 400:
+                # Brevo's error body explains e.g. an unverified sender; it
+                # never echoes the API key or our email body.
+                raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:300]}")
+        else:
+            smtp_port = getattr(settings, "SMTP_PORT", 587)
+            smtp_password = getattr(settings, "SMTP_PASSWORD", "")
+            msg = EmailMessage()
+            msg["Subject"] = subject
+            msg["From"] = from_email
+            msg["To"] = email
+            msg.set_content(body)
+            # smtplib's default TLS context skips certificate verification;
+            # this one verifies the chain and hostname (blocks MITM).
+            tls = ssl.create_default_context()
+            # 465 is implicit TLS; STARTTLS on it hangs/fails.
+            if smtp_port == 465:
+                conn = smtplib.SMTP_SSL(
+                    smtp_host, smtp_port, timeout=_SMTP_TIMEOUT_SECONDS, context=tls
+                )
+            else:
+                conn = smtplib.SMTP(smtp_host, smtp_port, timeout=_SMTP_TIMEOUT_SECONDS)
+            with conn as server:
+                if smtp_port != 465:
+                    server.ehlo()
+                    # Plaintext is allowed only for a trusted local catcher
+                    # (Mailpit) outside production; everywhere else starttls()
+                    # raises if unsupported -> NOT sent.
+                    plaintext_ok = (
+                        settings.ENVIRONMENT != "production"
+                        and smtp_host.strip().lower() in _LOCAL_SMTP_HOSTS
+                        and not server.has_extn("starttls")
+                    )
+                    if not plaintext_ok:
+                        server.starttls(context=tls)
+                if smtp_user and smtp_password:
+                    server.login(smtp_user, smtp_password)
+                server.send_message(msg)
     except Exception as exc:
-        _logger.error("Failed to send password-reset email to %s: %s", email, exc)
+        _logger.error(
+            "Password-reset email to %s was NOT sent via %s: %s", masked, provider, exc
+        )
+        return
+
+    _logger.info("Password-reset email to %s accepted by %s", masked, provider)

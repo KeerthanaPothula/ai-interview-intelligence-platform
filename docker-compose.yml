@@ -43,6 +43,17 @@ services:
       start_period: 40s
     restart: unless-stopped
 
+  # Local mail catcher: password-reset emails land in http://localhost:8025
+  # instead of a real inbox (reset links are never logged). Point the backend
+  # at it with SMTP_HOST=mailpit (inside compose) or localhost, SMTP_PORT=1025.
+  mailpit:
+    image: axllent/mailpit:v1.21.0
+    container_name: aiip_mailpit
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   uploads_data:

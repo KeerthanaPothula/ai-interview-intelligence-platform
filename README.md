@@ -482,7 +482,8 @@ Two example files are provided. **Never commit a real `.env`.** Both
 | `GEMINI_API_KEY` | Yes | Google AI Studio key for questions, evaluation, RAG, live interviews, and coaching |
 | `CORS_ORIGINS` | Yes | Comma-separated list of allowed origins (e.g. `http://localhost:5173`). Empty disables credentialed CORS |
 | `FRONTEND_URL` | For password reset | Base URL used in password-reset emails |
-| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` / `SMTP_FROM` | For password reset | Outgoing mail server for reset emails |
+| `BREVO_API_KEY` | For password reset | Brevo HTTPS email API key; takes precedence over SMTP (needed on Render free, which blocks SMTP ports) |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` / `SMTP_FROM` | For password reset | Outgoing mail server for reset emails; `SMTP_FROM` is also the Brevo sender |
 | `ENVIRONMENT` | No (default `development`) | `development` or `production`. Controls traceback detail and `/docs` |
 | `DEBUG` | No (default `true`) | Must be `false` in production |
 | `WHISPER_MODEL` | No (default `base`) | Whisper model size. Larger models are more accurate but slower and use more RAM |

@@ -137,6 +137,16 @@ services:
         sync: false          # set manually in Render dashboard
 
       # ----------------------------------------------------------------
+      # Password-reset email. The free plan blocks outbound SMTP ports
+      # 25/465/587, so email goes over Brevo's HTTPS API instead.
+      # SMTP_FROM must be a sender verified in Brevo (Senders & IP).
+      # ----------------------------------------------------------------
+      - key: BREVO_API_KEY
+        sync: false          # set manually in Render dashboard
+      - key: SMTP_FROM
+        sync: false          # set manually in Render dashboard
+
+      # ----------------------------------------------------------------
       # Observability
       # ----------------------------------------------------------------
       - key: LOG_LEVEL
@@ -170,9 +180,9 @@ services:
 
 # Optional settings deliberately NOT declared above (each needs a value that
 # only the deployer knows) — set them in the Render dashboard when needed:
-#   SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASSWORD / SMTP_FROM
-#       Without SMTP_HOST, password-reset emails are not sent (in production the
-#       reset link is never written to the logs either).
+#   SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASSWORD
+#       Only usable on a PAID plan (free blocks SMTP ports); BREVO_API_KEY
+#       takes precedence when both are set.
 #   TRUSTED_PROXY_COUNT
 #       Render terminates TLS in front of this container, so every request
 #       arrives from the proxy's IP and all users share one login rate-limit
