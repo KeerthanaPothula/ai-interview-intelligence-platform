@@ -27,7 +27,8 @@ interface AuthContextValue {
   // must never unlock the app shell or the landing page's Dashboard link.
   isAuthenticated: boolean;
   login: (email: string, password: string, rememberMe?: boolean) => Promise<void>;
-  register: (data: UserCreate) => Promise<void>;
+  // Resolves true if the automatic login after registration succeeded.
+  register: (data: UserCreate) => Promise<boolean>;
   logout: () => void;
   // Re-fetches /auth/me and updates `user` in place — used after a
   // profile edit so the rest of the app (avatar initials, TopBar name)
@@ -57,10 +58,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (email: string, password: string, rememberMe = true) => {
     const result = await api.login(email, password);
     api.storeTokens(result, rememberMe);
+    // Drop any previously saved session's user so its role can't be used
+    // for the post-login redirect before /auth/me answers for the new token.
+    setUser(null);
     setToken(result.access_token);
   }, []);
 
-  const register = useCallback(async (data: UserCreate) => {
+  const register = useCallback(async (data: UserCreate): Promise<boolean> => {
     await api.register(data);
     // Automatic login after registration, using the same credentials the
     // user just submitted. Registration itself already succeeded by this
@@ -71,9 +75,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const result = await api.login(data.email, data.password);
       api.storeTokens(result, true);
+      setUser(null);
       setToken(result.access_token);
+      return true;
     } catch {
       // Fall through — see comment above.
+      return false;
     }
   }, []);
 

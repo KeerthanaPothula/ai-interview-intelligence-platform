@@ -466,14 +466,10 @@ export function LandingPage() {
             <a href="#faq" className="lp-nav-link">FAQ</a>
           </nav>
           <div className="lp-nav-actions">
-            {isAuthenticated ? (
-              <Link to={homeRoute} className="lp-btn lp-btn--sm lp-btn--primary">Dashboard</Link>
-            ) : (
-              <>
-                <Link to="/login" className="lp-nav-link">Log in</Link>
-                <Link to="/register" className="lp-btn lp-btn--sm lp-btn--primary">Get Started</Link>
-              </>
-            )}
+            {/* Always both entry points; /login and /register never auto-redirect. */}
+            {isAuthenticated && <Link to={homeRoute} className="lp-nav-link">Dashboard</Link>}
+            <Link to="/login" className="lp-nav-link">Log in</Link>
+            <Link to="/register" className="lp-btn lp-btn--sm lp-btn--primary">Get Started</Link>
           </div>
         </div>
       </header>

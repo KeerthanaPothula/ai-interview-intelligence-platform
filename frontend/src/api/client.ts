@@ -267,7 +267,10 @@ async function request<T>(
   }
 
   if (!response.ok) {
-    if (response.status === 401) {
+    // Only a rejected *session* ends the session. An anonymous 401 (e.g. a
+    // wrong password on /auth/login) says nothing about the saved tokens and
+    // must not log out a valid session held in storage.
+    if (response.status === 401 && token) {
       onUnauthorized?.();
     }
     throw new ApiError(response.status, await extractErrorMessage(response));

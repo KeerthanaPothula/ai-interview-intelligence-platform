@@ -30,18 +30,19 @@ export function RegisterPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [loggedIn, setLoggedIn] = useState(false);
 
   const strength = passwordStrength(password);
-  // Auto-login after registration: token stored, /auth/me still in flight.
-  // Keep the button busy rather than flashing the manual "sign in" screen.
-  // A token restored from storage does NOT block the form (on a cold backend
-  // that check takes ~30 s); a valid one still redirects once it resolves.
-  const busy = submitting || (success && userLoading);
+  // Auto-login after registration: token stored, /auth/me still in flight —
+  // keep the button busy until the redirect below fires. A token restored
+  // from storage neither blocks the form (on a cold backend that check takes
+  // ~30 s) nor redirects: /register always shows the registration form.
+  const busy = submitting || (loggedIn && userLoading);
   const slow = useSlowFlag(busy);
 
-  if (isAuthenticated) {
-    // Same per-role home as LoginPage: a signed-in recruiter/admin opening
-    // /register must not be sent to the candidate-only /dashboard.
+  // Redirect only after THIS form's registration + auto-login, once the
+  // backend has verified the new token. Per-role home, same as LoginPage.
+  if (loggedIn && isAuthenticated) {
     return <Navigate to={homeRouteForRole(user?.role ?? null)} replace />;
   }
 
@@ -65,13 +66,15 @@ export function RegisterPage() {
     setSubmitting(true);
     try {
       const fullName = `${firstName.trim()} ${lastName.trim()}`.trim();
-      await register({ email, password, full_name: fullName });
-      // register() auto-logs-in on success — if that worked, isAuthenticated
-      // is now true and the guard above redirects to /dashboard on the next
-      // render. Reaching this line without isAuthenticated flipping means
-      // auto-login didn't happen (rare — see AuthContext.register), so fall
-      // back to the manual "sign in" success screen below.
-      setSuccess(true);
+      // register() auto-logs-in and reports whether that worked. If it did,
+      // the guard above redirects once /auth/me verifies the new session;
+      // if not (rare — see AuthContext.register), show the manual "sign in"
+      // success screen below.
+      if (await register({ email, password, full_name: fullName })) {
+        setLoggedIn(true);
+      } else {
+        setSuccess(true);
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Unable to register. Please try again.');
     } finally {
@@ -79,7 +82,8 @@ export function RegisterPage() {
     }
   }
 
-  if (success && !userLoading) {
+  // Also the fallback when auto-login worked but /auth/me then failed.
+  if (success || (loggedIn && !busy)) {
     return (
       <div className="auth-page">
         <div className="auth-form" style={{ textAlign: 'center' }}>

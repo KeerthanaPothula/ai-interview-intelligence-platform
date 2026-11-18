@@ -173,6 +173,46 @@ describe('AuthContext', () => {
     expect(result.current.isAuthenticated).toBe(true);
   });
 
+  it('register() resolves true when auto-login succeeded and false when it did not', async () => {
+    vi.spyOn(api, 'register').mockResolvedValue(MOCK_USER);
+    const loginSpy = vi.spyOn(api, 'login').mockResolvedValue(MOCK_TOKEN);
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    const data = { email: 'jane@example.com', password: 'password123', full_name: 'Jane Smith' };
+
+    let ok: boolean | undefined;
+    await act(async () => { ok = await result.current.register(data); });
+    expect(ok).toBe(true);
+
+    loginSpy.mockRejectedValue(new Error('network blip'));
+    await act(async () => { ok = await result.current.register(data); });
+    expect(ok).toBe(false);
+  });
+
+  it('login() as a new user never exposes the previous saved session user or role', async () => {
+    // Saved session for a recruiter, then a candidate logs in on /login.
+    const RECRUITER = { ...MOCK_USER, id: 'rec-1', role: 'recruiter' as const };
+    vi.spyOn(api, 'readStoredAccessToken').mockReturnValue('saved-recruiter-token');
+    let resolveNewMe: (u: typeof MOCK_USER) => void = () => {};
+    vi.spyOn(api, 'getMe').mockImplementation((token: string) =>
+      token === 'saved-recruiter-token'
+        ? Promise.resolve(RECRUITER)
+        : new Promise((r) => { resolveNewMe = r; }),
+    );
+    vi.spyOn(api, 'login').mockResolvedValue(MOCK_TOKEN);
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(result.current.user?.role).toBe('recruiter'));
+
+    await act(async () => { await result.current.login('jane@example.com', 'password123'); });
+    // New token's /auth/me still pending: not authenticated, no stale role.
+    expect(result.current.isAuthenticated).toBe(false);
+    expect(result.current.user).toBeNull();
+    expect(result.current.userLoading).toBe(true);
+
+    await act(async () => { resolveNewMe(MOCK_USER); });
+    expect(result.current.user?.role).toBe('candidate');
+    expect(result.current.isAuthenticated).toBe(true);
+  });
+
   it('register() failure does not attempt auto-login', async () => {
     vi.spyOn(api, 'register').mockRejectedValue(
       new api.ApiError(409, 'An account with this email already exists.'),

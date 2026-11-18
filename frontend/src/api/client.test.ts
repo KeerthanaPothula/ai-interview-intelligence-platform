@@ -188,6 +188,20 @@ describe('request() silent refresh-and-retry on 401', () => {
     expect(onUnauthorized).toHaveBeenCalled();
   });
 
+  it('an anonymous 401 (wrong password on login) does not end the saved session', async () => {
+    storeTokens({ access_token: 'valid-saved', refresh_token: 'valid-refresh', token_type: 'bearer' }, true);
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse(401, { detail: 'Incorrect email or password.' })));
+    vi.stubGlobal('fetch', fetchMock);
+    const onUnauthorized = vi.fn();
+    registerUnauthorizedHandler(onUnauthorized);
+
+    const { login } = await import('./client');
+    await expect(login('a@b.c', 'wrong')).rejects.toBeInstanceOf(ApiError);
+    expect(onUnauthorized).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1); // no refresh attempt either
+    expect(localStorage.getItem('aiip_access_token')).toBe('valid-saved');
+  });
+
   it('never attempts a refresh for anonymous (no-token) requests', async () => {
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse(401, { detail: 'nope' })));
     vi.stubGlobal('fetch', fetchMock);

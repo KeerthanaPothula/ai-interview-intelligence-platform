@@ -3,13 +3,11 @@ import { Eye, EyeOff, Lock, Mail } from 'lucide-react';
 import { Link, Navigate } from 'react-router-dom';
 import { ApiError } from '../api/client';
 import { useAuth } from '../context/AuthContext';
-import { useRole } from '../context/RoleContext';
 import { homeRouteForRole } from '../utils/roleRoutes';
 import { useSlowFlag } from '../hooks/useSlowFlag';
 
 export function LoginPage() {
-  const { login, isAuthenticated } = useAuth();
-  const { role, roleLoading } = useRole();
+  const { login, isAuthenticated, user, userLoading } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
@@ -19,21 +17,26 @@ export function LoginPage() {
   const [loggedIn, setLoggedIn] = useState(false);
   // After a successful login the role is still loading (/auth/me in flight):
   // keep the button busy until the redirect below fires. A token restored
-  // from storage does NOT block the form — on a cold backend that check can
-  // take ~30 s, and the form is usable meanwhile; if the stored session turns
-  // out valid, the redirect below still fires once it resolves.
-  const busy = submitting || (loggedIn && roleLoading);
+  // from storage neither blocks the form (on a cold backend that check can
+  // take ~30 s) nor redirects: /login always shows the login form.
+  const busy = submitting || (loggedIn && userLoading);
   const slow = useSlowFlag(busy);
 
-  // isAuthenticated implies the user (and therefore role) is loaded, so this
-  // never redirects to a guessed role.
-  if (isAuthenticated) {
-    return <Navigate to={homeRouteForRole(role)} replace />;
+  // Redirect only after THIS form's login, once the backend has verified the
+  // new token (login() clears the previous user, so isAuthenticated here
+  // means /auth/me answered for the new session and `user` is its user).
+  if (loggedIn && isAuthenticated) {
+    return <Navigate to={homeRouteForRole(user?.role ?? null)} replace />;
   }
+  // Login succeeded but /auth/me failed (network error): say so instead of
+  // silently re-enabling the form.
+  const profileError =
+    loggedIn && !busy ? 'Signed in, but your profile could not be loaded. Please try again.' : null;
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     setError(null);
+    setLoggedIn(false);
     setSubmitting(true);
     try {
       await login(email, password, rememberMe);
@@ -117,7 +120,7 @@ export function LoginPage() {
           </Link>
         </div>
 
-        {error && (
+        {(error ?? profileError) && (
           <p
             role="alert"
             style={{
@@ -130,7 +133,7 @@ export function LoginPage() {
               margin: '0 0 1rem',
             }}
           >
-            {error}
+            {error ?? profileError}
           </p>
         )}
 

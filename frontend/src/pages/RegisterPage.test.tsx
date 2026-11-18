@@ -121,7 +121,7 @@ describe('RegisterPage', () => {
   });
 
   it('combines first and last name into full_name on submit', async () => {
-    mockRegister.mockResolvedValue(undefined);
+    mockRegister.mockResolvedValue(false); // registered, auto-login failed
     const user = setupUser();
     renderRegisterPage();
     await fillValidForm(user);
@@ -159,13 +159,25 @@ describe('RegisterPage', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/already exists/i);
   });
 
+  it('shows the registration form, not a redirect, when a valid saved session exists', () => {
+    mockIsAuthenticated = true;
+    mockUser = { role: 'admin' };
+    renderRegisterPage();
+    expect(screen.getByRole('button', { name: /create account/i })).toBeEnabled();
+    expect(screen.getByRole('link', { name: /sign in/i })).toHaveAttribute('href', '/login');
+  });
+
   it.each([
     ['candidate', '/dashboard'],
     ['recruiter', '/recruiter'],
     ['admin', '/admin'],
-  ])('redirects an authenticated %s to %s', (role, home) => {
-    mockIsAuthenticated = true;
-    mockUser = { role };
+  ])('after registration + auto-login, a verified %s is redirected to %s', async (role, home) => {
+    mockRegister.mockImplementation(async () => {
+      mockIsAuthenticated = true;
+      mockUser = { role };
+      return true;
+    });
+    const user = setupUser();
     render(
       <MemoryRouter initialEntries={['/register']}>
         <Routes>
@@ -174,6 +186,8 @@ describe('RegisterPage', () => {
         </Routes>
       </MemoryRouter>,
     );
-    expect(screen.getByText(`home:${home}`)).toBeInTheDocument();
+    await fillValidForm(user);
+    await user.click(screen.getByRole('button', { name: /create account/i }));
+    expect(await screen.findByText(`home:${home}`)).toBeInTheDocument();
   });
 });

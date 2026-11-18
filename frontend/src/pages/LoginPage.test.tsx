@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { LoginPage } from './LoginPage';
 import { ApiError } from '../api/client';
 import { RoleProvider } from '../context/RoleContext';
@@ -9,6 +9,7 @@ import { RoleProvider } from '../context/RoleContext';
 const mockLogin = vi.fn();
 let mockIsAuthenticated = false;
 let mockUserLoading = false;
+let mockUser: { role: string } | null = null;
 
 vi.mock('../context/AuthContext', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../context/AuthContext')>();
@@ -16,7 +17,7 @@ vi.mock('../context/AuthContext', async (importOriginal) => {
     ...actual,
     useAuth: vi.fn(() => ({
       token: null,
-      user: null,
+      user: mockUser,
       userLoading: mockUserLoading,
       isAuthenticated: mockIsAuthenticated,
       login: mockLogin,
@@ -39,6 +40,7 @@ function renderLoginPage() {
 beforeEach(() => {
   mockIsAuthenticated = false;
   mockUserLoading = false;
+  mockUser = null;
   mockLogin.mockReset();
 });
 
@@ -157,9 +159,49 @@ describe('LoginPage', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/temporarily locked/i);
   });
 
-  it('redirects to /dashboard when already authenticated', () => {
+  it('shows the login form, not a redirect, when a valid saved session exists', () => {
     mockIsAuthenticated = true;
+    mockUser = { role: 'recruiter' };
     renderLoginPage();
-    expect(screen.queryByLabelText(/email/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /sign in/i })).toBeEnabled();
+    expect(screen.getByRole('link', { name: /create one free/i })).toHaveAttribute('href', '/register');
+  });
+
+  it.each([
+    ['candidate', '/dashboard'],
+    ['recruiter', '/recruiter'],
+    ['admin', '/admin'],
+  ])('after a successful login, a verified %s is redirected to %s', async (role, home) => {
+    // login() resolving + /auth/me verifying the new session.
+    mockLogin.mockImplementation(async () => {
+      mockIsAuthenticated = true;
+      mockUser = { role };
+    });
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter initialEntries={['/login']}>
+        <RoleProvider>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route path={home} element={<p>home:{home}</p>} />
+          </Routes>
+        </RoleProvider>
+      </MemoryRouter>,
+    );
+    await user.type(screen.getByLabelText(/email/i), 'a@b.c');
+    await user.type(screen.getByLabelText(/^password$/i), 'Password1!');
+    await user.click(screen.getByRole('button', { name: /sign in/i }));
+    expect(await screen.findByText(`home:${home}`)).toBeInTheDocument();
+  });
+
+  it('says so when login succeeds but the session cannot be verified', async () => {
+    mockLogin.mockResolvedValue(undefined); // isAuthenticated never flips
+    const user = userEvent.setup();
+    renderLoginPage();
+    await user.type(screen.getByLabelText(/email/i), 'a@b.c');
+    await user.type(screen.getByLabelText(/^password$/i), 'Password1!');
+    await user.click(screen.getByRole('button', { name: /sign in/i }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/profile could not be loaded/i);
+    expect(screen.getByRole('button', { name: /sign in/i })).toBeEnabled();
   });
 });
