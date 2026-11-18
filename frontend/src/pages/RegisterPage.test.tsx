@@ -1,12 +1,14 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { RegisterPage } from './RegisterPage';
 import { ApiError } from '../api/client';
 
 const mockRegister = vi.fn();
 let mockIsAuthenticated = false;
+let mockUserLoading = false;
+let mockUser: { role: string } | null = null;
 
 vi.mock('../context/AuthContext', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../context/AuthContext')>();
@@ -14,7 +16,8 @@ vi.mock('../context/AuthContext', async (importOriginal) => {
     ...actual,
     useAuth: vi.fn(() => ({
       token: null,
-      user: null,
+      user: mockUser,
+      userLoading: mockUserLoading,
       isAuthenticated: mockIsAuthenticated,
       login: vi.fn(),
       register: mockRegister,
@@ -52,10 +55,20 @@ async function fillValidForm(user: ReturnType<typeof setupUser>) {
 
 beforeEach(() => {
   mockIsAuthenticated = false;
+  mockUserLoading = false;
+  mockUser = null;
   mockRegister.mockReset();
 });
 
 describe('RegisterPage', () => {
+  it('renders the form immediately while a stored session is still being verified', () => {
+    // Regression: Get Started → /register with a saved token used to show a
+    // full-page spinner until /auth/me answered (≈30 s on a cold backend).
+    mockUserLoading = true;
+    renderRegisterPage();
+    expect(screen.getByRole('button', { name: /create account/i })).toBeEnabled();
+  });
+
   it('renders first name, last name, email, password, confirm, and terms checkbox', () => {
     renderRegisterPage();
     expect(screen.getByLabelText(/first name/i)).toBeInTheDocument();
@@ -146,9 +159,21 @@ describe('RegisterPage', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/already exists/i);
   });
 
-  it('redirects to /dashboard when already authenticated', () => {
+  it.each([
+    ['candidate', '/dashboard'],
+    ['recruiter', '/recruiter'],
+    ['admin', '/admin'],
+  ])('redirects an authenticated %s to %s', (role, home) => {
     mockIsAuthenticated = true;
-    renderRegisterPage();
-    expect(screen.queryByLabelText(/first name/i)).not.toBeInTheDocument();
+    mockUser = { role };
+    render(
+      <MemoryRouter initialEntries={['/register']}>
+        <Routes>
+          <Route path="/register" element={<RegisterPage />} />
+          <Route path={home} element={<p>home:{home}</p>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(screen.getByText(`home:${home}`)).toBeInTheDocument();
   });
 });

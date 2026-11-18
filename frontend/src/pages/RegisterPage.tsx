@@ -3,6 +3,8 @@ import { Eye, EyeOff, Lock, Mail, User } from 'lucide-react';
 import { Link, Navigate } from 'react-router-dom';
 import { ApiError } from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import { useSlowFlag } from '../hooks/useSlowFlag';
+import { homeRouteForRole } from '../utils/roleRoutes';
 
 function passwordStrength(pw: string): 0 | 1 | 2 | 3 | 4 {
   if (pw.length === 0) return 0;
@@ -17,7 +19,7 @@ function passwordStrength(pw: string): 0 | 1 | 2 | 3 | 4 {
 const STRENGTH_LABEL = ['', 'Weak', 'Fair', 'Good', 'Strong'];
 
 export function RegisterPage() {
-  const { register, isAuthenticated, userLoading } = useAuth();
+  const { register, isAuthenticated, userLoading, user } = useAuth();
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
@@ -30,19 +32,17 @@ export function RegisterPage() {
   const [submitting, setSubmitting] = useState(false);
 
   const strength = passwordStrength(password);
+  // Auto-login after registration: token stored, /auth/me still in flight.
+  // Keep the button busy rather than flashing the manual "sign in" screen.
+  // A token restored from storage does NOT block the form (on a cold backend
+  // that check takes ~30 s); a valid one still redirects once it resolves.
+  const busy = submitting || (success && userLoading);
+  const slow = useSlowFlag(busy);
 
   if (isAuthenticated) {
-    return <Navigate to="/dashboard" replace />;
-  }
-
-  // Auto-login after registration: token stored, /auth/me still in flight.
-  // Wait for it rather than flashing the manual "sign in" screen.
-  if (userLoading) {
-    return (
-      <div className="auth-page">
-        <span className="spinner" style={{ width: 32, height: 32, borderWidth: 3 }} aria-label="Loading" />
-      </div>
-    );
+    // Same per-role home as LoginPage: a signed-in recruiter/admin opening
+    // /register must not be sent to the candidate-only /dashboard.
+    return <Navigate to={homeRouteForRole(user?.role ?? null)} replace />;
   }
 
   async function handleSubmit(event: FormEvent) {
@@ -79,7 +79,7 @@ export function RegisterPage() {
     }
   }
 
-  if (success) {
+  if (success && !userLoading) {
     return (
       <div className="auth-page">
         <div className="auth-form" style={{ textAlign: 'center' }}>
@@ -282,10 +282,10 @@ export function RegisterPage() {
         <button
           type="submit"
           className="btn btn-primary btn-full"
-          disabled={submitting}
-          aria-busy={submitting}
+          disabled={busy}
+          aria-busy={busy}
         >
-          {submitting ? (
+          {busy ? (
             <>
               <span className="spinner" aria-hidden="true" />
               Creating account…
@@ -294,6 +294,12 @@ export function RegisterPage() {
             'Create account'
           )}
         </button>
+
+        {slow && (
+          <p role="status" className="auth-footer-text">
+            The server is waking up after being idle. This can take up to a minute.
+          </p>
+        )}
 
         <p className="auth-footer-text">
           Already have an account?{' '}

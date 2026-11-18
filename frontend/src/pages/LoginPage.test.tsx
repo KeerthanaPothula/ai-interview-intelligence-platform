@@ -8,6 +8,7 @@ import { RoleProvider } from '../context/RoleContext';
 
 const mockLogin = vi.fn();
 let mockIsAuthenticated = false;
+let mockUserLoading = false;
 
 vi.mock('../context/AuthContext', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../context/AuthContext')>();
@@ -16,7 +17,7 @@ vi.mock('../context/AuthContext', async (importOriginal) => {
     useAuth: vi.fn(() => ({
       token: null,
       user: null,
-      userLoading: false,
+      userLoading: mockUserLoading,
       isAuthenticated: mockIsAuthenticated,
       login: mockLogin,
       register: vi.fn(),
@@ -37,10 +38,19 @@ function renderLoginPage() {
 
 beforeEach(() => {
   mockIsAuthenticated = false;
+  mockUserLoading = false;
   mockLogin.mockReset();
 });
 
 describe('LoginPage', () => {
+  it('renders the form immediately while a stored session is still being verified', () => {
+    // Regression: a saved token whose /auth/me is pending (≈30 s on a cold
+    // backend) used to replace the whole page with a spinner.
+    mockUserLoading = true;
+    renderLoginPage();
+    expect(screen.getByRole('button', { name: /sign in/i })).toBeEnabled();
+  });
+
   it('renders email, password, remember me, and forgot password link', () => {
     renderLoginPage();
     expect(screen.getByLabelText(/email/i)).toBeInTheDocument();

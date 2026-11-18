@@ -5,6 +5,7 @@ import { ApiError } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useRole } from '../context/RoleContext';
 import { homeRouteForRole } from '../utils/roleRoutes';
+import { useSlowFlag } from '../hooks/useSlowFlag';
 
 export function LoginPage() {
   const { login, isAuthenticated } = useAuth();
@@ -15,20 +16,17 @@ export function LoginPage() {
   const [rememberMe, setRememberMe] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [loggedIn, setLoggedIn] = useState(false);
+  // After a successful login the role is still loading (/auth/me in flight):
+  // keep the button busy until the redirect below fires. A token restored
+  // from storage does NOT block the form — on a cold backend that check can
+  // take ~30 s, and the form is usable meanwhile; if the stored session turns
+  // out valid, the redirect below still fires once it resolves.
+  const busy = submitting || (loggedIn && roleLoading);
+  const slow = useSlowFlag(busy);
 
-  if (!isAuthenticated && roleLoading) {
-    // Role isn't known yet — wait rather than redirecting to a guessed
-    // default, since Phase 10 requires each role to land on its own
-    // dashboard (Recruiter -> /recruiter, Admin -> /admin), not a
-    // one-size-fits-all /dashboard that RequireRole would then bounce a
-    // Recruiter/Admin straight back out of.
-    return (
-      <div className="auth-page">
-        <span className="spinner" style={{ width: 32, height: 32, borderWidth: 3 }} aria-label="Loading" />
-      </div>
-    );
-  }
-
+  // isAuthenticated implies the user (and therefore role) is loaded, so this
+  // never redirects to a guessed role.
   if (isAuthenticated) {
     return <Navigate to={homeRouteForRole(role)} replace />;
   }
@@ -39,6 +37,7 @@ export function LoginPage() {
     setSubmitting(true);
     try {
       await login(email, password, rememberMe);
+      setLoggedIn(true);
     } catch (err) {
       // ApiError's message is the backend's own detail text for 4xx errors
       // (see client.ts's extractErrorMessage) — e.g. "Incorrect email or
@@ -138,10 +137,10 @@ export function LoginPage() {
         <button
           type="submit"
           className="btn btn-primary btn-full"
-          disabled={submitting}
-          aria-busy={submitting}
+          disabled={busy}
+          aria-busy={busy}
         >
-          {submitting ? (
+          {busy ? (
             <>
               <span className="spinner" aria-hidden="true" />
               Signing in…
@@ -150,6 +149,12 @@ export function LoginPage() {
             'Sign in'
           )}
         </button>
+
+        {slow && (
+          <p role="status" className="auth-footer-text">
+            The server is waking up after being idle. This can take up to a minute.
+          </p>
+        )}
 
         <p className="auth-footer-text">
           Don&apos;t have an account?{' '}
